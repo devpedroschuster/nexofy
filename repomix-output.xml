@@ -189,7 +189,7 @@ webapp/src/services/modalidadeService.js
 webapp/src/services/planosService.js
 webapp/src/services/professoresService.js
 webapp/src/services/repasseService.js
-webapp/src/services/superAdminServices,js
+webapp/src/services/superAdminService.js
 webapp/src/types/agenda.ts
 webapp/src/types/leads.ts
 webapp/src/utils/calendarioParser.js
@@ -25394,7 +25394,7 @@ export async function listarRepassesProfessor(professorId, mesAno) {
 }
 </file>
 
-<file path="webapp/src/services/superAdminServices,js">
+<file path="webapp/src/services/superAdminService.js">
 // webapp/src/services/superAdminService.js
 //
 // Serviço exclusivo do painel super_admin.
