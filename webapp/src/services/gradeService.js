@@ -1,0 +1,158 @@
+import { supabase } from '../lib/supabase';
+
+export const gradeService = {
+  async listarProfessores() {
+    const { data, error } = await supabase
+      .from('professores')
+      .select('*')
+      .eq('ativo', true)
+      .order('nome');
+    if (error) throw error;
+    return data;
+  },
+
+  async listarModalidades() {
+    const { data, error } = await supabase
+      .from('modalidades')
+      .select('*')
+      .order('nome');
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * @param {'admin' | 'professor' | 'aluno'} perfil  — vem do useAuth
+   * @param {string | null} professorId                — id do professor logado (se perfil === 'professor')
+   */
+  async listarGrade(perfil, professorId) {
+    if (perfil === 'admin') {
+      const { data, error } = await supabase
+        .from('agenda')
+        .select('*, professores(nome), modalidades(id, nome)')
+        .order('horario', { ascending: true });
+      if (error) throw error;
+      return data;
+    }
+
+    if (perfil !== 'professor' || !professorId) return [];
+
+    const { data: modalidadesDoProf } = await supabase
+      .from('modalidades')
+      .select('id')
+      .eq('professor_id', professorId);
+
+    const idsModsDoProf = modalidadesDoProf?.map((m) => m.id) ?? [];
+
+    const [{ data: aulasDiretas, error: errDiretas }, { data: aulasPorMod, error: errMod }] =
+      await Promise.all([
+        supabase
+          .from('agenda')
+          .select('*, professores(nome), modalidades(id, nome)')
+          .eq('professor_id', professorId)
+          .order('horario', { ascending: true }),
+
+        idsModsDoProf.length > 0
+          ? supabase
+              .from('agenda')
+              .select('*, professores(nome), modalidades(id, nome)')
+              .is('professor_id', null)
+              .in('modalidade_id', idsModsDoProf)
+              .order('horario', { ascending: true })
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+    if (errDiretas) throw errDiretas;
+    if (errMod) throw errMod;
+
+    const vistas = new Set();
+    return [...(aulasDiretas ?? []), ...(aulasPorMod ?? [])].filter((a) => {
+      if (vistas.has(a.id)) return false;
+      vistas.add(a.id);
+      return true;
+    });
+  },
+
+  // Sprint 02: estudioId obrigatório em INSERTs de agenda
+  async salvarAula(aula, estudioId) {
+    if (aula.id) {
+      // UPDATE: estudio_id não precisa ser alterado
+      const { id, ...payload } = aula;
+      const { error } = await supabase.from('agenda').update(payload).eq('id', id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('agenda')
+        .insert([{ ...aula, estudio_id: estudioId }]);
+      if (error) throw error;
+    }
+    return true;
+  },
+
+  async excluirAula(id) {
+    try {
+      await supabase.from('agenda_fixa').delete().eq('aula_id', id);
+      await supabase.from('agenda_excecoes').delete().eq('aula_id', id);
+      await supabase.from('presencas').delete().eq('aula_id', id);
+      const { error } = await supabase.from('agenda').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Erro ao excluir aula em cascata:', error);
+      throw error;
+    }
+  },
+
+  async encerrarAula(id, dataEncerramento) {
+    const { error } = await supabase
+      .from('agenda')
+      .update({ data_fim: dataEncerramento })
+      .eq('id', id);
+    if (error) throw error;
+    return true;
+  },
+
+  async listarFeriados() {
+    const { data, error } = await supabase
+      .from('feriados')
+      .select('*')
+      .gte('data', new Date().toISOString().split('T')[0])
+      .order('data', { ascending: true });
+    if (error) throw error;
+    return data;
+  },
+
+  // Sprint 02: estudioId obrigatório no INSERT de feriados
+  async cadastrarFeriado(dados, estudioId) {
+    const { error } = await supabase
+      .from('feriados')
+      .insert([{ ...dados, estudio_id: estudioId }]);
+    if (error) throw error;
+
+    if (dados.bloqueia_agenda) {
+      const inicioDia = `${dados.data}T00:00:00`;
+      const fimDia    = `${dados.data}T23:59:59`;
+      await supabase
+        .from('presencas')
+        .delete()
+        .gte('data_checkin', inicioDia)
+        .lte('data_checkin', fimDia);
+    }
+  },
+
+  async listarMatriculasFixas(aulasIds = null) {
+    let query = supabase
+      .from('agenda_fixa')
+      .select('aula_id, alunos (id, nome_completo, data_inicio_plano, data_fim_plano)');
+
+    if (aulasIds !== null) {
+      query = query.in('aula_id', aulasIds);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Erro ao buscar alunos fixos:', error);
+      return [];
+    }
+    return data;
+  },
+};
