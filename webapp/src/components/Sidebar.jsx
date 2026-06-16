@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Calendar, Download, LogOut, 
   Package, TrendingDown, UserCheck, Calculator, X,
   Clock, Bell, Percent, DollarSign, Gift, TableConfigIcon,
-  CreditCard
+  CreditCard, Settings
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import ThemeToggle from './ui/ThemeToggle';
@@ -62,6 +62,7 @@ function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }
     { name: 'Resultado Financeiro', path: '/resultado-financeiro', icon: Calculator },
     { name: 'Comissões', path: '/comissoes', icon: Percent },
     { name: 'Repasse Regras', path: '/configuracoes/repasse', icon: Calculator },
+    { name: 'Configurações do Estúdio', path: '/configuracoes/estudio', icon: Settings },
   ];
 
   const menuProfessor = [

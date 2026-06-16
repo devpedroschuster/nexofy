@@ -45,6 +45,7 @@ import ConfiguracoesRepasse from './pages/ConfiguracoesRepasse';
 import ProfessorAlunos    from './pages/Professor/ProfessorAlunos';
 import ProfessorComissoes from './pages/Professor/ProfessorComissoes';
 import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
+import ConfiguracoesEstudio from './pages/ConfiguracoesEstudio';
 
 // Super Admin
 import SuperAdminLayout      from './pages/SuperAdmin';
@@ -215,6 +216,7 @@ export default function App() {
                     <Route path="/configuracoes/feriados"element={<ConfiguracoesFeriados />} />
                     <Route path="/notificacoes"          element={<Notificacoes />} />
                     <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
+                    <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
                   </Route>
                 </Route>
 
