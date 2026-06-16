@@ -40,9 +40,9 @@ The content is organized as follows:
 </file_summary>
 
 <directory_structure>
-..env
 .gitignore
 .hintrc
+README.md
 supabase/.gitignore
 supabase/config.toml
 supabase/functions/criar-estudio/index.ts
@@ -203,12 +203,6 @@ webapp/vite.config.js
 <files>
 This section contains the contents of the repository's files.
 
-<file path="..env">
-VITE_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjaWllcHFtbnJyY2pucWhzcHZ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0NzcxOTUsImV4cCI6MjA5NzA1MzE5NX0.fU3YXhgQsjBKS3aCCRTybdpWOrEKFcjuihl89lSXtLA"
-VITE_SUPABASE_URL="https://tciiepqmnrrcjnqhspvw.supabase.co"
-VITE_API_URL=""
-</file>
-
 <file path=".gitignore">
 node_modules/
 /.pnp
@@ -260,6 +254,10 @@ out/
     ]
   }
 }
+</file>
+
+<file path="README.md">
+# nexofy
 </file>
 
 <file path="supabase/.gitignore">
@@ -15245,8 +15243,7 @@ import { LogIn, Mail, Lock, AlertCircle, RefreshCw, ArrowRight } from 'lucide-re
 import { rotaPorPerfil } from '../lib/navigation';
 import { showToast } from '../components/shared/Toast';
 import Modal, { useModal } from '../components/ui/Modal';
-
-const nomeEstudio = import.meta.env.VITE_ESTUDIO_NOME || 'Iluminus';
+import { useEstudioPublico } from '../hooks/useEstudioPublico';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -15256,6 +15253,8 @@ export default function Login() {
 
   const navigate = useNavigate();
   const modalRecuperar = useModal();
+  const { data: estudio } = useEstudioPublico();
+  const nomeEstudio = estudio?.nome || 'Movfy';
 
   // LOGIN
   async function handleLogin(e) {
