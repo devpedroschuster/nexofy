@@ -23,7 +23,7 @@ export const financeiroService = {
    *
    * @param {number} mesNumero - Mês 1-indexed (1 = janeiro, 12 = dezembro).
    * @param {number} ano       - Ano com 4 dígitos (ex: 2025).
-   * @param {string} estudioId - UUID do estúdio (Sprint 02).
+   * @param {string} estudioId - UUID do estúdio (Sprint 02 — obrigatório).
    */
   async gerarMensalidades(mesNumero, ano, estudioId) {
     if (mesNumero < 1 || mesNumero > 12) {
@@ -31,6 +31,13 @@ export const financeiroService = {
         `gerarMensalidades: mesNumero deve ser 1-indexed (1–12). Recebido: ${mesNumero}. ` +
         `Se estiver usando Date.getMonth(), lembre-se de somar 1.`
       );
+    }
+
+    // FIX (sprint RLS): estudioId é obrigatório — sem ele, os INSERTs abaixo
+    // gravariam estudio_id: undefined. Falhar alto e claro aqui é melhor do
+    // que descobrir isso só quando o RLS começar a rejeitar o INSERT.
+    if (!estudioId) {
+      throw new Error('gerarMensalidades: estudioId é obrigatório.');
     }
 
     const { data: alunos, error: errAlunos } = await supabase
@@ -97,6 +104,10 @@ export const financeiroService = {
 
   // Sprint 02: estudioId obrigatório no INSERT de mensalidades manuais
   async adicionarPagamentoManual(dados, estudioId) {
+    if (!estudioId) {
+      throw new Error('adicionarPagamentoManual: estudioId é obrigatório.');
+    }
+
     const payload = {
       aluno_id: dados.aluno_id ? dados.aluno_id : null,
       nome_visitante: dados.nome_visitante ? dados.nome_visitante : null,
@@ -129,7 +140,10 @@ export const financeiroService = {
 
     if (dados.status === 'pago') {
       try {
-        await gerarRepassesDaMensalidade(data.id);
+        // FIX (sprint RLS): gerarRepassesDaMensalidade agora exige estudioId
+        // (a edge function gerar-repasses usa service role e precisa do
+        // isolamento manual no body).
+        await gerarRepassesDaMensalidade(data.id, estudioId);
       } catch (repasseError) {
         console.warn('[financeiroService] Repasse não gerado automaticamente.', repasseError);
         return { ...data, _avisoRepasse: 'Repasse não gerado automaticamente. Verifique manualmente.' };
@@ -138,7 +152,17 @@ export const financeiroService = {
     return data;
   },
 
-  async confirmarPagamento(id, dados) {
+  /**
+   * @param {string} id     - id da mensalidade
+   * @param {object} dados
+   * @param {string} estudioId - UUID do estúdio (obrigatório — necessário
+   *   para repassar à edge function gerar-repasses via gerarRepassesDaMensalidade).
+   */
+  async confirmarPagamento(id, dados, estudioId) {
+    if (!estudioId) {
+      throw new Error('confirmarPagamento: estudioId é obrigatório.');
+    }
+
     const payload = {
       status: 'pago',
       valor_pago: dados.valor_pago,
@@ -155,7 +179,7 @@ export const financeiroService = {
       .eq('id', id);
     if (error) throw error;
 
-    const resultado = await gerarRepassesDaMensalidade(id);
+    const resultado = await gerarRepassesDaMensalidade(id, estudioId);
     return { ok: true, resultado };
   },
 };

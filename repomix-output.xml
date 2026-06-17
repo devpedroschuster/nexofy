@@ -144,6 +144,7 @@ webapp/src/pages/Alunos.jsx
 webapp/src/pages/Aniversariantes.jsx
 webapp/src/pages/AreaAluno.jsx
 webapp/src/pages/Comissoes.jsx
+webapp/src/pages/ConfiguracoesEstudio.jsx
 webapp/src/pages/ConfiguracoesFeriados.jsx
 webapp/src/pages/ConfiguracoesRepasse.jsx
 webapp/src/pages/Dashboard.jsx
@@ -181,6 +182,7 @@ webapp/src/services/configuracoesRepasseService.js
 webapp/src/services/dashboardService.js
 webapp/src/services/despesasService.js
 webapp/src/services/dreService.js
+webapp/src/services/estudioService.js
 webapp/src/services/feriadosService.js
 webapp/src/services/financeiroService.js
 webapp/src/services/gradeService.js
@@ -193,6 +195,7 @@ webapp/src/services/superAdminService.js
 webapp/src/types/agenda.ts
 webapp/src/types/leads.ts
 webapp/src/utils/calendarioParser.js
+webapp/src/utils/storage.js
 webapp/supabase/.gitignore
 webapp/supabase/config.toml
 webapp/tailwind.config.js
@@ -276,7 +279,7 @@ out/
 # https://supabase.com/docs/guides/local-development/cli/config
 # A string used to distinguish different Supabase projects on the same host. Defaults to the
 # working directory name when running `supabase init`.
-project_id = "FitFlex_Admin"
+project_id = "Nexofy_Admin"
 
 [api]
 enabled = true
@@ -676,7 +679,7 @@ entrypoint = "./functions/lembretes-aula/index.ts"
 <file path="supabase/functions/criar-estudio/index.ts">
 // supabase/functions/criar-estudio/index.ts
 //
-// Onboarding completo de um novo estúdio no sistema Iluminus.
+// Onboarding completo de um novo estúdio no sistema Nexofy.
 //
 // Responsabilidades:
 //   1. Valida que o caller é um super_admin (via JWT)
@@ -2185,7 +2188,7 @@ serve(async (req) => {
       .select(`
         id,
         data_aula,
-        agenda ( horario, atividade ),
+        agenda ( horario, atividade, estudio:estudios (nome) ),
         alunos ( push_token, nome_completo )
       `)
       .eq('estudio_id', estudioId)       // ← isolamento
@@ -2207,7 +2210,7 @@ serve(async (req) => {
 
         notificacoes.push({
           to: ag.alunos.push_token,
-          title: '🏋️ Lembrete Iluminus',
+          title: `🏋️ Lembrete ${ag.agenda?.estudio?.nome ?? 'de Aula'}`,
           body: `Olá, ${primeiroNome}! Sua aula de ${ag.agenda.atividade} é amanhã às ${horario}. Te esperamos!`,
           sound: 'default'
         });
@@ -2697,17 +2700,21 @@ export default defineConfig([
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#eab308" />
 
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="FitFlex Admin" />
+    <meta name="apple-mobile-web-app-title" content="%%VITE_APP_NOME%%" />
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <title>FitFlex Admin</title>
+    <title>%VITE_APP_NOME%</title>
   </head>
   <body>
     <div id="root"></div>
@@ -2718,7 +2725,7 @@ export default defineConfig([
 
 <file path="webapp/package.json">
 {
-  "name": "fitFlex-web",
+  "name": "nexofy-web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -2812,9 +2819,9 @@ export default {
 
 <file path="webapp/public/manifest.json">
 {
-  "name": "FitFlex Admin",
-  "short_name": "FitFlex",
-  "description": "Sistema de gestão do FitFlex",
+  "name": "VITE_APP_NOME",
+  "short_name": "VITE_APP_NOME",
+  "description": "Sistema de gestão do VITE_APP_NOME",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",
@@ -2881,8 +2888,8 @@ export default {
 </file>
 
 <file path="webapp/public/sw.js">
-const CACHE_NAME = 'iluminus-v3';
-const STATIC_CACHE_NAME = 'iluminus-static-v3';
+const CACHE_NAME = '%%VITE_APP_SLUG%%-v3';
+const STATIC_CACHE_NAME = '%%VITE_APP_SLUG%%-static-v3';
 
 const PRECACHE_URLS = [
   '/',
@@ -3007,243 +3014,6 @@ The React Compiler is not enabled on this template because of its impact on dev 
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
-</file>
-
-<file path="webapp/src/App.jsx">
-// webapp/src/App.jsx
-import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import { RefreshCw, Menu } from 'lucide-react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-
-import { useAuth } from './hooks/useAuth';
-import { useSuperAdmin } from './hooks/useSuperAdmin';
-import { useEstudio } from './hooks/useEstudio';
-import { rotaPorPerfil } from './lib/navigation';
-import { ThemeProvider } from './providers/ThemeProvider';
-import { ToastProvider } from './components/shared/Toast';
-import ErrorBoundary from './components/shared/ErrorBoundary';
-import Sidebar from './components/Sidebar';
-import { PWABanners } from './components/PWABanners';
-import PaginaNaoEncontrada from './components/PaginaNaoEncontrada';
-
-// Impersonation
-import { ImpersonationProvider } from './contexts/ImpersonationContext';
-import BannerImpersonation from './pages/SuperAdmin/components/BannerImpersonation';
-
-// Pages
-import Login from './pages/Login';
-import RedefinirSenha from './pages/RedefinirSenha';
-import Dashboard from './pages/Dashboard';
-import Alunos from './pages/Alunos';
-import NovoAluno from './pages/NovoAluno';
-import PerfilAluno from './pages/PerfilAluno';
-import Leads from './pages/Leads';
-import Professores from './pages/Professores';
-import Agenda from './pages/Agenda/Agenda';
-import Financeiro from './pages/Financeiro';
-import Despesas from './pages/Despesas';
-import Planos from './pages/Planos';
-import Modalidades from './pages/Modalidades';
-import Presenca from './pages/Presenca';
-import Comissoes from './pages/Comissoes';
-import Aniversariantes from './pages/Aniversariantes';
-import Landing from './pages/Landing';
-import AreaAluno from './pages/AreaAluno';
-import ConfiguracoesFeriados from './pages/ConfiguracoesFeriados';
-import Notificacoes from './pages/Notificacoes';
-import ConfiguracoesRepasse from './pages/ConfiguracoesRepasse';
-import ProfessorAlunos    from './pages/Professor/ProfessorAlunos';
-import ProfessorComissoes from './pages/Professor/ProfessorComissoes';
-import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
-
-// Super Admin
-import SuperAdminLayout      from './pages/SuperAdmin';
-import SuperAdminDashboard   from './pages/SuperAdmin/pages/SuperAdminDashboard';
-import SuperAdminEstudios    from './pages/SuperAdmin/pages/SuperAdminEstudios';
-import SuperAdminNovoEstudio from './pages/SuperAdmin/pages/SuperAdminNovoEstudio';
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { retry: 1, refetchOnWindowFocus: false },
-  },
-});
-
-function Spinner() {
-  return (
-    <div className="h-screen w-screen flex items-center justify-center bg-background">
-      <RefreshCw className="animate-spin text-primary" size={48} />
-    </div>
-  );
-}
-
-// Layout com sidebar (admin + professor)
-// Quando em modo impersonation, o super_admin acessa estas rotas com o
-// override ativo — o BannerImpersonation no topo avisa sobre isso.
-const LayoutComSidebar = ({ perfil, nomeUsuario, estudioId }) => {
-  const { data: estudio } = useEstudio(estudioId);
-  const nomeEstudio = estudio?.nome ?? 'Estudio';
-  const [menuAberto, setMenuAberto] = useState(false);
-
-  return (
-    <div className="flex h-screen bg-background transition-colors duration-300 overflow-hidden w-full">
-      {/* Banner de impersonation fica no topo de tudo (fixed, z-[200]) */}
-      <BannerImpersonation />
-
-      <Sidebar
-        perfil={perfil}
-        nomeUsuario={nomeUsuario}
-        nomeEstudio={nomeEstudio}
-        estudioId={estudioId}
-        menuAberto={menuAberto}
-        setMenuAberto={setMenuAberto}
-      />
-
-      <div className="flex-1 flex flex-col h-screen overflow-hidden w-full max-w-full">
-        <div className="md:hidden flex items-center justify-between bg-card border-b border-border p-4 shrink-0 z-10 shadow-sm transition-colors duration-300">
-          <div>
-            <h2 className="text-xl font-black text-primary tracking-tight leading-none">{nomeEstudio}</h2>
-            {perfil === 'professor' && (
-              <p className="text-[11px] font-bold text-muted-foreground mt-0.5">Area do Professor</p>
-            )}
-          </div>
-          <button
-            onClick={() => setMenuAberto(true)}
-            className="p-2 text-muted-foreground bg-muted rounded-xl hover:bg-subtle transition-colors"
-          >
-            <Menu size={24} />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto w-full custom-scrollbar">
-          <Outlet context={{ perfil }} />
-        </div>
-      </div>
-
-      <PWABanners />
-    </div>
-  );
-};
-
-// Guard generico (admin / professor / aluno)
-const RotaPrivada = ({ sessao, perfil, loading, allowedRoles }) => {
-  if (loading) return <Spinner />;
-  if (!sessao || perfil === null) return <Navigate to="/login" replace />;
-  if (allowedRoles && !allowedRoles.includes(perfil)) {
-    return <Navigate to={rotaPorPerfil(perfil)} replace />;
-  }
-  return <Outlet />;
-};
-
-// Guard exclusivo de super_admin
-// Autocontido: chama useSuperAdmin() internamente, sem receber perfil via props.
-function RotaSuperAdmin() {
-  const { isSuperAdmin, loading, autenticado } = useSuperAdmin();
-  if (loading)       return <Spinner />;
-  if (!autenticado)  return <Navigate to="/login" replace />;
-  if (!isSuperAdmin) return <Navigate to={rotaPorPerfil('admin')} replace />;
-  return <Outlet />;
-}
-
-export default function App() {
-  const { sessao, perfil, loading, nomeUsuario, estudioId } = useAuth();
-
-  if (loading) return <Spinner />;
-
-  return (
-    <QueryClientProvider client={queryClient}>
-      <ErrorBoundary>
-        <ThemeProvider>
-          {/*
-            ImpersonationProvider envolve o BrowserRouter para que
-            useImpersonation() funcione em qualquer componente da arvore,
-            incluindo o BannerImpersonation montado dentro do LayoutComSidebar.
-          */}
-          <ImpersonationProvider>
-            <BrowserRouter>
-              <ToastProvider />
-              <Routes>
-
-                {/* Publicas */}
-                <Route path="/" element={
-                  !sessao ? <Landing /> : <Navigate to={rotaPorPerfil(perfil)} replace />
-                } />
-                <Route path="/login" element={
-                  !sessao ? <Login /> : <Navigate to={rotaPorPerfil(perfil)} replace />
-                } />
-                <Route path="/redefinir-senha" element={<RedefinirSenha />} />
-
-                {/* Super Admin — guard proprio, layout proprio, sem Sidebar de estudio */}
-                <Route element={<RotaSuperAdmin />}>
-                  <Route path="/super" element={<SuperAdminLayout />}>
-                    <Route index                element={<SuperAdminDashboard />} />
-                    <Route path="estudios"      element={<SuperAdminEstudios />} />
-                    <Route path="estudios/novo" element={<SuperAdminNovoEstudio />} />
-                  </Route>
-                </Route>
-
-                {/* Aluno */}
-                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['aluno']} />}>
-                  <Route path="/area-aluno" element={<AreaAluno />} />
-                </Route>
-
-                {/*
-                  Admin + Professor
-                  Nota: quando super_admin usa impersonation, perfil ainda e 'super_admin'.
-                  O acesso ao dashboard e feito via navigate('/dashboard') no handleAcessar,
-                  mas o RLS do servidor ja enxerga o estudio_id correto pelo override.
-                  O guard allowedRoles nao bloqueia porque RotaPrivada recebe perfil='super_admin'
-                  que nao esta na lista — para resolver isso, o super_admin em modo impersonation
-                  acessa estas rotas como 'admin' efetivo. Duas opcoes:
-                    A) Adicionar 'super_admin' nos allowedRoles de admin (abaixo, mais simples)
-                    B) Criar um layout de impersonation separado (mais isolado)
-                  Usamos a opcao A, que e a padrao para ferramentas de suporte.
-                */}
-                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'professor', 'super_admin']} />}>
-                  <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
-                    <Route path="/agenda"              element={<Agenda />} />
-                    <Route path="/professor/alunos"    element={<ProfessorAlunos />} />
-                    <Route path="/professor/comissoes" element={<ProfessorComissoes />} />
-                  </Route>
-                </Route>
-
-                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'super_admin']} />}>
-                  <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
-                    <Route path="/dashboard"             element={<Dashboard />} />
-                    <Route path="/leads"                 element={<Leads />} />
-                    <Route path="/alunos"                element={<Alunos />} />
-                    <Route path="/alunos/novo"           element={<NovoAluno />} />
-                    <Route path="/alunos/:id"            element={<PerfilAluno />} />
-                    <Route path="/professores"           element={<Professores />} />
-                    <Route path="/financeiro"            element={<Financeiro />} />
-                    <Route path="/despesas"              element={<Despesas />} />
-                    <Route path="/resultado-financeiro"  element={<ResultadoFinanceiro />} />
-                    <Route path="/planos"                element={<Planos />} />
-                    <Route path="/modalidades"           element={<Modalidades />} />
-                    <Route path="/presenca"              element={<Presenca />} />
-                    <Route path="/comissoes"             element={<Comissoes />} />
-                    <Route path="/aniversariantes"       element={<Aniversariantes />} />
-                    <Route path="/configuracoes/feriados"element={<ConfiguracoesFeriados />} />
-                    <Route path="/notificacoes"          element={<Notificacoes />} />
-                    <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
-                  </Route>
-                </Route>
-
-                {/* 404 */}
-                <Route path="*" element={
-                  <PaginaNaoEncontrada destino={sessao ? rotaPorPerfil(perfil) : '/'} />
-                } />
-
-              </Routes>
-            </BrowserRouter>
-          </ImpersonationProvider>
-        </ThemeProvider>
-      </ErrorBoundary>
-      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
-    </QueryClientProvider>
-  );
-}
 </file>
 
 <file path="webapp/src/assets/react.svg">
@@ -4863,233 +4633,6 @@ export const showToast = {
     });
   }
 };
-</file>
-
-<file path="webapp/src/components/Sidebar.jsx">
-import React from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { 
-  LayoutDashboard, Users, Calendar, Download, LogOut, 
-  Package, TrendingDown, UserCheck, Calculator, X,
-  Clock, Bell, Percent, DollarSign, Gift, TableConfigIcon,
-  CreditCard
-} from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import ThemeToggle from './ui/ThemeToggle';
-import { usePWA } from '../hooks/usePWA';
-
-function resolverPerfil(perfil) {
-  if (!perfil) return 'admin';
-  if (typeof perfil === 'string') return perfil.toLowerCase().trim();
-  const valor = perfil.role ?? perfil.tipo ?? 'admin';
-  return String(valor).toLowerCase().trim();
-}
-
-// S3 UX — extrai inicial do nome para o avatar
-function inicialNome(nome) {
-  if (!nome) return '?';
-  return nome.trim().charAt(0).toUpperCase();
-}
-
-// #17 — recebe nomeUsuario como prop
-function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }) {
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  async function handleLogout() {
-    try {
-      await supabase.auth.signOut();
-      Object.keys(localStorage)
-        .filter(key => key.startsWith('supabase.'))
-        .forEach(key => localStorage.removeItem(key));
-      navigate('/login');
-    } catch (error) {
-      console.error('Erro ao sair:', error);
-    }
-  }
-
-  const menuAdmin = [
-    { label: 'Visão Geral' },
-    { name: 'Painel Avisos', path: '/dashboard', icon: LayoutDashboard },
-    { name: 'Notificações', path: '/notificacoes', icon: Bell },
-    { name: 'Leads', path: '/leads', icon: Clock },
-    { name: 'Aniversariantes', path: '/aniversariantes', icon: Gift },
-    
-    { label: 'Gestão e Operação' },
-    { name: 'Alunos', path: '/alunos', icon: Users },
-    { name: 'Planos', path: '/planos', icon: CreditCard },
-    { name: 'Professores', path: '/professores', icon: UserCheck },
-    { name: 'Modalidades', path: '/modalidades', icon: Package },
-    { name: 'Agenda', path: '/agenda', icon: Calendar },
-    { name: 'Presença', path: '/presenca', icon: Clock },
-    { name: 'Feriados', path: '/configuracoes/feriados', icon: TableConfigIcon },
-    
-    { label: 'Financeiro' },
-    { name: 'Mensalidades', path: '/financeiro', icon: DollarSign },
-    { name: 'Despesas', path: '/despesas', icon: TrendingDown },
-    { name: 'Resultado Financeiro', path: '/resultado-financeiro', icon: Calculator },
-    { name: 'Comissões', path: '/comissoes', icon: Percent },
-    { name: 'Repasse Regras', path: '/configuracoes/repasse', icon: Calculator },
-  ];
-
-  const menuProfessor = [
-    { label: 'Menu Professor' },
-    { name: 'Minha Agenda',           path: '/agenda',              icon: Calendar },
-    { name: 'Meus Alunos',            path: '/professor/alunos',    icon: Users    },
-    // S1 FIX — renomeado de "Minhas Comissões" para refletir que inclui repasses
-    //{ name: 'Comissões & Repasses',   path: '/professor/comissoes', icon: Percent  },
-  ];
-
-  const isProfessor = resolverPerfil(perfil) === 'professor';
-  const itensMenu = isProfessor ? menuProfessor : menuAdmin;
-  const { canInstall, install } = usePWA();
-
-  return (
-    <>
-      {/* Overlay Mobile */}
-      {menuAberto && (
-        <div 
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 md:hidden transition-all"
-          onClick={() => setMenuAberto(false)}
-        />
-      )}
-
-      {/* Container Sidebar */}
-      <aside className={`
-        fixed md:static inset-y-0 left-0 z-50
-        w-72 bg-card border-r border-border
-        transform transition-transform duration-300 ease-in-out
-        flex flex-col h-full
-        ${menuAberto ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-      `}>
-        
-        {/* Header / Logo */}
-        <div className="p-8 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20">
-              <span className="text-primary-foreground font-black text-xl">
-                {nomeEstudio?.charAt(0) ?? 'E'}
-              </span>
-            </div>
-            <div>
-              <h1 className="text-2xl font-black text-foreground tracking-tighter leading-none">
-                {nomeEstudio}
-              </h1>
-              {/* UX — label de contexto abaixo do logo para o professor */}
-              {isProfessor && (
-                <p className="text-[10px] font-bold text-muted-foreground tracking-wide mt-0.5">
-                  Área do Professor
-                </p>
-              )}
-            </div>
-          </div>
-          
-          <button 
-            onClick={() => setMenuAberto(false)}
-            className="md:hidden p-2 text-muted-foreground hover:bg-subtle rounded-xl border border-border bg-card"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* S3 UX — Avatar + nome do professor no topo da nav (apenas para professor) */}
-        {isProfessor && nomeUsuario && (
-          <div className="px-6 pb-4">
-            <div className="flex items-center gap-3 px-4 py-3 bg-primary-soft rounded-2xl">
-              <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shrink-0 shadow shadow-primary/20">
-                <span className="text-primary-foreground font-black text-sm">
-                  {inicialNome(nomeUsuario)}
-                </span>
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground font-medium">Bem-vindo,</p>
-                <p className="font-black text-sm text-foreground truncate">{nomeUsuario}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Navegação */}
-        <nav className="flex-1 overflow-y-auto px-4 space-y-1 custom-scrollbar">
-          {itensMenu.map((item, index) => {
-            if (item.label) {
-              return (
-                <p key={`label-${index}`} className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 px-4 mt-6 mb-2">
-                  {item.label}
-                </p>
-              );
-            }
-
-            const Icon = item.icon;
-            const ativo = location.pathname === item.path;
-
-            return (
-              <Link 
-                key={item.path} 
-                to={item.path}
-                onClick={() => setMenuAberto(false)}
-                className={`
-                  flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all
-                  ${ativo 
-                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20' 
-                    : 'text-muted-foreground hover:bg-subtle hover:text-foreground'}
-                `}
-              >
-                <Icon size={20} />
-                <span className="text-sm">{item.name}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Rodapé da Sidebar */}
-        <div className="p-4 border-t border-border mt-auto space-y-2">
-
-          {/* #17 / S3 FIX — chip de identidade: exibe para admin; professor já tem avatar no topo */}
-          {nomeUsuario && !isProfessor && (
-            <div className="px-4 py-3 bg-muted rounded-xl">
-              <p className="text-xs text-muted-foreground">Logado como</p>
-              <p className="font-bold text-sm text-foreground truncate">{nomeUsuario}</p>
-            </div>
-          )}
-
-          <div className="flex justify-center w-full pb-2">
-            <ThemeToggle />
-          </div>
-
-          {canInstall && (
-            <button 
-              onClick={install}
-              className="flex items-center gap-3 px-4 py-3 w-full text-primary font-bold hover:bg-primary/10 rounded-xl transition-all"
-            >
-              <Download size={20} />
-              <span className="text-sm">Instalar Aplicativo</span>
-            </button>
-          )}
-
-          {/* UX — divisor visual antes do logout */}
-          <div className="border-t border-border pt-2">
-            <button 
-              onClick={handleLogout}
-              className="flex items-center gap-3 px-4 py-3 w-full text-muted-foreground font-bold hover:text-destructive hover:bg-destructive-soft rounded-xl transition-all"
-            >
-              <LogOut size={20} />
-              <span className="text-sm">Sair do Sistema</span>
-            </button>
-          </div>
-          
-          <div className="px-4 py-2">
-            <p className="text-[10px] text-muted-foreground/40 font-medium text-center italic">
-              v3.0
-            </p>
-          </div>
-        </div>
-      </aside>
-    </>
-  );
-}
-
-export default Sidebar;
 </file>
 
 <file path="webapp/src/components/ui/Badge.jsx">
@@ -6840,89 +6383,82 @@ export function useSuperAdmin() {
 @import "tailwindcss";
 @config "../tailwind.config.js";
 
+/* Necessário caso utilize os componentes do shadcn/ui que possuem animação: */
+@plugin "tailwindcss-animate";
+
 @layer base {
   :root {
-    /* Superfícies */
-    --background: 30 33% 98%;
-    --foreground: 220 13% 18%;
-    --card: 0 0% 100%;
-    --card-foreground: 220 13% 18%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 220 13% 18%;
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
-    --subtle: 220 14% 92%;
-    --border: 220 13% 91%;
-    --input: 220 14% 96%;
-    --ring: 60 100% 50%;
+    /* --- CAMADA BASE NEXOFY (LIGHT MODE) --- */
+    --background: 0 0% 100%;       
+    --foreground: 222.2 84% 4.9%;  
 
-    /* Marca Iluminus */
-    --primary: 60 100% 50%;
---primary-foreground: 60 100% 8%;
---primary-soft: 60 100% 93%;
-    --info: 217 91% 60%;
-    --info-foreground: 0 0% 100%;
-    --info-soft: 214 100% 97%;
-    --success: 142 60% 45%;
-    --success-foreground: 0 0% 100%;
-    --success-soft: 143 85% 96%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
-    --warning-soft: 48 96% 96%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --destructive-soft: 0 94% 97%;
-    --purple: 270 60% 60%;
-    --purple-soft: 270 80% 96%;
-    
-    --radius: 1rem;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+
+    /* --- CAMADA TENANT (Fallback Default) --- */
+    --primary: 221.2 83.2% 53.3%; 
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.75rem;
   }
 
   .dark {
-    --background: 240 10% 4%;
-    --foreground: 220 14% 96%;
-    --card: 240 6% 11%;
-    --card-foreground: 220 14% 96%;
-    --popover: 240 6% 11%;
-    --popover-foreground: 220 14% 96%;
-    --muted: 240 5% 16%;
-    --muted-foreground: 240 5% 65%;
-    --subtle: 240 5% 20%;
-    --border: 240 5% 22%;
-    --input: 240 5% 16%;
-    --ring: 60 100% 50%;
-    --primary: 60 100% 52%;
-    --primary-foreground: 60 100% 8%;
-    --primary-soft: 60 80% 15%;
-    --info: 217 91% 65%;
-    --info-foreground: 240 10% 7%;
-    --info-soft: 217 60% 20%;
-    --success: 142 60% 50%;
-    --success-foreground: 240 10% 7%;
-    --success-soft: 142 50% 18%;
-    --warning: 38 92% 60%;
-    --warning-foreground: 240 10% 7%;
-    --warning-soft: 38 50% 20%;
-    --destructive: 0 84% 65%;
-    --destructive-foreground: 240 10% 7%;
-    --destructive-soft: 0 60% 20%;
-    --purple: 270 60% 65%;
-    --purple-soft: 270 50% 20%;
+    /* --- CAMADA BASE NEXOFY (DARK MODE - MIDNIGHT INDIGO) --- */
+    --background: 240 44% 7%;      
+    --foreground: 210 40% 98%;
+
+    --card: 240 40% 10%;           
+    --card-foreground: 210 40% 98%;
+
+    --popover: 240 40% 10%;
+    --popover-foreground: 210 40% 98%;
+
+    --muted: 240 30% 16%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --border: 240 30% 16%;
+    --input: 240 30% 16%;
+
+    /* --- CAMADA TENANT (Fallback Default Dark) --- */
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 240 30% 16%;
+    --secondary-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --ring: 217.2 91.2% 59.8%;
   }
 }
 
 @layer base {
   * {
-    border-color: hsl(var(--border));
+    @apply border-border;
   }
   body {
-    background-color: hsl(var(--background));
-    color: hsl(var(--foreground));
-    @apply antialiased;
+    @apply bg-background text-foreground font-sans antialiased transition-colors duration-300;
   }
-  ::selection {
-    background-color: hsl(var(--primary) / 0.2);
-    color: hsl(var(--primary));
+  /* Aplica a Sora em todos os headings automaticamente */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-tight font-semibold;
   }
 }
 </file>
@@ -7033,7 +6569,7 @@ export const REGEX = {
 };
 
 export const LINKS = {
-  SUPORTE: 'mailto:suporte@espacoiluminus.com',
+  // SUPORTE removido — consumir via useEstudio().data?.email
   DOCUMENTACAO: '/docs',
   TERMOS: '/termos-de-uso',
   PRIVACIDADE: '/politica-privacidade',
@@ -10082,7 +9618,8 @@ const gerarProximosDias = () => {
 
 export default function AreaAluno() {
   const navigate = useNavigate();
-  const { nomeEstudio } = useEstudio();
+  const { data: estudio } = useEstudio();
+const nomeEstudio = estudio?.nome;
   const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
   const proximosDias = useMemo(() => gerarProximosDias(), []);
@@ -10322,7 +9859,10 @@ export default function AreaAluno() {
   return (
     <div id="page-dashboard">
       <aside className="sidebar">
-        <div className="sidebar-logo"><div className="logo-mark">I</div><span className="logo-name">ILUMINUS</span></div>
+        <div className="sidebar-logo">
+      <div className="logo-mark">{nomeEstudio?.charAt(0) ?? 'E'}</div>
+     <span className="logo-name">{nomeEstudio?.toUpperCase() ?? ''}</span>
+   </div>
         <div className="user-card">
           <div className="avatar overflow-hidden">
             {aluno.avatar_url ? (
@@ -11307,6 +10847,345 @@ export default function Comissoes() {
         mesAno={filtros.mesAno}
         onConfirm={handleGerarRepasses}
       />
+    </div>
+  );
+}
+</file>
+
+<file path="webapp/src/pages/ConfiguracoesEstudio.jsx">
+// webapp/src/pages/ConfiguracoesEstudio.jsx
+import React, { useState, useEffect, useRef } from 'react';
+import { Settings, Upload, Save, Globe, Phone, Instagram, MapPin, Mail, Palette } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEstudio } from '../hooks/useEstudio';
+import { useAuth } from '../hooks/useAuth';
+import { atualizarEstudio, uploadLogo } from '../services/estudioService';
+import { showToast } from '../components/shared/Toast';
+import Button from '../components/ui/Button';
+import Input, { Label } from '../components/ui/Input';
+import Surface from '../components/ui/Surface';
+
+// Timezones brasileiras + internacionais mais comuns
+const TIMEZONES = [
+  { value: 'America/Sao_Paulo',    label: 'Brasília (GMT-3)' },
+  { value: 'America/Manaus',       label: 'Manaus (GMT-4)' },
+  { value: 'America/Belem',        label: 'Belém (GMT-3)' },
+  { value: 'America/Fortaleza',    label: 'Fortaleza (GMT-3)' },
+  { value: 'America/Recife',       label: 'Recife (GMT-3)' },
+  { value: 'America/Bahia',        label: 'Salvador (GMT-3)' },
+  { value: 'America/Cuiaba',       label: 'Cuiabá (GMT-4)' },
+  { value: 'America/Porto_Velho',  label: 'Porto Velho (GMT-4)' },
+  { value: 'America/Boa_Vista',    label: 'Boa Vista (GMT-4)' },
+  { value: 'America/Rio_Branco',   label: 'Rio Branco (GMT-5)' },
+  { value: 'America/Noronha',      label: 'Fernando de Noronha (GMT-2)' },
+  { value: 'America/New_York',     label: 'Nova York (GMT-5)' },
+  { value: 'Europe/Lisbon',        label: 'Lisboa (GMT+0/+1)' },
+  { value: 'UTC',                  label: 'UTC' },
+];
+
+function FieldGroup({ children, className = '' }) {
+  return <div className={`space-y-1.5 ${className}`}>{children}</div>;
+}
+
+export default function ConfiguracoesEstudio() {
+  const queryClient = useQueryClient();
+  const { estudioId } = useAuth();
+  const { data: estudio, isLoading } = useEstudio();
+
+  const fileInputRef = useRef(null);
+  const [salvando, setSalvando] = useState(false);
+  const [uploadandoLogo, setUploadandoLogo] = useState(false);
+  const [previewLogo, setPreviewLogo] = useState(null);
+
+  const [form, setForm] = useState({
+    nome:           '',
+    whatsapp:       '',
+    instagram_url:  '',
+    maps_url:       '',
+    email_suporte:  '',
+    cor_primaria:   '#7c3aed',
+    timezone:       'America/Sao_Paulo',
+  });
+
+  // Preenche o form quando os dados do estúdio chegam
+  useEffect(() => {
+    if (!estudio) return;
+    setForm({
+      nome:          estudio.nome          ?? '',
+      whatsapp:      estudio.whatsapp      ?? '',
+      instagram_url: estudio.instagram_url ?? '',
+      maps_url:      estudio.maps_url      ?? '',
+      email_suporte: estudio.email_suporte ?? '',
+      cor_primaria:  estudio.cor_primaria  ?? '#7c3aed',
+      timezone:      estudio.timezone      ?? 'America/Sao_Paulo',
+    });
+    setPreviewLogo(estudio.logo_url ?? null);
+  }, [estudio]);
+
+  function handleChange(e) {
+    const { name, value } = e.target;
+    setForm(prev => ({ ...prev, [name]: value }));
+  }
+
+  async function handleSalvar() {
+    if (!form.nome.trim()) {
+      showToast.error('O nome do estúdio é obrigatório.');
+      return;
+    }
+
+    setSalvando(true);
+    try {
+      await atualizarEstudio(estudioId, form);
+      // Invalida a query para refletir imediatamente no Sidebar e demais componentes
+      await queryClient.invalidateQueries({ queryKey: ['estudio-atual'] });
+      showToast.success('Configurações salvas com sucesso!');
+    } catch (err) {
+      console.error(err);
+      showToast.error('Erro ao salvar. Tente novamente.');
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function handleLogoChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Preview local imediato
+    setPreviewLogo(URL.createObjectURL(file));
+
+    setUploadandoLogo(true);
+    try {
+      const url = await uploadLogo(estudioId, file);
+      setPreviewLogo(url);
+      // Invalida para que o Sidebar reflita o novo logo
+      await queryClient.invalidateQueries({ queryKey: ['estudio-atual'] });
+      showToast.success('Logo atualizado com sucesso!');
+    } catch (err) {
+      console.error(err);
+      showToast.error('Erro ao enviar o logo. Tente novamente.');
+      setPreviewLogo(estudio?.logo_url ?? null);
+    } finally {
+      setUploadandoLogo(false);
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="max-w-4xl mx-auto p-8">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-muted rounded-2xl w-64" />
+          <div className="h-4 bg-muted rounded-xl w-96" />
+          <div className="h-64 bg-muted rounded-3xl mt-8" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto p-8 animate-in fade-in space-y-8">
+
+      {/* Cabeçalho */}
+      <div>
+        <h1 className="text-2xl font-black text-foreground tracking-tight flex items-center gap-2">
+          <Settings className="text-primary" />
+          Configurações do Estúdio
+        </h1>
+        <p className="text-muted-foreground font-medium mt-1">
+          Personalize as informações, identidade visual e contato do seu estúdio.
+        </p>
+      </div>
+
+      {/* Logo */}
+      <Surface variant="card" padding="xl">
+        <h2 className="text-base font-black text-foreground mb-6 flex items-center gap-2">
+          <Upload size={18} className="text-primary" />
+          Logo do Estúdio
+        </h2>
+
+        <div className="flex items-center gap-6">
+          {/* Preview */}
+          <div className="relative shrink-0">
+            <div className="w-24 h-24 rounded-3xl border-2 border-dashed border-border bg-muted flex items-center justify-center overflow-hidden">
+              {previewLogo ? (
+                <img
+                  src={previewLogo}
+                  alt="Logo do estúdio"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-3xl font-black text-primary">
+                  {form.nome?.charAt(0)?.toUpperCase() ?? 'E'}
+                </span>
+              )}
+            </div>
+            {uploadandoLogo && (
+              <div className="absolute inset-0 rounded-3xl bg-black/40 flex items-center justify-center">
+                <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              </div>
+            )}
+          </div>
+
+          {/* Ações */}
+          <div className="space-y-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              className="hidden"
+              onChange={handleLogoChange}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<Upload size={16} />}
+              onClick={() => fileInputRef.current?.click()}
+              loading={uploadandoLogo}
+            >
+              {uploadandoLogo ? 'Enviando...' : 'Escolher imagem'}
+            </Button>
+            <p className="text-xs text-muted-foreground font-medium">
+              PNG, JPG ou SVG. Recomendado: 512×512 px.
+            </p>
+          </div>
+        </div>
+      </Surface>
+
+      {/* Informações básicas */}
+      <Surface variant="card" padding="xl">
+        <h2 className="text-base font-black text-foreground mb-6 flex items-center gap-2">
+          <Globe size={18} className="text-primary" />
+          Informações Básicas
+        </h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <FieldGroup className="md:col-span-2">
+            <Label htmlFor="nome" required>Nome do Estúdio</Label>
+            <Input
+              id="nome"
+              name="nome"
+              value={form.nome}
+              onChange={handleChange}
+              placeholder="Ex: Espaço Iluminus"
+            />
+          </FieldGroup>
+
+          <FieldGroup>
+            <Label htmlFor="timezone">Fuso Horário</Label>
+            <Input
+              as="select"
+              id="timezone"
+              name="timezone"
+              value={form.timezone}
+              onChange={handleChange}
+              className="font-medium"
+            >
+              {TIMEZONES.map(tz => (
+                <option key={tz.value} value={tz.value}>{tz.label}</option>
+              ))}
+            </Input>
+          </FieldGroup>
+
+          <FieldGroup>
+            <Label htmlFor="cor_primaria" className="flex items-center gap-1.5">
+              <Palette size={12} />
+              Cor Primária
+            </Label>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                id="cor_primaria"
+                name="cor_primaria"
+                value={form.cor_primaria}
+                onChange={handleChange}
+                className="h-11 w-14 cursor-pointer rounded-xl border border-border bg-input p-1"
+              />
+              <Input
+                name="cor_primaria"
+                value={form.cor_primaria}
+                onChange={handleChange}
+                placeholder="#7c3aed"
+                className="font-mono"
+              />
+            </div>
+          </FieldGroup>
+        </div>
+      </Surface>
+
+      {/* Contato */}
+      <Surface variant="card" padding="xl">
+        <h2 className="text-base font-black text-foreground mb-6 flex items-center gap-2">
+          <Phone size={18} className="text-primary" />
+          Contato e Redes Sociais
+        </h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <FieldGroup>
+            <Label htmlFor="whatsapp">WhatsApp de Suporte</Label>
+            <Input
+              id="whatsapp"
+              name="whatsapp"
+              value={form.whatsapp}
+              onChange={handleChange}
+              placeholder="5551999999999"
+              leftIcon={<Phone size={16} />}
+            />
+            <p className="text-[11px] text-muted-foreground font-medium">
+              Formato: código do país + DDD + número (sem espaços).
+            </p>
+          </FieldGroup>
+
+          <FieldGroup>
+            <Label htmlFor="email_suporte">E-mail de Suporte</Label>
+            <Input
+              id="email_suporte"
+              name="email_suporte"
+              type="email"
+              value={form.email_suporte}
+              onChange={handleChange}
+              placeholder="contato@meuestudio.com"
+              leftIcon={<Mail size={16} />}
+            />
+          </FieldGroup>
+
+          <FieldGroup>
+            <Label htmlFor="instagram_url">Instagram</Label>
+            <Input
+              id="instagram_url"
+              name="instagram_url"
+              value={form.instagram_url}
+              onChange={handleChange}
+              placeholder="https://instagram.com/meuestudio"
+              leftIcon={<Instagram size={16} />}
+            />
+          </FieldGroup>
+
+          <FieldGroup>
+            <Label htmlFor="maps_url">Google Maps URL</Label>
+            <Input
+              id="maps_url"
+              name="maps_url"
+              value={form.maps_url}
+              onChange={handleChange}
+              placeholder="https://maps.google.com/..."
+              leftIcon={<MapPin size={16} />}
+            />
+          </FieldGroup>
+        </div>
+      </Surface>
+
+      {/* Botão salvar */}
+      <div className="flex justify-end pb-4">
+        <Button
+          variant="brand"
+          size="lg"
+          leftIcon={<Save size={20} />}
+          onClick={handleSalvar}
+          loading={salvando}
+        >
+          {salvando ? 'Salvando...' : 'Salvar Configurações'}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -14558,9 +14437,8 @@ export default function Landing() {
 <file path="webapp/src/pages/Leads.jsx">
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { Phone, CheckCircle, XCircle, Clock, RefreshCw, MessageCircle, LayoutGrid, List, X, ChevronDown, TrendingUp, TrendingDown, Minus, Calendar, MessageSquare } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { useEstudio } from '../hooks/useEstudio';
 import { showToast } from '../components/shared/Toast';
 import {
   useLeadsPendentes,
@@ -14729,15 +14607,8 @@ export default function Leads() {
   const [visaoAtiva, setVisaoAtiva] = useState('cards');
   const [confirmandoId, setConfirmandoId] = useState(null);
 
-  const { data: configuracoes } = useQuery({
-    queryKey: ['configuracoes'],
-    queryFn: async () => {
-      const { data } = await supabase.from('configuracoes').select('chave, valor');
-      return Object.fromEntries((data || []).map(r => [r.chave, r.valor]));
-    },
-    staleTime: Infinity,
-  });
-  const nomeEstudio = configuracoes?.nome_estudio || 'Iluminus';
+  const { data: estudio } = useEstudio();
+  const nomeEstudio = estudio?.nome;
 
   // ── Período selecionado em cada visão (independentes) ────────────────────
   // 'todos' ou uma chave 'AAAA-MM'
@@ -16116,6 +15987,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { alunosService } from '../services/alunosService';
 import { alunoSchema } from '../lib/validation';
 import { supabase } from '../lib/supabase';
+import { useEstudio } from '../hooks/useEstudio';
 import { showToast } from '../components/shared/Toast';
 import Modal from '../components/shared/Modal';
 
@@ -16251,15 +16123,8 @@ export default function NovoAluno() {
   const alunoParaEditar   = location.state?.alunoParaEditar   || null;
   const leadParaConversao = location.state?.leadParaConversao || null;
 
-  const { data: configuracoes } = useQuery({
-    queryKey: ['configuracoes'],
-    queryFn: async () => {
-      const { data } = await supabase.from('configuracoes').select('chave, valor');
-      return Object.fromEntries((data || []).map(r => [r.chave, r.valor]));
-    },
-    staleTime: Infinity,
-  });
-  const nomeEstudio = configuracoes?.nome_estudio || 'Iluminus';
+  const { data: estudio } = useEstudio();
+const nomeEstudio = estudio?.nome;
 
   const [abaAtiva,                setAbaAtiva]                = useState('dados');
   const [planos,                  setPlanos]                  = useState([]);
@@ -17549,6 +17414,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { alunosService } from '../services/alunosService';
+import { useEstudio } from '../hooks/useEstudio';
 import { TableSkeleton } from '../components/shared/Loading';
 import { showToast } from '../components/shared/Toast';
 import ModalRenovarPlano from '../components/ModalRenovarPlano';
@@ -17619,7 +17485,7 @@ function gerarLinkWhatsApp(telefone, mensagem) {
   const numCompleto = num.startsWith('55') ? num : `55${num}`;
   return `https://wa.me/${numCompleto}?text=${encodeURIComponent(mensagem)}`;
 }
-function BotaoWhatsApp({ aluno, nomeEstudio = 'Iluminus' }) {
+function BotaoWhatsApp({ aluno, nomeEstudio = 'Estúdio' }) {
   const telefone = aluno?.telefone;
   const nome = aluno?.nome_completo?.split(' ')[0] || 'aluno(a)';
   const mensagem = `Olá ${nome}, tudo bem? Passando aqui pelo ${nomeEstudio} para falar com você! 😊`;
@@ -18602,15 +18468,8 @@ export default function PerfilAluno() {
     queryFn: () => alunosService.buscarHistoricoFrequencia(id),
     enabled: !!aluno,
   });
-  const { data: configuracoes } = useQuery({
-    queryKey: ['configuracoes'],
-    queryFn: async () => {
-      const { data } = await supabase.from('configuracoes').select('chave, valor');
-      return Object.fromEntries((data || []).map(r => [r.chave, r.valor]));
-    },
-    staleTime: Infinity,
-  });
-  const nomeEstudio = configuracoes?.nome_estudio || 'Iluminus';
+  const { data: estudio } = useEstudio();
+const nomeEstudio = estudio?.nome;
 
   React.useEffect(() => {
     if (aluno?.observacoes_medicas !== undefined) {
@@ -23029,7 +22888,7 @@ export default function SuperAdminLayout() {
             </div>
             <div className="hidden sm:block leading-tight">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                Iluminus
+                {import.meta.env.VITE_APP_NOME ?? 'Gestão App'}
               </p>
               <p className="text-sm font-black text-foreground tracking-tight">
                 Super Admin
@@ -24630,6 +24489,49 @@ export const dreService = {
 };
 </file>
 
+<file path="webapp/src/services/estudioService.js">
+// webapp/src/services/estudioService.js
+import { supabase } from '../lib/supabase';
+
+/**
+ * Atualiza os dados do estúdio.
+ * O RLS garante que apenas o admin do estúdio pode atualizar.
+ */
+export async function atualizarEstudio(estudioId, dados) {
+  const { error } = await supabase
+    .from('estudios')
+    .update(dados)
+    .eq('id', estudioId);
+
+  if (error) throw error;
+}
+
+/**
+ * Faz upload do logo para o bucket "logos" (público).
+ * Path: "{estudio_id}/logo.png"
+ * Após o upload, atualiza a coluna logo_url na tabela estudios.
+ *
+ * @param {string} estudioId - UUID do estúdio
+ * @param {File}   file      - Arquivo de imagem selecionado pelo usuário
+ * @returns {string} URL pública do logo
+ */
+export async function uploadLogo(estudioId, file) {
+  const path = `${estudioId}/logo.png`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('logos')
+    .upload(path, file, { upsert: true });
+
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage.from('logos').getPublicUrl(path);
+
+  await atualizarEstudio(estudioId, { logo_url: data.publicUrl });
+
+  return data.publicUrl;
+}
+</file>
+
 <file path="webapp/src/services/feriadosService.js">
 import { supabase } from '../lib/supabase';
 
@@ -25730,6 +25632,20 @@ export function gerarEventosFeriados(feriados) {
 }
 </file>
 
+<file path="webapp/src/utils/storage.js">
+/**
+ * Gera uma chave de localStorage com namespace do estúdio,
+ * evitando colisões entre diferentes instâncias da aplicação.
+ *
+ * @param {string} slug  - Slug do estúdio (ex: "meu-estudio")
+ * @param {string} key   - Nome da chave (ex: "theme", "notificacoes_resolvidas")
+ * @returns {string}     - Chave com namespace (ex: "meu-estudio:theme")
+ */
+export function storageKey(slug, key) {
+  return `${slug}:${key}`;
+}
+</file>
+
 <file path="webapp/supabase/.gitignore">
 # Supabase
 .branches
@@ -25746,7 +25662,7 @@ export function gerarEventosFeriados(feriados) {
 # https://supabase.com/docs/guides/local-development/cli/config
 # A string used to distinguish different Supabase projects on the same host. Defaults to the
 # working directory name when running `supabase init`.
-project_id = "FitFlex_WebApp"
+project_id = "Nexofy_Admin"
 
 [api]
 enabled = true
@@ -26153,77 +26069,67 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 </file>
 
 <file path="webapp/tailwind.config.js">
-import tailwindcssAnimate from 'tailwindcss-animate';
-
 /** @type {import('tailwindcss').Config} */
 export default {
-  darkMode: 'class',
-  content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
+  darkMode: ["class"],
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
   theme: {
+    container: {
+      center: true,
+      padding: "2rem",
+      screens: {
+        "2xl": "1400px",
+      },
+    },
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'sans-serif'],
+        display: ['Sora', 'sans-serif'],
+      },
       colors: {
-        background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
-
-        card: {
-          DEFAULT: 'hsl(var(--card))',
-          foreground: 'hsl(var(--card-foreground))',
-        },
-        popover: {
-          DEFAULT: 'hsl(var(--popover))',
-          foreground: 'hsl(var(--popover-foreground))',
-        },
-        muted: {
-          DEFAULT: 'hsl(var(--muted))',
-          foreground: 'hsl(var(--muted-foreground))',
-        },
-        subtle: 'hsl(var(--subtle))',
-        border: 'hsl(var(--border))',
-        input: 'hsl(var(--input))',
-        ring: 'hsl(var(--ring))',
-
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
         primary: {
-          DEFAULT: 'hsl(var(--primary))',
-          foreground: 'hsl(var(--primary-foreground))',
-          soft: 'hsl(var(--primary-soft))',
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+          /* Para usar primary com opacidade customizada (ex: badges) */
+          soft: "hsl(var(--primary) / 0.15)",
         },
-        info: {
-          DEFAULT: 'hsl(var(--info))',
-          foreground: 'hsl(var(--info-foreground))',
-          soft: 'hsl(var(--info-soft))',
-        },
-        success: {
-          DEFAULT: 'hsl(var(--success))',
-          foreground: 'hsl(var(--success-foreground))',
-          soft: 'hsl(var(--success-soft))',
-        },
-        warning: {
-          DEFAULT: 'hsl(var(--warning))',
-          foreground: 'hsl(var(--warning-foreground))',
-          soft: 'hsl(var(--warning-soft))',
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
         },
         destructive: {
-          DEFAULT: 'hsl(var(--destructive))',
-          foreground: 'hsl(var(--destructive-foreground))',
-          soft: 'hsl(var(--destructive-soft))',
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
         },
-        purple: {
-          DEFAULT: 'hsl(var(--purple))',
-          soft: 'hsl(var(--purple-soft))',
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
         },
-
-        'iluminus-amarelo': 'hsl(var(--primary))',
-        'iluminus-fundo': 'hsl(var(--background))',
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
       },
       borderRadius: {
-        lg: 'var(--radius)',
-        xl: 'calc(var(--radius) + 4px)',
-        '2xl': 'calc(var(--radius) + 8px)',
-        '3xl': 'calc(var(--radius) + 16px)',
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
       },
     },
   },
-  plugins: [tailwindcssAnimate],
+  plugins: [],
 }
 </file>
 
@@ -26270,6 +26176,473 @@ export default defineConfig({
     },
   },
 });
+</file>
+
+<file path="webapp/src/App.jsx">
+// webapp/src/App.jsx
+import React, { useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { RefreshCw, Menu } from 'lucide-react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+
+import { useAuth } from './hooks/useAuth';
+import { useSuperAdmin } from './hooks/useSuperAdmin';
+import { useEstudio } from './hooks/useEstudio';
+import { rotaPorPerfil } from './lib/navigation';
+import { ThemeProvider } from './providers/ThemeProvider';
+import { ToastProvider } from './components/shared/Toast';
+import ErrorBoundary from './components/shared/ErrorBoundary';
+import Sidebar from './components/Sidebar';
+import { PWABanners } from './components/PWABanners';
+import PaginaNaoEncontrada from './components/PaginaNaoEncontrada';
+
+// Impersonation
+import { ImpersonationProvider } from './contexts/ImpersonationContext';
+import BannerImpersonation from './pages/SuperAdmin/components/BannerImpersonation';
+
+// Pages
+import Login from './pages/Login';
+import RedefinirSenha from './pages/RedefinirSenha';
+import Dashboard from './pages/Dashboard';
+import Alunos from './pages/Alunos';
+import NovoAluno from './pages/NovoAluno';
+import PerfilAluno from './pages/PerfilAluno';
+import Leads from './pages/Leads';
+import Professores from './pages/Professores';
+import Agenda from './pages/Agenda/Agenda';
+import Financeiro from './pages/Financeiro';
+import Despesas from './pages/Despesas';
+import Planos from './pages/Planos';
+import Modalidades from './pages/Modalidades';
+import Presenca from './pages/Presenca';
+import Comissoes from './pages/Comissoes';
+import Aniversariantes from './pages/Aniversariantes';
+import Landing from './pages/Landing';
+import AreaAluno from './pages/AreaAluno';
+import ConfiguracoesFeriados from './pages/ConfiguracoesFeriados';
+import Notificacoes from './pages/Notificacoes';
+import ConfiguracoesRepasse from './pages/ConfiguracoesRepasse';
+import ProfessorAlunos    from './pages/Professor/ProfessorAlunos';
+import ProfessorComissoes from './pages/Professor/ProfessorComissoes';
+import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
+import ConfiguracoesEstudio from './pages/ConfiguracoesEstudio';
+
+// Super Admin
+import SuperAdminLayout      from './pages/SuperAdmin';
+import SuperAdminDashboard   from './pages/SuperAdmin/pages/SuperAdminDashboard';
+import SuperAdminEstudios    from './pages/SuperAdmin/pages/SuperAdminEstudios';
+import SuperAdminNovoEstudio from './pages/SuperAdmin/pages/SuperAdminNovoEstudio';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, refetchOnWindowFocus: false },
+  },
+});
+
+function Spinner() {
+  return (
+    <div className="h-screen w-screen flex items-center justify-center bg-background">
+      <RefreshCw className="animate-spin text-primary" size={48} />
+    </div>
+  );
+}
+
+// Layout com sidebar (admin + professor)
+// Quando em modo impersonation, o super_admin acessa estas rotas com o
+// override ativo — o BannerImpersonation no topo avisa sobre isso.
+const LayoutComSidebar = ({ perfil, nomeUsuario, estudioId }) => {
+  const { data: estudio } = useEstudio(estudioId);
+  const nomeEstudio = estudio?.nome ?? 'Estudio';
+  const [menuAberto, setMenuAberto] = useState(false);
+
+  return (
+    <div className="flex h-screen bg-background transition-colors duration-300 overflow-hidden w-full">
+      {/* Banner de impersonation fica no topo de tudo (fixed, z-[200]) */}
+      <BannerImpersonation />
+
+      <Sidebar
+        perfil={perfil}
+        nomeUsuario={nomeUsuario}
+        nomeEstudio={nomeEstudio}
+        estudioId={estudioId}
+        menuAberto={menuAberto}
+        setMenuAberto={setMenuAberto}
+      />
+
+      <div className="flex-1 flex flex-col h-screen overflow-hidden w-full max-w-full">
+        <div className="md:hidden flex items-center justify-between bg-card border-b border-border p-4 shrink-0 z-10 shadow-sm transition-colors duration-300">
+          <div>
+            <h2 className="text-xl font-black text-primary tracking-tight leading-none">{nomeEstudio}</h2>
+            {perfil === 'professor' && (
+              <p className="text-[11px] font-bold text-muted-foreground mt-0.5">Area do Professor</p>
+            )}
+          </div>
+          <button
+            onClick={() => setMenuAberto(true)}
+            className="p-2 text-muted-foreground bg-muted rounded-xl hover:bg-subtle transition-colors"
+          >
+            <Menu size={24} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto w-full custom-scrollbar">
+          <Outlet context={{ perfil }} />
+        </div>
+      </div>
+
+      <PWABanners />
+    </div>
+  );
+};
+
+// Guard generico (admin / professor / aluno)
+const RotaPrivada = ({ sessao, perfil, loading, allowedRoles }) => {
+  if (loading) return <Spinner />;
+  if (!sessao || perfil === null) return <Navigate to="/login" replace />;
+  if (allowedRoles && !allowedRoles.includes(perfil)) {
+    return <Navigate to={rotaPorPerfil(perfil)} replace />;
+  }
+  return <Outlet />;
+};
+
+// Guard exclusivo de super_admin
+// Autocontido: chama useSuperAdmin() internamente, sem receber perfil via props.
+function RotaSuperAdmin() {
+  const { isSuperAdmin, loading, autenticado } = useSuperAdmin();
+  if (loading)       return <Spinner />;
+  if (!autenticado)  return <Navigate to="/login" replace />;
+  if (!isSuperAdmin) return <Navigate to={rotaPorPerfil('admin')} replace />;
+  return <Outlet />;
+}
+
+export default function App() {
+  const { sessao, perfil, loading, nomeUsuario, estudioId } = useAuth();
+
+  if (loading) return <Spinner />;
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ErrorBoundary>
+        <ThemeProvider>
+          {/*
+            ImpersonationProvider envolve o BrowserRouter para que
+            useImpersonation() funcione em qualquer componente da arvore,
+            incluindo o BannerImpersonation montado dentro do LayoutComSidebar.
+          */}
+          <ImpersonationProvider>
+            <BrowserRouter>
+              <ToastProvider />
+              <Routes>
+
+                {/* Publicas */}
+                <Route path="/" element={
+                  !sessao ? <Landing /> : <Navigate to={rotaPorPerfil(perfil)} replace />
+                } />
+                <Route path="/login" element={
+                  !sessao ? <Login /> : <Navigate to={rotaPorPerfil(perfil)} replace />
+                } />
+                <Route path="/redefinir-senha" element={<RedefinirSenha />} />
+
+                {/* Super Admin — guard proprio, layout proprio, sem Sidebar de estudio */}
+                <Route element={<RotaSuperAdmin />}>
+                  <Route path="/super" element={<SuperAdminLayout />}>
+                    <Route index                element={<SuperAdminDashboard />} />
+                    <Route path="estudios"      element={<SuperAdminEstudios />} />
+                    <Route path="estudios/novo" element={<SuperAdminNovoEstudio />} />
+                  </Route>
+                </Route>
+
+                {/* Aluno */}
+                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['aluno']} />}>
+                  <Route path="/area-aluno" element={<AreaAluno />} />
+                </Route>
+
+                {/*
+                  Admin + Professor
+                  Nota: quando super_admin usa impersonation, perfil ainda e 'super_admin'.
+                  O acesso ao dashboard e feito via navigate('/dashboard') no handleAcessar,
+                  mas o RLS do servidor ja enxerga o estudio_id correto pelo override.
+                  O guard allowedRoles nao bloqueia porque RotaPrivada recebe perfil='super_admin'
+                  que nao esta na lista — para resolver isso, o super_admin em modo impersonation
+                  acessa estas rotas como 'admin' efetivo. Duas opcoes:
+                    A) Adicionar 'super_admin' nos allowedRoles de admin (abaixo, mais simples)
+                    B) Criar um layout de impersonation separado (mais isolado)
+                  Usamos a opcao A, que e a padrao para ferramentas de suporte.
+                */}
+                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'professor', 'super_admin']} />}>
+                  <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
+                    <Route path="/agenda"              element={<Agenda />} />
+                    <Route path="/professor/alunos"    element={<ProfessorAlunos />} />
+                    <Route path="/professor/comissoes" element={<ProfessorComissoes />} />
+                  </Route>
+                </Route>
+
+                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'super_admin']} />}>
+                  <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
+                    <Route path="/dashboard"             element={<Dashboard />} />
+                    <Route path="/leads"                 element={<Leads />} />
+                    <Route path="/alunos"                element={<Alunos />} />
+                    <Route path="/alunos/novo"           element={<NovoAluno />} />
+                    <Route path="/alunos/:id"            element={<PerfilAluno />} />
+                    <Route path="/professores"           element={<Professores />} />
+                    <Route path="/financeiro"            element={<Financeiro />} />
+                    <Route path="/despesas"              element={<Despesas />} />
+                    <Route path="/resultado-financeiro"  element={<ResultadoFinanceiro />} />
+                    <Route path="/planos"                element={<Planos />} />
+                    <Route path="/modalidades"           element={<Modalidades />} />
+                    <Route path="/presenca"              element={<Presenca />} />
+                    <Route path="/comissoes"             element={<Comissoes />} />
+                    <Route path="/aniversariantes"       element={<Aniversariantes />} />
+                    <Route path="/configuracoes/feriados"element={<ConfiguracoesFeriados />} />
+                    <Route path="/notificacoes"          element={<Notificacoes />} />
+                    <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
+                    <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
+                  </Route>
+                </Route>
+
+                {/* 404 */}
+                <Route path="*" element={
+                  <PaginaNaoEncontrada destino={sessao ? rotaPorPerfil(perfil) : '/'} />
+                } />
+
+              </Routes>
+            </BrowserRouter>
+          </ImpersonationProvider>
+        </ThemeProvider>
+      </ErrorBoundary>
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+    </QueryClientProvider>
+  );
+}
+</file>
+
+<file path="webapp/src/components/Sidebar.jsx">
+import React from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { 
+  LayoutDashboard, Users, Calendar, Download, LogOut, 
+  Package, TrendingDown, UserCheck, Calculator, X,
+  Clock, Bell, Percent, DollarSign, Gift, TableConfigIcon,
+  CreditCard, Settings
+} from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import ThemeToggle from './ui/ThemeToggle';
+import { usePWA } from '../hooks/usePWA';
+
+function resolverPerfil(perfil) {
+  if (!perfil) return 'admin';
+  if (typeof perfil === 'string') return perfil.toLowerCase().trim();
+  const valor = perfil.role ?? perfil.tipo ?? 'admin';
+  return String(valor).toLowerCase().trim();
+}
+
+// S3 UX — extrai inicial do nome para o avatar
+function inicialNome(nome) {
+  if (!nome) return '?';
+  return nome.trim().charAt(0).toUpperCase();
+}
+
+// #17 — recebe nomeUsuario como prop
+function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  async function handleLogout() {
+    try {
+      await supabase.auth.signOut();
+      Object.keys(localStorage)
+        .filter(key => key.startsWith('supabase.'))
+        .forEach(key => localStorage.removeItem(key));
+      navigate('/login');
+    } catch (error) {
+      console.error('Erro ao sair:', error);
+    }
+  }
+
+  const menuAdmin = [
+    { label: 'Visão Geral' },
+    { name: 'Painel Avisos', path: '/dashboard', icon: LayoutDashboard },
+    { name: 'Notificações', path: '/notificacoes', icon: Bell },
+    { name: 'Leads', path: '/leads', icon: Clock },
+    { name: 'Aniversariantes', path: '/aniversariantes', icon: Gift },
+    
+    { label: 'Gestão e Operação' },
+    { name: 'Alunos', path: '/alunos', icon: Users },
+    { name: 'Planos', path: '/planos', icon: CreditCard },
+    { name: 'Professores', path: '/professores', icon: UserCheck },
+    { name: 'Modalidades', path: '/modalidades', icon: Package },
+    { name: 'Agenda', path: '/agenda', icon: Calendar },
+    { name: 'Presença', path: '/presenca', icon: Clock },
+    { name: 'Feriados', path: '/configuracoes/feriados', icon: TableConfigIcon },
+    
+    { label: 'Financeiro' },
+    { name: 'Mensalidades', path: '/financeiro', icon: DollarSign },
+    { name: 'Despesas', path: '/despesas', icon: TrendingDown },
+    { name: 'Resultado Financeiro', path: '/resultado-financeiro', icon: Calculator },
+    { name: 'Comissões', path: '/comissoes', icon: Percent },
+    { name: 'Repasse Regras', path: '/configuracoes/repasse', icon: Calculator },
+    { name: 'Configurações do Estúdio', path: '/configuracoes/estudio', icon: Settings },
+  ];
+
+  const menuProfessor = [
+    { label: 'Menu Professor' },
+    { name: 'Minha Agenda',           path: '/agenda',              icon: Calendar },
+    { name: 'Meus Alunos',            path: '/professor/alunos',    icon: Users    },
+    // S1 FIX — renomeado de "Minhas Comissões" para refletir que inclui repasses
+    //{ name: 'Comissões & Repasses',   path: '/professor/comissoes', icon: Percent  },
+  ];
+
+  const isProfessor = resolverPerfil(perfil) === 'professor';
+  const itensMenu = isProfessor ? menuProfessor : menuAdmin;
+  const { canInstall, install } = usePWA();
+
+  return (
+    <>
+      {/* Overlay Mobile */}
+      {menuAberto && (
+        <div 
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 md:hidden transition-all"
+          onClick={() => setMenuAberto(false)}
+        />
+      )}
+
+      {/* Container Sidebar */}
+      <aside className={`
+        fixed md:static inset-y-0 left-0 z-50
+        w-72 bg-card border-r border-border
+        transform transition-transform duration-300 ease-in-out
+        flex flex-col h-full
+        ${menuAberto ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+      `}>
+        
+        {/* Header / Logo */}
+        <div className="p-8 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20">
+              <span className="text-primary-foreground font-black text-xl">
+                {nomeEstudio?.charAt(0) ?? 'E'}
+              </span>
+            </div>
+            <div>
+              <h1 className="text-2xl font-black text-foreground tracking-tighter leading-none">
+                {nomeEstudio}
+              </h1>
+              {/* UX — label de contexto abaixo do logo para o professor */}
+              {isProfessor && (
+                <p className="text-[10px] font-bold text-muted-foreground tracking-wide mt-0.5">
+                  Área do Professor
+                </p>
+              )}
+            </div>
+          </div>
+          
+          <button 
+            onClick={() => setMenuAberto(false)}
+            className="md:hidden p-2 text-muted-foreground hover:bg-subtle rounded-xl border border-border bg-card"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* S3 UX — Avatar + nome do professor no topo da nav (apenas para professor) */}
+        {isProfessor && nomeUsuario && (
+          <div className="px-6 pb-4">
+            <div className="flex items-center gap-3 px-4 py-3 bg-primary-soft rounded-2xl">
+              <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shrink-0 shadow shadow-primary/20">
+                <span className="text-primary-foreground font-black text-sm">
+                  {inicialNome(nomeUsuario)}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground font-medium">Bem-vindo,</p>
+                <p className="font-black text-sm text-foreground truncate">{nomeUsuario}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Navegação */}
+        <nav className="flex-1 overflow-y-auto px-4 space-y-1 custom-scrollbar">
+          {itensMenu.map((item, index) => {
+            if (item.label) {
+              return (
+                <p key={`label-${index}`} className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 px-4 mt-6 mb-2">
+                  {item.label}
+                </p>
+              );
+            }
+
+            const Icon = item.icon;
+            const ativo = location.pathname === item.path;
+
+            return (
+              <Link 
+                key={item.path} 
+                to={item.path}
+                onClick={() => setMenuAberto(false)}
+                className={`
+                  flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all
+                  ${ativo 
+                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20' 
+                    : 'text-muted-foreground hover:bg-subtle hover:text-foreground'}
+                `}
+              >
+                <Icon size={20} />
+                <span className="text-sm">{item.name}</span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Rodapé da Sidebar */}
+        <div className="p-4 border-t border-border mt-auto space-y-2">
+
+          {/* #17 / S3 FIX — chip de identidade: exibe para admin; professor já tem avatar no topo */}
+          {nomeUsuario && !isProfessor && (
+            <div className="px-4 py-3 bg-muted rounded-xl">
+              <p className="text-xs text-muted-foreground">Logado como</p>
+              <p className="font-bold text-sm text-foreground truncate">{nomeUsuario}</p>
+            </div>
+          )}
+
+          <div className="flex justify-center w-full pb-2">
+            <ThemeToggle />
+          </div>
+
+          {canInstall && (
+            <button 
+              onClick={install}
+              className="flex items-center gap-3 px-4 py-3 w-full text-primary font-bold hover:bg-primary/10 rounded-xl transition-all"
+            >
+              <Download size={20} />
+              <span className="text-sm">Instalar Aplicativo</span>
+            </button>
+          )}
+
+          {/* UX — divisor visual antes do logout */}
+          <div className="border-t border-border pt-2">
+            <button 
+              onClick={handleLogout}
+              className="flex items-center gap-3 px-4 py-3 w-full text-muted-foreground font-bold hover:text-destructive hover:bg-destructive-soft rounded-xl transition-all"
+            >
+              <LogOut size={20} />
+              <span className="text-sm">Sair do Sistema</span>
+            </button>
+          </div>
+          
+          <div className="px-4 py-2">
+            <p className="text-[10px] text-muted-foreground/40 font-medium text-center italic">
+              v3.0
+            </p>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+export default Sidebar;
 </file>
 
 </files>

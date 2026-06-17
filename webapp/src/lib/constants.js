@@ -94,7 +94,7 @@ export const REGEX = {
 };
 
 export const LINKS = {
-  SUPORTE: 'mailto:suporte@espacoiluminus.com',
+  // SUPORTE removido — consumir via useEstudio().data?.email
   DOCUMENTACAO: '/docs',
   TERMOS: '/termos-de-uso',
   PRIVACIDADE: '/politica-privacidade',

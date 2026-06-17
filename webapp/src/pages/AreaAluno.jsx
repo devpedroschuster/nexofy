@@ -29,7 +29,8 @@ const gerarProximosDias = () => {
 
 export default function AreaAluno() {
   const navigate = useNavigate();
-  const { nomeEstudio } = useEstudio();
+  const { data: estudio } = useEstudio();
+const nomeEstudio = estudio?.nome;
   const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
   const proximosDias = useMemo(() => gerarProximosDias(), []);
@@ -269,7 +270,10 @@ export default function AreaAluno() {
   return (
     <div id="page-dashboard">
       <aside className="sidebar">
-        <div className="sidebar-logo"><div className="logo-mark">I</div><span className="logo-name">ILUMINUS</span></div>
+        <div className="sidebar-logo">
+      <div className="logo-mark">{nomeEstudio?.charAt(0) ?? 'E'}</div>
+     <span className="logo-name">{nomeEstudio?.toUpperCase() ?? ''}</span>
+   </div>
         <div className="user-card">
           <div className="avatar overflow-hidden">
             {aluno.avatar_url ? (

@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx';
 
 import { comissoesService } from '../services/comissoesService';
 import { gerarRepassesMensais, previewRepassesMensais } from '../services/repasseService';
+import { useAuth } from '../hooks/useAuth';
 import {
   useComissoesProfessor,
   useResumoMensal,
@@ -517,6 +518,7 @@ function AbaVisaoGeral({ mesAno, onSelecionarProfessor }) {
 // ─── página principal ─────────────────────────────────────────────────────────
 
 export default function Comissoes() {
+  const { estudioId } = useAuth();
   const [professores, setProfessores] = useState([]);
   const [filtros, setFiltros] = useState({
     professorId: '',
@@ -527,7 +529,7 @@ export default function Comissoes() {
   const [gerando, setGerando] = useState(false);
   const [resultadoGeracao, setResultadoGeracao] = useState(null);
   const [resumoExpandido, setResumoExpandido] = useState(false);
-
+ 
   const modalGeracao = useModal();
   const invalidarComissoes = useInvalidarComissoes();
 
@@ -544,11 +546,15 @@ export default function Comissoes() {
   }, []);
 
   const handleGerarRepasses = async () => {
+    if (!estudioId) {
+      showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
+      return;
+    }
     const [ano, mes] = filtros.mesAno.split('-').map(Number);
     setGerando(true);
     setResultadoGeracao(null);
     try {
-      const resultado = await gerarRepassesMensais(mes, ano);
+      const resultado = await gerarRepassesMensais(mes, ano, estudioId);
       if (resultado?.jaGerados) {
         showToast.error(resultado.error || 'Repasses deste mês já foram gerados.');
         modalGeracao.fechar();

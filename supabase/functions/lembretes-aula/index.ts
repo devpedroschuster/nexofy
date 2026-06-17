@@ -45,7 +45,7 @@ serve(async (req) => {
       .select(`
         id,
         data_aula,
-        agenda ( horario, atividade ),
+        agenda ( horario, atividade, estudio:estudios (nome) ),
         alunos ( push_token, nome_completo )
       `)
       .eq('estudio_id', estudioId)       // ← isolamento
@@ -67,7 +67,7 @@ serve(async (req) => {
 
         notificacoes.push({
           to: ag.alunos.push_token,
-          title: '🏋️ Lembrete Iluminus',
+          title: `🏋️ Lembrete ${ag.agenda?.estudio?.nome ?? 'de Aula'}`,
           body: `Olá, ${primeiroNome}! Sua aula de ${ag.agenda.atividade} é amanhã às ${horario}. Te esperamos!`,
           sound: 'default'
         });

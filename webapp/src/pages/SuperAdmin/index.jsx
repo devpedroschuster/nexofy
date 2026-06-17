@@ -45,7 +45,7 @@ export default function SuperAdminLayout() {
             </div>
             <div className="hidden sm:block leading-tight">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                Iluminus
+                {import.meta.env.VITE_APP_NOME ?? 'Gestão App'}
               </p>
               <p className="text-sm font-black text-foreground tracking-tight">
                 Super Admin

@@ -5,6 +5,7 @@ import Input, { Label } from './ui/Input';
 import { supabase } from '../lib/supabase';
 import { financeiroService } from '../services/financeiroService';
 import { showToast } from './shared/Toast';
+import { useAuth } from '../hooks/useAuth';
 import { User, DollarSign, Calendar, BookOpen, GraduationCap, Package, CreditCard, LayoutList, Loader2 } from 'lucide-react';
 
 /**
@@ -35,6 +36,7 @@ function traduzirErroRegistro(error, nomeAluno) {
 }
 
 export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSucesso }) {
+  const { estudioId } = useAuth();
   const [alunos, setAlunos] = useState([]);
   const [planos, setPlanos] = useState([]);
   const [professores, setProfessores] = useState([]);
@@ -75,8 +77,14 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
 
   async function handleSubmit(e) {
     e.preventDefault();
+ 
+    if (!estudioId) {
+      showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
+      return;
+    }
+ 
     setLoading(true);
-
+ 
     try {
       const payload = {
         aluno_id: isVisitante ? null : form.aluno_id,
@@ -88,7 +96,7 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
         status: 'pago',
         data_pagamento: form.data_pagamento,
       };
-
+ 
       if (form.tipo_aula === 'regular' && form.plano_id) {
         payload.plano_id = form.plano_id;
       }
@@ -96,8 +104,8 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
         payload.professor_id = form.professor_id;
         payload.modalidade_nome = form.modalidade_nome;
       }
-
-      const resultado = await financeiroService.adicionarPagamentoManual(payload);
+ 
+      const resultado = await financeiroService.adicionarPagamentoManual(payload, estudioId);
 
       // Toast contextual de sucesso
       const nomeExibicao = isVisitante

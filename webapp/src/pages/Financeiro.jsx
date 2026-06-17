@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
 import { financeiroService } from '../services/financeiroService';
 import { useFinanceiro } from '../hooks/useFinanceiro';
+import { useAuth } from '../hooks/useAuth';
 import SelectFormaPagamento from '../components/SelectFormaPagamento';
 import RepasseAlunoCard from '../components/RepasseAlunoCard';
 import { TIPOS_AULA } from '../lib/constants';
@@ -47,6 +48,7 @@ const ORDEM_STATUS = { atrasado: 0, pendente: 1, pago: 2 };
 // ──────────────────────────────────────────────────────────────────────────────
 
 export default function Financeiro() {
+  const { estudioId } = useAuth();
   const dataAtual = new Date();
   const [filtros, setFiltros] = useState({
     mes: dataAtual.getMonth() + 1,
@@ -129,6 +131,10 @@ export default function Financeiro() {
 
   const handleConfirmarPagamento = async (e) => {
   e.preventDefault();
+  if (!estudioId) {
+    showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
+    return;
+  }
   try {
     const valorFormatado = parseFloat(valorPago.replace(/\./g, '').replace(',', '.'));
     const payload = {
@@ -139,7 +145,7 @@ export default function Financeiro() {
       modalidade_nome: (tipoAula === 'experimental' || tipoAula === 'avulsa') ? modalidadeNome : null,
       data_pagamento: dataPagamentoConfirmar,
     };
-    const res = await financeiroService.confirmarPagamento(pagamentoSelecionado.id, payload);
+    const res = await financeiroService.confirmarPagamento(pagamentoSelecionado.id, payload, estudioId);
     showToast.success('Pagamento processado com sucesso!');
     refetch();
     modalPagamento.fechar();
@@ -155,10 +161,14 @@ export default function Financeiro() {
   }
 };
 
-  const handleGerarMensalidades = async () => {
+   const handleGerarMensalidades = async () => {
+    if (!estudioId) {
+      showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
+      return;
+    }
     setGerando(true);
     try {
-      await financeiroService.gerarMensalidades(filtros.mes, filtros.ano);
+      await financeiroService.gerarMensalidades(filtros.mes, filtros.ano, estudioId);
       showToast.success('Mensalidades criadas com sucesso!');
       refetch();
       modalGerarMensalidades.fechar();

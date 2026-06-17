@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { alunosService } from '../services/alunosService';
+import { useEstudio } from '../hooks/useEstudio';
 import { TableSkeleton } from '../components/shared/Loading';
 import { showToast } from '../components/shared/Toast';
 import ModalRenovarPlano from '../components/ModalRenovarPlano';
@@ -79,7 +80,7 @@ function gerarLinkWhatsApp(telefone, mensagem) {
   const numCompleto = num.startsWith('55') ? num : `55${num}`;
   return `https://wa.me/${numCompleto}?text=${encodeURIComponent(mensagem)}`;
 }
-function BotaoWhatsApp({ aluno, nomeEstudio = 'Iluminus' }) {
+function BotaoWhatsApp({ aluno, nomeEstudio = 'Estúdio' }) {
   const telefone = aluno?.telefone;
   const nome = aluno?.nome_completo?.split(' ')[0] || 'aluno(a)';
   const mensagem = `Olá ${nome}, tudo bem? Passando aqui pelo ${nomeEstudio} para falar com você! 😊`;
@@ -1062,15 +1063,8 @@ export default function PerfilAluno() {
     queryFn: () => alunosService.buscarHistoricoFrequencia(id),
     enabled: !!aluno,
   });
-  const { data: configuracoes } = useQuery({
-    queryKey: ['configuracoes'],
-    queryFn: async () => {
-      const { data } = await supabase.from('configuracoes').select('chave, valor');
-      return Object.fromEntries((data || []).map(r => [r.chave, r.valor]));
-    },
-    staleTime: Infinity,
-  });
-  const nomeEstudio = configuracoes?.nome_estudio || 'Iluminus';
+  const { data: estudio } = useEstudio();
+const nomeEstudio = estudio?.nome;
 
   React.useEffect(() => {
     if (aluno?.observacoes_medicas !== undefined) {

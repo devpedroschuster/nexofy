@@ -28,6 +28,7 @@ import Button from './ui/Button';
 import Badge from './ui/Badge';
 import { formatarMoeda } from '../lib/utils';
 import { previewRepassesMensais } from '../services/repasseService';
+import { useAuth } from '../hooks/useAuth';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -159,20 +160,21 @@ function AvisosSection({ avisos }) {
 // ─── componente principal ────────────────────────────────────────────────────
 
 export default function ModalPreviewRepasses({ isOpen, onClose, mesAno, onConfirm }) {
+  const { estudioId } = useAuth();
   const [estado, setEstado] = useState('idle'); // idle | carregando | pronto | erro | ja_gerado
   const [preview, setPreview] = useState(null);
   const [erroMsg, setErroMsg] = useState('');
   const [confirmando, setConfirmando] = useState(false);
-
+ 
   const carregarPreview = useCallback(async () => {
-    if (!mesAno) return;
+    if (!mesAno || !estudioId) return;
     setEstado('carregando');
     setPreview(null);
     setErroMsg('');
-
+ 
     try {
       const [ano, mes] = mesAno.split('-').map(Number);
-      const data = await previewRepassesMensais(mes, ano);
+      const data = await previewRepassesMensais(mes, ano, estudioId);
 
       if (data?.jaGerados) {
         setEstado('ja_gerado');
@@ -186,7 +188,7 @@ export default function ModalPreviewRepasses({ isOpen, onClose, mesAno, onConfir
       setErroMsg(err?.message || 'Erro ao calcular preview dos repasses.');
       setEstado('erro');
     }
-  }, [mesAno]);
+}, [mesAno, estudioId]);
 
   // Carrega sempre que o modal abre
   useEffect(() => {

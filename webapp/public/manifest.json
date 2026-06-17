@@ -1,7 +1,7 @@
 {
-  "name": "FitFlex Admin",
-  "short_name": "FitFlex",
-  "description": "Sistema de gestão do FitFlex",
+  "name": "VITE_APP_NOME",
+  "short_name": "VITE_APP_NOME",
+  "description": "Sistema de gestão do VITE_APP_NOME",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",

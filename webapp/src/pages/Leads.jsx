@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { Phone, CheckCircle, XCircle, Clock, RefreshCw, MessageCircle, LayoutGrid, List, X, ChevronDown, TrendingUp, TrendingDown, Minus, Calendar, MessageSquare } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { useEstudio } from '../hooks/useEstudio';
 import { showToast } from '../components/shared/Toast';
 import {
   useLeadsPendentes,
@@ -171,15 +170,8 @@ export default function Leads() {
   const [visaoAtiva, setVisaoAtiva] = useState('cards');
   const [confirmandoId, setConfirmandoId] = useState(null);
 
-  const { data: configuracoes } = useQuery({
-    queryKey: ['configuracoes'],
-    queryFn: async () => {
-      const { data } = await supabase.from('configuracoes').select('chave, valor');
-      return Object.fromEntries((data || []).map(r => [r.chave, r.valor]));
-    },
-    staleTime: Infinity,
-  });
-  const nomeEstudio = configuracoes?.nome_estudio || 'Iluminus';
+  const { data: estudio } = useEstudio();
+  const nomeEstudio = estudio?.nome;
 
   // ── Período selecionado em cada visão (independentes) ────────────────────
   // 'todos' ou uma chave 'AAAA-MM'

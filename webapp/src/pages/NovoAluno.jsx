@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { alunosService } from '../services/alunosService';
 import { alunoSchema } from '../lib/validation';
 import { supabase } from '../lib/supabase';
+import { useEstudio } from '../hooks/useEstudio';
 import { showToast } from '../components/shared/Toast';
 import Modal from '../components/shared/Modal';
 
@@ -148,15 +149,8 @@ export default function NovoAluno() {
   const alunoParaEditar   = location.state?.alunoParaEditar   || null;
   const leadParaConversao = location.state?.leadParaConversao || null;
 
-  const { data: configuracoes } = useQuery({
-    queryKey: ['configuracoes'],
-    queryFn: async () => {
-      const { data } = await supabase.from('configuracoes').select('chave, valor');
-      return Object.fromEntries((data || []).map(r => [r.chave, r.valor]));
-    },
-    staleTime: Infinity,
-  });
-  const nomeEstudio = configuracoes?.nome_estudio || 'Iluminus';
+  const { data: estudio } = useEstudio();
+const nomeEstudio = estudio?.nome;
 
   const [abaAtiva,                setAbaAtiva]                = useState('dados');
   const [planos,                  setPlanos]                  = useState([]);

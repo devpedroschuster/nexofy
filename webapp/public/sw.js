@@ -1,5 +1,5 @@
-const CACHE_NAME = 'iluminus-v3';
-const STATIC_CACHE_NAME = 'iluminus-static-v3';
+const CACHE_NAME = '%%VITE_APP_SLUG%%-v3';
+const STATIC_CACHE_NAME = '%%VITE_APP_SLUG%%-static-v3';
 
 const PRECACHE_URLS = [
   '/',

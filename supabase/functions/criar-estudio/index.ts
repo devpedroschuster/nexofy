@@ -1,6 +1,6 @@
 // supabase/functions/criar-estudio/index.ts
 //
-// Onboarding completo de um novo estúdio no sistema Iluminus.
+// Onboarding completo de um novo estúdio no sistema Nexofy.
 //
 // Responsabilidades:
 //   1. Valida que o caller é um super_admin (via JWT)
