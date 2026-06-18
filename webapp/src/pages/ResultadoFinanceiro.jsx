@@ -13,7 +13,6 @@ import {
 import { format, subMonths, addMonths, startOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatarMoeda } from '../lib/utils';
-import { CORES } from '../lib/constants';
 import Surface from '../components/ui/Surface';
 import Skeleton from '../components/ui/Skeleton';
 import Badge from '../components/ui/Badge';
