@@ -1,62 +1,79 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { storageKey } from '../utils/storage';
+// src/providers/ThemeProvider.jsx
+// ─── Midnight Indigo · ThemeProvider ─────────────────────────────────────────
+//
+// Suporta três modos: 'light' | 'dark' | 'system'
+// - Persiste em localStorage sob a chave 'midnight-theme'
+// - Aplica a classe 'dark' no <html> conforme o tema resolvido
+// - Respeita prefers-color-scheme quando em modo 'system'
+// - Escuta mudanças do sistema em tempo real (ex: usuário muda o SO p/ dark)
+//
+// Uso:
+//   const { theme, setTheme, resolvedTheme } = useTheme();
+//   theme          → 'light' | 'dark' | 'system'  (preferência salva)
+//   resolvedTheme  → 'light' | 'dark'              (tema efetivo aplicado)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+
+const STORAGE_KEY  = 'midnight-theme';
+const DEFAULT_THEME = 'dark'; // Midnight Indigo nasce escuro
 
 const ThemeContext = createContext(null);
-const slug = import.meta.env.VITE_APP_SLUG ?? 'app';
-const STORAGE_KEY = storageKey(slug, 'theme');
 
-export function ThemeProvider({ children, defaultTheme = 'system' }) {
+function getSystemTheme() {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function resolveTheme(theme) {
+  if (theme === 'system') return getSystemTheme();
+  return theme;
+}
+
+export function ThemeProvider({ children, defaultTheme = DEFAULT_THEME }) {
   const [theme, setThemeState] = useState(() => {
-    if (typeof window === 'undefined') return defaultTheme;
-    return localStorage.getItem(STORAGE_KEY) || defaultTheme;
+    try {
+      return localStorage.getItem(STORAGE_KEY) ?? defaultTheme;
+    } catch {
+      return defaultTheme;
+    }
   });
 
-  const apply = useCallback((mode) => {
-    const root = document.documentElement;
-    const isDark =
-      mode === 'dark' ||
-      (mode === 'system' &&
-        window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [resolvedTheme, setResolvedTheme] = useState(() =>
+    resolveTheme(localStorage.getItem(STORAGE_KEY) ?? defaultTheme)
+  );
 
-    root.classList.add('theme-transition');
-    root.classList.toggle('dark', isDark);
-    window.setTimeout(() => root.classList.remove('theme-transition'), 250);
-  }, []);
-
+  /* Aplica a classe 'dark' no <html> e atualiza resolvedTheme */
   useEffect(() => {
-    apply(theme);
-    localStorage.setItem(STORAGE_KEY, theme);
-  }, [theme, apply]);
+    const resolved = resolveTheme(theme);
+    setResolvedTheme(resolved);
+    document.documentElement.classList.toggle('dark', resolved === 'dark');
+  }, [theme]);
 
+  /* Escuta mudanças de tema do sistema (apenas quando em modo 'system') */
   useEffect(() => {
-    if (theme !== 'system') return;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = () => apply('system');
+
+    const handler = () => {
+      if (theme === 'system') {
+        const resolved = getSystemTheme();
+        setResolvedTheme(resolved);
+        document.documentElement.classList.toggle('dark', resolved === 'dark');
+      }
+    };
+
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
-  }, [theme, apply]);
+  }, [theme]);
 
-  const setTheme = useCallback((next) => setThemeState(next), []);
-  const toggle = useCallback(() => {
-    setThemeState((cur) => {
-      const isDark =
-        cur === 'dark' ||
-        (cur === 'system' &&
-          window.matchMedia('(prefers-color-scheme: dark)').matches);
-      return isDark ? 'light' : 'dark';
-    });
+  const setTheme = useCallback((next) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch { /* safari private */ }
+    setThemeState(next);
   }, []);
 
-  const resolved =
-    theme === 'system'
-      ? (typeof window !== 'undefined' &&
-          window.matchMedia('(prefers-color-scheme: dark)').matches
-          ? 'dark'
-          : 'light')
-      : theme;
-
   return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme: resolved, setTheme, toggle }}>
+    <ThemeContext.Provider value={{ theme, setTheme, resolvedTheme }}>
       {children}
     </ThemeContext.Provider>
   );
@@ -64,6 +81,6 @@ export function ThemeProvider({ children, defaultTheme = 'system' }) {
 
 export function useTheme() {
   const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error('useTheme deve ser usado dentro de um ThemeProvider');
+  if (!ctx) throw new Error('useTheme deve ser usado dentro de <ThemeProvider>');
   return ctx;
 }

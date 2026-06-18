@@ -1,221 +1,266 @@
+// src/components/Sidebar.jsx
+// ─── Midnight Indigo · Sidebar ────────────────────────────────────────────────
+//
+// Design: usa tokens sidebar-* (isolados do resto da UI).
+// Borda esquerda no item ativo (indicador de posição visual).
+// Avatar com inicial do nome para todos os perfis no rodapé.
+// Overlay mobile com backdrop-blur.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { 
-  LayoutDashboard, Users, Calendar, Download, LogOut, 
+import {
+  LayoutDashboard, Users, Calendar, Download, LogOut,
   Package, TrendingDown, UserCheck, Calculator, X,
-  Clock, Bell, Percent, DollarSign, Gift, TableConfigIcon,
-  CreditCard, Settings
+  Clock, Bell, Percent, DollarSign, Gift, CalendarCog,
+  CreditCard, Settings, ChevronRight,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import ThemeToggle from './ui/ThemeToggle';
 import { usePWA } from '../hooks/usePWA';
+import { cn } from '../lib/cn';
 
+/* ── Helpers ────────────────────────────────────────────────────────────────── */
 function resolverPerfil(perfil) {
   if (!perfil) return 'admin';
   if (typeof perfil === 'string') return perfil.toLowerCase().trim();
-  const valor = perfil.role ?? perfil.tipo ?? 'admin';
-  return String(valor).toLowerCase().trim();
+  return String(perfil.role ?? perfil.tipo ?? 'admin').toLowerCase().trim();
 }
 
-// S3 UX — extrai inicial do nome para o avatar
 function inicialNome(nome) {
   if (!nome) return '?';
   return nome.trim().charAt(0).toUpperCase();
 }
 
-// #17 — recebe nomeUsuario como prop
+/* ── Menus ──────────────────────────────────────────────────────────────────── */
+const MENU_ADMIN = [
+  { label: 'Visão Geral' },
+  { name: 'Painel',            path: '/dashboard',                  icon: LayoutDashboard },
+  { name: 'Notificações',      path: '/notificacoes',               icon: Bell            },
+  { name: 'Leads',             path: '/leads',                      icon: Clock           },
+  { name: 'Aniversariantes',   path: '/aniversariantes',            icon: Gift            },
+
+  { label: 'Gestão e Operação' },
+  { name: 'Alunos',            path: '/alunos',                     icon: Users           },
+  { name: 'Planos',            path: '/planos',                     icon: CreditCard      },
+  { name: 'Professores',       path: '/professores',                icon: UserCheck       },
+  { name: 'Modalidades',       path: '/modalidades',                icon: Package         },
+  { name: 'Agenda',            path: '/agenda',                     icon: Calendar        },
+  { name: 'Presença',          path: '/presenca',                   icon: Clock           },
+  { name: 'Feriados',          path: '/configuracoes/feriados',     icon: CalendarCog     },
+
+  { label: 'Financeiro' },
+  { name: 'Mensalidades',      path: '/financeiro',                 icon: DollarSign      },
+  { name: 'Despesas',          path: '/despesas',                   icon: TrendingDown    },
+  { name: 'Resultado',         path: '/resultado-financeiro',       icon: Calculator      },
+  { name: 'Comissões',         path: '/comissoes',                  icon: Percent         },
+  { name: 'Regras de Repasse', path: '/configuracoes/repasse',      icon: Calculator      },
+  { name: 'Configurações',     path: '/configuracoes/estudio',      icon: Settings        },
+];
+
+const MENU_PROFESSOR = [
+  { label: 'Minha Área' },
+  { name: 'Minha Agenda', path: '/agenda',           icon: Calendar },
+  { name: 'Meus Alunos',  path: '/professor/alunos', icon: Users    },
+];
+
+/* ── Componente ─────────────────────────────────────────────────────────────── */
 function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }) {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate  = useNavigate();
+
+  const isProfessor = resolverPerfil(perfil) === 'professor';
+  const itensMenu   = isProfessor ? MENU_PROFESSOR : MENU_ADMIN;
+  const { canInstall, install } = usePWA();
 
   async function handleLogout() {
     try {
       await supabase.auth.signOut();
       Object.keys(localStorage)
-        .filter(key => key.startsWith('supabase.'))
-        .forEach(key => localStorage.removeItem(key));
+        .filter(k => k.startsWith('supabase.'))
+        .forEach(k => localStorage.removeItem(k));
       navigate('/login');
-    } catch (error) {
-      console.error('Erro ao sair:', error);
+    } catch (err) {
+      console.error('Erro ao sair:', err);
     }
   }
 
-  const menuAdmin = [
-    { label: 'Visão Geral' },
-    { name: 'Painel Avisos', path: '/dashboard', icon: LayoutDashboard },
-    { name: 'Notificações', path: '/notificacoes', icon: Bell },
-    { name: 'Leads', path: '/leads', icon: Clock },
-    { name: 'Aniversariantes', path: '/aniversariantes', icon: Gift },
-    
-    { label: 'Gestão e Operação' },
-    { name: 'Alunos', path: '/alunos', icon: Users },
-    { name: 'Planos', path: '/planos', icon: CreditCard },
-    { name: 'Professores', path: '/professores', icon: UserCheck },
-    { name: 'Modalidades', path: '/modalidades', icon: Package },
-    { name: 'Agenda', path: '/agenda', icon: Calendar },
-    { name: 'Presença', path: '/presenca', icon: Clock },
-    { name: 'Feriados', path: '/configuracoes/feriados', icon: TableConfigIcon },
-    
-    { label: 'Financeiro' },
-    { name: 'Mensalidades', path: '/financeiro', icon: DollarSign },
-    { name: 'Despesas', path: '/despesas', icon: TrendingDown },
-    { name: 'Resultado Financeiro', path: '/resultado-financeiro', icon: Calculator },
-    { name: 'Comissões', path: '/comissoes', icon: Percent },
-    { name: 'Repasse Regras', path: '/configuracoes/repasse', icon: Calculator },
-    { name: 'Configurações do Estúdio', path: '/configuracoes/estudio', icon: Settings },
-  ];
-
-  const menuProfessor = [
-    { label: 'Menu Professor' },
-    { name: 'Minha Agenda',           path: '/agenda',              icon: Calendar },
-    { name: 'Meus Alunos',            path: '/professor/alunos',    icon: Users    },
-    // S1 FIX — renomeado de "Minhas Comissões" para refletir que inclui repasses
-    //{ name: 'Comissões & Repasses',   path: '/professor/comissoes', icon: Percent  },
-  ];
-
-  const isProfessor = resolverPerfil(perfil) === 'professor';
-  const itensMenu = isProfessor ? menuProfessor : menuAdmin;
-  const { canInstall, install } = usePWA();
-
   return (
     <>
-      {/* Overlay Mobile */}
+      {/* ── Overlay Mobile ──────────────────────────────────────────────── */}
       {menuAberto && (
-        <div 
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 md:hidden transition-all"
+        <div
+          className="fixed inset-0 z-40 bg-background/60 backdrop-blur-sm md:hidden"
           onClick={() => setMenuAberto(false)}
+          aria-hidden="true"
         />
       )}
 
-      {/* Container Sidebar */}
-      <aside className={`
-        fixed md:static inset-y-0 left-0 z-50
-        w-72 bg-card border-r border-border
-        transform transition-transform duration-300 ease-in-out
-        flex flex-col h-full
-        ${menuAberto ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-      `}>
-        
-        {/* Header / Logo */}
-        <div className="p-8 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20">
-              <span className="text-primary-foreground font-black text-xl">
-                {nomeEstudio?.charAt(0) ?? 'E'}
+      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 md:static',
+          'flex h-full w-64 flex-col',
+          'bg-sidebar border-r border-sidebar-border',
+          'transform transition-transform duration-300 ease-out',
+          menuAberto ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        )}
+      >
+        {/* ── Header / Logo ──────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-5 py-6 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Avatar do estúdio */}
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary shadow-brand">
+              <span className="text-primary-foreground font-bold text-base leading-none">
+                {nomeEstudio?.charAt(0)?.toUpperCase() ?? 'E'}
               </span>
             </div>
-            <div>
-              <h1 className="text-2xl font-black text-foreground tracking-tighter leading-none">
-                {nomeEstudio}
-              </h1>
-              {/* UX — label de contexto abaixo do logo para o professor */}
+
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-sidebar-foreground leading-tight">
+                {nomeEstudio ?? 'Estúdio'}
+              </p>
               {isProfessor && (
-                <p className="text-[10px] font-bold text-muted-foreground tracking-wide mt-0.5">
+                <p className="text-[10px] font-medium text-sidebar-muted-foreground uppercase tracking-wider mt-0.5">
                   Área do Professor
                 </p>
               )}
             </div>
           </div>
-          
-          <button 
+
+          {/* Fechar no mobile */}
+          <button
             onClick={() => setMenuAberto(false)}
-            className="md:hidden p-2 text-muted-foreground hover:bg-subtle rounded-xl border border-border bg-card"
+            className={cn(
+              'md:hidden flex h-8 w-8 items-center justify-center rounded-lg',
+              'text-sidebar-muted-foreground',
+              'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+              'transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+            )}
+            aria-label="Fechar menu"
           >
-            <X size={20} />
+            <X size={16} />
           </button>
         </div>
 
-        {/* S3 UX — Avatar + nome do professor no topo da nav (apenas para professor) */}
-        {isProfessor && nomeUsuario && (
-          <div className="px-6 pb-4">
-            <div className="flex items-center gap-3 px-4 py-3 bg-primary-soft rounded-2xl">
-              <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shrink-0 shadow shadow-primary/20">
-                <span className="text-primary-foreground font-black text-sm">
-                  {inicialNome(nomeUsuario)}
-                </span>
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground font-medium">Bem-vindo,</p>
-                <p className="font-black text-sm text-foreground truncate">{nomeUsuario}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Navegação */}
-        <nav className="flex-1 overflow-y-auto px-4 space-y-1 custom-scrollbar">
+        {/* ── Navegação ──────────────────────────────────────────────────── */}
+        <nav
+          className="flex-1 overflow-y-auto px-3 pb-4 space-y-0.5 custom-scrollbar"
+          aria-label="Navegação principal"
+        >
           {itensMenu.map((item, index) => {
+            /* Label de seção */
             if (item.label) {
               return (
-                <p key={`label-${index}`} className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 px-4 mt-6 mb-2">
+                <p
+                  key={`label-${index}`}
+                  className="px-3 pt-5 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-sidebar-muted-foreground/70 select-none"
+                >
                   {item.label}
                 </p>
               );
             }
 
-            const Icon = item.icon;
+            const Icon  = item.icon;
             const ativo = location.pathname === item.path;
 
             return (
-              <Link 
-                key={item.path} 
+              <Link
+                key={item.path}
                 to={item.path}
                 onClick={() => setMenuAberto(false)}
-                className={`
-                  flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all
-                  ${ativo 
-                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20' 
-                    : 'text-muted-foreground hover:bg-subtle hover:text-foreground'}
-                `}
+                aria-current={ativo ? 'page' : undefined}
+                className={cn(
+                  'group flex items-center gap-3 rounded-lg px-3 py-2.5',
+                  'text-sm font-medium transition-all duration-150',
+                  'focus-visible:ring-2 focus-visible:ring-ring outline-none',
+                  ativo
+                    ? [
+                        'bg-sidebar-accent text-sidebar-accent-foreground',
+                        'border-l-2 border-sidebar-primary pl-[10px]', // indicador ativo
+                      ]
+                    : [
+                        'text-sidebar-muted-foreground',
+                        'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                        'border-l-2 border-transparent pl-[10px]',
+                      ]
+                )}
               >
-                <Icon size={20} />
-                <span className="text-sm">{item.name}</span>
+                <Icon
+                  size={17}
+                  strokeWidth={ativo ? 2 : 1.5}
+                  className="shrink-0"
+                />
+                <span className="flex-1 truncate">{item.name}</span>
+                {ativo && (
+                  <ChevronRight size={13} className="shrink-0 opacity-40" />
+                )}
               </Link>
             );
           })}
         </nav>
 
-        {/* Rodapé da Sidebar */}
-        <div className="p-4 border-t border-border mt-auto space-y-2">
+        {/* ── Rodapé ─────────────────────────────────────────────────────── */}
+        <div className="shrink-0 border-t border-sidebar-border px-3 py-4 space-y-2">
 
-          {/* #17 / S3 FIX — chip de identidade: exibe para admin; professor já tem avatar no topo */}
-          {nomeUsuario && !isProfessor && (
-            <div className="px-4 py-3 bg-muted rounded-xl">
-              <p className="text-xs text-muted-foreground">Logado como</p>
-              <p className="font-bold text-sm text-foreground truncate">{nomeUsuario}</p>
+          {/* Identidade do usuário */}
+          {nomeUsuario && (
+            <div className="flex items-center gap-3 rounded-lg bg-sidebar-accent px-3 py-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-brand">
+                <span className="text-xs font-bold leading-none">
+                  {inicialNome(nomeUsuario)}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] text-sidebar-muted-foreground font-medium leading-none mb-0.5">
+                  {isProfessor ? 'Professor' : 'Administrador'}
+                </p>
+                <p className="text-sm font-semibold text-sidebar-foreground truncate leading-tight">
+                  {nomeUsuario}
+                </p>
+              </div>
             </div>
           )}
 
-          <div className="flex justify-center w-full pb-2">
+          {/* ThemeToggle */}
+          <div className="flex justify-center py-1">
             <ThemeToggle />
           </div>
 
+          {/* Instalar PWA */}
           {canInstall && (
-            <button 
+            <button
               onClick={install}
-              className="flex items-center gap-3 px-4 py-3 w-full text-primary font-bold hover:bg-primary/10 rounded-xl transition-all"
+              className={cn(
+                'flex w-full items-center gap-3 rounded-lg px-3 py-2.5',
+                'text-sm font-medium text-sidebar-primary',
+                'hover:bg-sidebar-accent transition-colors',
+                'focus-visible:ring-2 focus-visible:ring-ring outline-none',
+              )}
             >
-              <Download size={20} />
-              <span className="text-sm">Instalar Aplicativo</span>
+              <Download size={16} className="shrink-0" />
+              <span>Instalar aplicativo</span>
             </button>
           )}
 
-          {/* UX — divisor visual antes do logout */}
-          <div className="border-t border-border pt-2">
-            <button 
-              onClick={handleLogout}
-              className="flex items-center gap-3 px-4 py-3 w-full text-muted-foreground font-bold hover:text-destructive hover:bg-destructive-soft rounded-xl transition-all"
-            >
-              <LogOut size={20} />
-              <span className="text-sm">Sair do Sistema</span>
-            </button>
-          </div>
-          
-          <div className="px-4 py-2">
-            <p className="text-[10px] text-muted-foreground/40 font-medium text-center italic">
-              v3.0
-            </p>
-          </div>
+          {/* Logout */}
+          <button
+            onClick={handleLogout}
+            className={cn(
+              'flex w-full items-center gap-3 rounded-lg px-3 py-2.5',
+              'text-sm font-medium text-sidebar-muted-foreground',
+              'hover:bg-destructive-soft hover:text-destructive transition-colors',
+              'focus-visible:ring-2 focus-visible:ring-ring outline-none',
+            )}
+          >
+            <LogOut size={16} className="shrink-0" />
+            <span>Sair do sistema</span>
+          </button>
+
+          {/* Versão */}
+          <p className="text-center text-[10px] text-sidebar-muted-foreground/40 font-medium pb-1">
+            v3.0 · Midnight Indigo
+          </p>
         </div>
       </aside>
     </>

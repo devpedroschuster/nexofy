@@ -1,37 +1,79 @@
+// src/components/ui/Button.jsx
+// ─── Midnight Indigo · Button ─────────────────────────────────────────────────
+//
+// Variantes:
+//   default     — primary sólido (ação principal)
+//   premium     — gradiente + glow (CTAs de destaque)
+//   destructive — ação destrutiva
+//   success     — confirmação / ação positiva
+//   outline     — borda sobre fundo transparente
+//   secondary   — fundo muted, menos ênfase
+//   ghost       — sem fundo (navegação / ações secundárias)
+//   link        — pareado com texto
+//
+// Tamanhos: sm | default | lg | xl | icon
+//
+// Estados: hover, active, focus-visible (ring AA), disabled — TODOS obrigatórios
+// ─────────────────────────────────────────────────────────────────────────────
+
 import React from 'react';
 import { cn } from '../../lib/cn';
 
+const BASE = [
+  'relative inline-flex items-center justify-center gap-2 whitespace-nowrap',
+  'rounded-lg text-sm font-medium leading-none',
+  'transition-all duration-200 ease-out outline-none',
+  'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+  'active:scale-[0.98]',
+  'disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none',
+  '[&_svg]:size-4 [&_svg]:shrink-0',
+].join(' ');
+
 const VARIANTS = {
-  brand:
-    'bg-primary text-primary-foreground hover:opacity-95 shadow-brand active:scale-[0.99]',
-  primary:
-    'bg-foreground text-background hover:opacity-90 active:scale-[0.99]',
-  secondary:
-    'bg-muted text-foreground hover:bg-subtle',
-  outline:
-    'border border-border bg-transparent text-foreground hover:bg-muted',
-  ghost:
-    'bg-transparent text-foreground hover:bg-muted',
+  default:
+    'bg-primary text-primary-foreground shadow-sm ' +
+    'hover:bg-primary/90 hover:-translate-y-0.5 hover:shadow-elegant',
+
+  premium:
+    'bg-gradient-primary text-primary-foreground shadow-elegant ' +
+    'hover:shadow-glow hover:-translate-y-0.5',
+
   destructive:
-    'bg-destructive text-destructive-foreground hover:opacity-95',
+    'bg-destructive text-destructive-foreground shadow-sm ' +
+    'hover:bg-destructive/90 hover:-translate-y-0.5',
+
   success:
-    'bg-success text-success-foreground hover:opacity-95',
-  info:
-    'bg-info text-info-foreground hover:opacity-95',
+    'bg-success text-success-foreground shadow-sm ' +
+    'hover:bg-success/90 hover:-translate-y-0.5',
+
+  outline:
+    'border border-border bg-transparent text-foreground ' +
+    'hover:bg-accent hover:text-accent-foreground hover:border-primary/40',
+
+  secondary:
+    'bg-secondary text-secondary-foreground ' +
+    'hover:bg-subtle',
+
+  ghost:
+    'text-foreground hover:bg-accent hover:text-accent-foreground',
+
+  link:
+    'text-primary underline-offset-4 hover:underline active:scale-100',
 };
 
 const SIZES = {
-  sm: 'h-9 px-3 text-xs gap-1.5',
-  md: 'h-11 px-5 text-sm gap-2',
-  lg: 'h-14 px-6 text-base gap-2',
-  icon: 'h-10 w-10 p-0',
+  sm:      'h-8 rounded-md px-3 text-xs',
+  default: 'h-10 px-5 py-2',
+  lg:      'h-12 rounded-xl px-8 text-base',
+  xl:      'h-14 rounded-xl px-10 text-base font-semibold',
+  icon:    'h-10 w-10 p-0',
 };
 
 const Button = React.forwardRef(function Button(
   {
     as: Tag = 'button',
-    variant = 'brand',
-    size = 'md',
+    variant = 'default',
+    size = 'default',
     fullWidth = false,
     loading = false,
     leftIcon,
@@ -48,11 +90,9 @@ const Button = React.forwardRef(function Button(
       ref={ref}
       disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center rounded-2xl font-bold uppercase tracking-wide',
-        'transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-        'disabled:opacity-50 disabled:pointer-events-none',
-        VARIANTS[variant],
-        SIZES[size],
+        BASE,
+        VARIANTS[variant] ?? VARIANTS.default,
+        SIZES[size]       ?? SIZES.default,
         fullWidth && 'w-full',
         className
       )}

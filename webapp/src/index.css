@@ -1,81 +1,217 @@
 @import "tailwindcss";
 @config "../tailwind.config.js";
 
-/* Necessário caso utilize os componentes do shadcn/ui que possuem animação: */
+/* ─── Midnight Indigo · Design System v2.0 ──────────────────────────────────
+   Fonte de verdade dos tokens CSS.
+   Stack: Vite + React 19 + Tailwind v4 + shadcn/ui + Radix
+   Regra: ZERO valores hardcoded em componentes. Sempre via token.
+────────────────────────────────────────────────────────────────────────────── */
+
 @plugin "tailwindcss-animate";
 
 @layer base {
   :root {
-    /* --- CAMADA BASE NEXOFY (LIGHT MODE) --- */
-    --background: 0 0% 100%;       
-    --foreground: 222.2 84% 4.9%;  
+    /* ── Superfícies ─────────────────────────────────────────────────────── */
+    --background:          220 20% 98%;     /* #FAFBFC — página */
+    --foreground:          240 30% 8%;      /* #0A0A1A — texto base */
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card:                0 0% 100%;       /* #FFFFFF — cards */
+    --card-foreground:     240 30% 8%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover:             0 0% 100%;
+    --popover-foreground:  240 30% 8%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted:               240 15% 95%;     /* áreas secundárias */
+    --muted-foreground:    240 10% 45%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
+    --subtle:              240 15% 92%;     /* hover sutil */
 
-    /* --- CAMADA TENANT (Fallback Default) --- */
-    --primary: 221.2 83.2% 53.3%; 
-    --primary-foreground: 210 40% 98%;
+    /* ── Ações principais ────────────────────────────────────────────────── */
+    --primary:             243 75% 59%;     /* #4F46E5 */
+    --primary-foreground:  0 0% 100%;
+    --primary-glow:        234 89% 74%;     /* #818CF8 — gradientes / glow */
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* ── Semânticas ──────────────────────────────────────────────────────── */
+    --secondary:           240 20% 96%;
+    --secondary-foreground: 240 30% 15%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --accent:              240 60% 96%;
+    --accent-foreground:   243 75% 35%;
 
-    --ring: 221.2 83.2% 53.3%;
+    --destructive:         0 72% 51%;       /* #DC2626 */
+    --destructive-foreground: 0 0% 100%;
+
+    --success:             160 84% 32%;     /* #059669 */
+    --success-foreground:  0 0% 100%;
+
+    --warning:             32 95% 44%;      /* #D97706 */
+    --warning-foreground:  30 60% 10%;
+
+    --info:                210 100% 52%;    /* #0EA5E9 */
+    --info-foreground:     0 0% 100%;
+
+    /* ── Bordas / Inputs ─────────────────────────────────────────────────── */
+    --border:              240 15% 90%;
+    --input:               240 15% 90%;
+    --ring:                243 75% 59%;
+
+    /* ── Sidebar (tokens dedicados) ──────────────────────────────────────── */
+    --sidebar:             0 0% 100%;
+    --sidebar-foreground:  240 30% 8%;
+    --sidebar-border:      240 15% 90%;
+    --sidebar-accent:      240 60% 96%;
+    --sidebar-accent-foreground: 243 75% 35%;
+    --sidebar-primary:     243 75% 59%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-muted-foreground: 240 10% 45%;
+
+    /* ── Raio global ─────────────────────────────────────────────────────── */
     --radius: 0.75rem;
+
+    /* ── Gradientes ──────────────────────────────────────────────────────── */
+    --gradient-primary: linear-gradient(135deg, hsl(243 75% 59%), hsl(255 85% 72%));
+    --gradient-hero:
+      radial-gradient(at 20% 0%,  hsl(243 75% 59% / 0.18), transparent 50%),
+      radial-gradient(at 80% 100%, hsl(255 85% 72% / 0.15), transparent 55%);
+
+    /* ── Sombras ─────────────────────────────────────────────────────────── */
+    --shadow-elegant: 0 10px 30px -12px hsl(243 75% 59% / 0.35);
+    --shadow-glow:    0 0 0 1px hsl(234 89% 74% / 0.25), 0 10px 40px -10px hsl(234 89% 74% / 0.6);
+    --shadow-card:    0 1px 2px hsl(240 30% 8% / 0.04), 0 8px 24px -12px hsl(240 30% 8% / 0.08);
+    --shadow-brand:   0 4px 14px -4px hsl(243 75% 59% / 0.4);
   }
 
+  /* ── Dark Mode — Midnight Indigo ─────────────────────────────────────────── */
   .dark {
-    /* --- CAMADA BASE NEXOFY (DARK MODE - MIDNIGHT INDIGO) --- */
-    --background: 240 44% 7%;      
-    --foreground: 210 40% 98%;
+    --background:          240 40% 7%;      /* #0A0A1A */
+    --foreground:          240 20% 96%;     /* #F5F6FA */
 
-    --card: 240 40% 10%;           
-    --card-foreground: 210 40% 98%;
+    --card:                243 40% 14%;     /* #141432 */
+    --card-foreground:     240 20% 96%;
 
-    --popover: 240 40% 10%;
-    --popover-foreground: 210 40% 98%;
+    --popover:             243 40% 14%;
+    --popover-foreground:  240 20% 96%;
 
-    --muted: 240 30% 16%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted:               243 30% 18%;
+    --muted-foreground:    240 10% 70%;
 
-    --border: 240 30% 16%;
-    --input: 240 30% 16%;
+    --subtle:              243 30% 22%;
 
-    /* --- CAMADA TENANT (Fallback Default Dark) --- */
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary:             239 84% 67%;     /* #6366F1 */
+    --primary-foreground:  240 40% 7%;
+    --primary-glow:        234 89% 74%;     /* #A5B4FC */
 
-    --secondary: 240 30% 16%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary:           243 30% 22%;
+    --secondary-foreground: 240 20% 96%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --accent:              243 40% 28%;
+    --accent-foreground:   240 20% 96%;
 
-    --ring: 217.2 91.2% 59.8%;
+    --destructive:         0 84% 60%;       /* #EF4444 */
+    --destructive-foreground: 0 0% 100%;
+
+    --success:             160 84% 39%;     /* #10B981 */
+    --success-foreground:  240 40% 7%;
+
+    --warning:             38 92% 50%;      /* #F59E0B */
+    --warning-foreground:  240 40% 7%;
+
+    --info:                199 89% 48%;
+    --info-foreground:     240 40% 7%;
+
+    --border:              240 20% 20%;     /* divisores escuros */
+    --input:               240 20% 22%;
+    --ring:                239 84% 67%;
+
+    /* Sidebar dark */
+    --sidebar:             243 45% 10%;     /* ligeiramente mais escuro que o card */
+    --sidebar-foreground:  240 20% 96%;
+    --sidebar-border:      240 20% 20%;
+    --sidebar-accent:      243 40% 22%;
+    --sidebar-accent-foreground: 240 20% 96%;
+    --sidebar-primary:     239 84% 67%;
+    --sidebar-primary-foreground: 240 40% 7%;
+    --sidebar-muted-foreground: 240 10% 55%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(243 75% 59%), hsl(234 89% 74%));
+
+    --shadow-elegant: 0 10px 30px -12px hsl(240 40% 2% / 0.7);
+    --shadow-glow:    0 0 0 1px hsl(234 89% 74% / 0.4), 0 10px 40px -10px hsl(234 89% 74% / 0.7);
+    --shadow-card:    0 1px 2px hsl(0 0% 0% / 0.5), 0 8px 24px -12px hsl(0 0% 0% / 0.6);
+    --shadow-brand:   0 4px 14px -4px hsl(239 84% 67% / 0.5);
   }
 }
 
+/* ── Base global ──────────────────────────────────────────────────────────── */
 @layer base {
   * {
     @apply border-border;
   }
+
   body {
-    @apply bg-background text-foreground font-sans antialiased transition-colors duration-300;
+    @apply bg-background text-foreground antialiased transition-colors duration-300;
+    font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
   }
-  /* Aplica a Sora em todos os headings automaticamente */
+
   h1, h2, h3, h4, h5, h6 {
-    @apply font-display tracking-tight font-semibold;
+    font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.02em;
+    @apply font-semibold;
   }
+
+  /* Scrollbar customizada — discreta no dark, invisível no light */
+  .custom-scrollbar::-webkit-scrollbar        { width: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-track  { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb  {
+    background: hsl(var(--border));
+    border-radius: 99px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+  }
+
+  /* Focus global — garante AA */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+/* ── Utilitários extras ───────────────────────────────────────────────────── */
+@layer utilities {
+  /* Texto com gradiente primary */
+  .gradient-text {
+    background-image: var(--gradient-primary);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Elevação hover padrão */
+  .hover-lift {
+    @apply transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-elegant active:translate-y-0 active:shadow-card;
+  }
+
+  /* Card glass — para sobreposições */
+  .glass-card {
+    @apply bg-card/70 backdrop-blur-md border border-border/80;
+  }
+
+  /* Animação fade-in padrão */
+  .animate-fade-in {
+    animation: fade-in 0.4s ease-out;
+  }
+
+  /* Scroll sem scrollbar visível */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ── Keyframes ────────────────────────────────────────────────────────────── */
+@keyframes fade-in {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
 }

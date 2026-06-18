@@ -3,20 +3,31 @@
   <head>
     <meta charset="UTF-8" />
 
+    <!-- ── Ícones ──────────────────────────────────────────────────────── -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#eab308" />
+
+    <!-- ── Tipografia · Midnight Indigo ────────────────────────────────── -->
+    <!-- Space Grotesk (display / headings) + DM Sans (corpo) -->
+    <!-- REGRA: sempre via <link>, nunca @import em CSS -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- ── PWA ─────────────────────────────────────────────────────────── -->
+    <!-- theme-color usa a cor primary do Midnight Indigo (dark default) -->
+    <meta name="theme-color" content="#6366F1" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#4F46E5" media="(prefers-color-scheme: light)" />
 
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="%%VITE_APP_NOME%%" />
+    <meta name="apple-mobile-web-app-title" content="%VITE_APP_NOME%" />
 
+    <!-- ── Viewport ─────────────────────────────────────────────────────── -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
     <title>%VITE_APP_NOME%</title>
