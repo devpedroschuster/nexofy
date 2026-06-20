@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { gradeService } from '../../services/gradeService';
 import { alunosService } from '../../services/alunosService';
 import { useAgenda } from '../../hooks/useAgenda';
+import { useAuth } from '../../hooks/useAuth';
 import Modal, { useModal, ModalConfirmacao } from '../../components/ui/Modal';
 import { TableSkeleton } from '../../components/shared/Loading';
 import { showToast } from '../../components/shared/Toast';
@@ -49,6 +50,7 @@ const INITIAL_FORM_STATE = {
 
 export default function Agenda() {
   const { perfil, professorId: professorIdLogado } = useOutletContext();
+  const { estudioId } = useAuth();
   const isAdmin = perfil === 'admin';
 
   const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
@@ -59,8 +61,9 @@ export default function Agenda() {
   const { aulas, feriados, loading, isError, refetch } = useAgenda();
 
   const { data: listaAlunos = [] } = useQuery({
-    queryKey: ['alunos', 'ativos-agendamento'],
-    queryFn: () => alunosService.listarAtivos(),
+    queryKey: ['alunos', estudioId, 'ativos-agendamento'],
+    queryFn: () => alunosService.listarAtivos(estudioId),
+    enabled: !!estudioId,
     staleTime: 1000 * 60 * 5,
   });
 

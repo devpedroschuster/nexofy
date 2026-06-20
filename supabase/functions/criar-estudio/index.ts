@@ -79,20 +79,20 @@ serve(async (req: Request) => {
   }
 
   // Verifica role super_admin na tabela profiles (não confia apenas no user_metadata)
-  const { data: callerProfile, error: profileErr } = await admin
-    .from('profiles')
-    .select('role')
-    .eq('id', caller.id)
-    .maybeSingle();
+  const { data: callerMembro, error: profileErr } = await admin
+  .from('estudio_membros')
+  .select('role')
+  .eq('user_id', caller.id)
+  .maybeSingle();
 
-  if (profileErr) {
-    console.error('[criar-estudio] Erro ao verificar perfil do caller:', profileErr);
-    return resp({ error: 'Erro ao verificar permissões do usuário.' }, 500);
-  }
+if (profileErr) {
+  console.error('[criar-estudio] Erro ao verificar perfil do caller:', profileErr);
+  return resp({ error: 'Erro ao verificar permissões do usuário.' }, 500);
+}
 
-  if (!callerProfile || callerProfile.role !== 'super_admin') {
-    return resp({ error: 'Acesso negado. Apenas super_admins podem criar estúdios.' }, 403);
-  }
+if (!callerMembro || callerMembro.role !== 'super_admin') {
+  return resp({ error: 'Acesso negado. Apenas super_admins podem criar estúdios.' }, 403);
+}
 
   // ── 2. VALIDAÇÃO DO PAYLOAD
   let body: Record<string, unknown>;

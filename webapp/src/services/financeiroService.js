@@ -2,7 +2,7 @@ import { supabase } from '../lib/supabase';
 import { gerarRepassesDaMensalidade } from './repasseService';
 
 export const financeiroService = {
-  async listarMensalidades(inicio, fim) {
+  async listarMensalidades(inicio, fim, estudioId) {
     const { data, error } = await supabase
       .from('mensalidades')
       .select(`
@@ -10,6 +10,7 @@ export const financeiroService = {
         alunos (nome_completo),
         planos (nome, preco, is_plano_livre)
       `)
+      .eq('estudio_id', estudioId)
       .gte('data_vencimento', inicio)
       .lte('data_vencimento', fim)
       .order('data_vencimento', { ascending: true });
@@ -43,6 +44,7 @@ export const financeiroService = {
     const { data: alunos, error: errAlunos } = await supabase
       .from('alunos')
       .select('id, plano_id')
+      .eq('estudio_id', estudioId)
       .eq('ativo', true)
       .not('plano_id', 'is', null);
 
@@ -55,6 +57,7 @@ export const financeiroService = {
     const { data: ultimasMensalidades } = await supabase
       .from('mensalidades')
       .select('aluno_id, data_vencimento')
+      .eq('estudio_id', estudioId)
       .gte('data_vencimento', filtroData)
       .order('data_vencimento', { ascending: false });
 
@@ -176,7 +179,8 @@ export const financeiroService = {
     const { error } = await supabase
       .from('mensalidades')
       .update(payload)
-      .eq('id', id);
+      .eq('id', id)
+      .eq('estudio_id', estudioId);
     if (error) throw error;
 
     const resultado = await gerarRepassesDaMensalidade(id, estudioId);

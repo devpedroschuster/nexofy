@@ -4,6 +4,13 @@ import { ModalConfirmacao } from '../../../components/ui/Modal';
 import Button from '../../../components/ui/Button';
 import Input, { Label } from '../../../components/ui/Input';
 
+const ROTULO_STATUS = {
+  falta_justificada: 'Falta Avisada',
+  falta_nao_avisada: 'Não Apareceu',
+};
+
+const EH_FALTA = (status) => status === 'falta_justificada' || status === 'falta_nao_avisada';
+
 export default function ModalListaPresenca({
   aulaParaLista, dataLista, setDataLista, listaPresenca, loadingLista,
   handleRegistrarFalta, handleDesfazerFalta,
@@ -37,44 +44,56 @@ export default function ModalListaPresenca({
           </div>
         ) : (
           <ul className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-            {listaPresenca.map(aluno => (
-              <li key={`${aluno.tipo}-${aluno.aluno_id || aluno.nome}`} className={`p-3 border rounded-xl flex justify-between items-center transition-all ${aluno.status === 'ausencia' ? 'bg-destructive-soft border-destructive/30 opacity-70' : 'bg-card border-border shadow-sm'}`}>
-                <div>
-                  <span className={`font-bold text-sm ${aluno.status === 'ausencia' ? 'text-destructive line-through' : 'text-foreground'}`}>
-                    {aluno.nome}
-                  </span>
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {aluno.tipo === 'fixo' && <span className="text-[9px] bg-purple-soft text-purple px-2 py-0.5 rounded font-black uppercase tracking-wider">Fixo</span>}
-                    {aluno.tipo === 'avulso' && <span className="text-[9px] bg-info-soft text-info px-2 py-0.5 rounded font-black uppercase tracking-wider">Avulso</span>}
-                    {aluno.tipo === 'experimental' && ( <span className="ml-1.5 text-[10px] font-black bg-warning/20 text-warning px-1.5 py-0.5 rounded-full border border-warning/30">LEAD</span>
+            {listaPresenca.map(aluno => {
+              const emFalta = EH_FALTA(aluno.status);
+              return (
+                <li key={`${aluno.tipo}-${aluno.aluno_id || aluno.lead_id || aluno.nome}`} className={`p-3 border rounded-xl flex justify-between items-center transition-all ${emFalta ? 'bg-destructive-soft border-destructive/30 opacity-70' : 'bg-card border-border shadow-sm'}`}>
+                  <div>
+                    <span className={`font-bold text-sm ${emFalta ? 'text-destructive line-through' : 'text-foreground'}`}>
+                      {aluno.nome}
+                    </span>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {aluno.tipo === 'fixo' && <span className="text-[9px] bg-purple-soft text-purple px-2 py-0.5 rounded font-black uppercase tracking-wider">Fixo</span>}
+                      {aluno.tipo === 'avulso' && <span className="text-[9px] bg-info-soft text-info px-2 py-0.5 rounded font-black uppercase tracking-wider">Avulso</span>}
+                      {aluno.tipo === 'experimental' && ( <span className="ml-1.5 text-[10px] font-black bg-warning/20 text-warning px-1.5 py-0.5 rounded-full border border-warning/30">LEAD</span>
 )}
-                    {aluno.status === 'ausencia' && <span className="text-[9px] bg-destructive-soft text-destructive px-2 py-0.5 rounded font-black uppercase tracking-wider">Falta Informada</span>}
+                      {emFalta && (
+                        <span className="text-[9px] bg-destructive-soft text-destructive px-2 py-0.5 rounded font-black uppercase tracking-wider">
+                          {ROTULO_STATUS[aluno.status]}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="ml-2">
-                  {aluno.tipo === 'fixo' ? (
-                    aluno.status === 'ausencia' ? (
-                      <Button variant="secondary" size="sm" onClick={() => handleDesfazerFalta(aluno)}>
-                        Desfazer Falta
+                  <div className="ml-2 flex gap-1.5">
+                    {aluno.tipo === 'fixo' ? (
+                      emFalta ? (
+                        <Button variant="secondary" size="sm" onClick={() => handleDesfazerFalta(aluno)}>
+                          Desfazer Falta
+                        </Button>
+                      ) : (
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => handleRegistrarFalta(aluno, 'justificada')}>
+                            Avisou
+                          </Button>
+                          <Button variant="destructive" size="sm" onClick={() => handleRegistrarFalta(aluno, 'nao_avisada')}>
+                            Não Veio
+                          </Button>
+                        </>
+                      )
+                    ) : isAdmin ? (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        leftIcon={<Trash2 size={14} />}
+                        onClick={() => solicitarRemocao(aluno.id_relacao)}
+                      >
+                        Remover
                       </Button>
-                    ) : (
-                      <Button variant="destructive" size="sm" onClick={() => handleRegistrarFalta(aluno)}>
-                        Informar Falta
-                      </Button>
-                    )
-                  ) : isAdmin ? (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      leftIcon={<Trash2 size={14} />}
-                      onClick={() => solicitarRemocao(aluno.id_relacao)}
-                    >
-                      Remover
-                    </Button>
-                  ) : null}
-                </div>
-              </li>
-            ))}
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

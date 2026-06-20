@@ -30,7 +30,7 @@ export function useAlunos(filtros = {}, pagina = 1) {
         return await alunosService.listar(filtros, {
           pagina,
           tamanho: PAGE_SIZE,
-        });
+        }, estudioId);
       } catch (err) {
         showToast.error('Erro ao carregar lista de alunos');
         throw err;

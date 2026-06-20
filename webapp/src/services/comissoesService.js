@@ -1,17 +1,18 @@
 import { supabase } from '../lib/supabase';
 
 export const comissoesService = {
-  async listarProfessores() {
+  async listarProfessores(estudioId) {
     const { data, error } = await supabase
       .from('professores')
       .select('*')
+      .eq('estudio_id', estudioId)
       .eq('ativo', true)
       .order('nome');
     if (error) throw error;
     return data;
   },
 
-  async buscarDetalhes(professorId, mesAno) {
+  async buscarDetalhes(professorId, mesAno, estudioId) {
     const inicio = `${mesAno}-01`;
     const [ano, mes] = mesAno.split('-').map(Number);
     const ultimoDia = new Date(ano, mes, 0).getDate();
@@ -20,6 +21,7 @@ export const comissoesService = {
     const { data: fechamento } = await supabase
       .from('fechamento_comissoes')
       .select('*')
+      .eq('estudio_id', estudioId)
       .eq('professor_id', professorId)
       .eq('mes_referencia', `${mesAno}-01`)
       .maybeSingle();
@@ -27,6 +29,7 @@ export const comissoesService = {
     const { data: lancamentos, error } = await supabase
       .from('repasses_lancamentos')
       .select('id, valor, tipo_aula, modalidade, data_referencia, pago_em, status, alunos(nome_completo)')
+      .eq('estudio_id', estudioId)
       .eq('professor_id', professorId)
       .gte('data_referencia', inicio)
       .lte('data_referencia', fim)
@@ -54,7 +57,7 @@ export const comissoesService = {
   // UX-04: resumo consolidado de todos os professores para um mês.
   // O Supabase SDK não expõe GROUP BY nativo, então buscamos todos os lançamentos
   // do mês e agregamos no client — volume esperado é pequeno (centenas de linhas/mês).
-  async resumoMensal(mesAno) {
+  async resumoMensal(mesAno, estudioId) {
     const inicio = `${mesAno}-01`;
     const [ano, mes] = mesAno.split('-').map(Number);
     const ultimoDia = new Date(ano, mes, 0).getDate();
@@ -64,6 +67,7 @@ export const comissoesService = {
     const { data: lancamentos, error } = await supabase
       .from('repasses_lancamentos')
       .select('professor_id, valor, tipo_aula, status, professores(id, nome)')
+      .eq('estudio_id', estudioId)
       .gte('data_referencia', inicio)
       .lte('data_referencia', fim);
 
@@ -73,6 +77,7 @@ export const comissoesService = {
     const { data: fechamentos } = await supabase
       .from('fechamento_comissoes')
       .select('professor_id, valor_total, fechado_em')
+      .eq('estudio_id', estudioId)
       .eq('mes_referencia', `${mesAno}-01`);
 
     const fechamentosPorProf = new Map(
@@ -111,11 +116,12 @@ export const comissoesService = {
   },
 
   // REP-04: upsert com constraint (professor_id, mes_referencia) para garantir idempotência.
-  async fecharMes(professorId, mesAno, valorTotal) {
+  async fecharMes(professorId, mesAno, valorTotal, estudioId) {
     const { error } = await supabase
       .from('fechamento_comissoes')
       .upsert([{
         professor_id: professorId,
+        estudio_id: estudioId,
         mes_referencia: `${mesAno}-01`,
         valor_total: valorTotal,
         fechado_em: new Date().toISOString(),

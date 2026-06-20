@@ -80,6 +80,7 @@ function AbaDetalhe({
   professores,
   filtros,
   setFiltros,
+  estudioId,
   loading: loadingProfs,
 }) {
   const invalidarComissoes = useInvalidarComissoes();
@@ -119,6 +120,7 @@ function AbaDetalhe({
         filtros.professorId,
         filtros.mesAno,
         dados.resumo.total_comissao,
+        estudioId,
       );
       showToast.success('Mês fechado e comissões aprovadas com sucesso!');
       modalFechamento.fechar();
@@ -534,16 +536,17 @@ export default function Comissoes() {
   const invalidarComissoes = useInvalidarComissoes();
 
   useEffect(() => {
+    if (!estudioId) return;
     async function carregarProfessores() {
       try {
-        const profs = await comissoesService.listarProfessores();
+        const profs = await comissoesService.listarProfessores(estudioId);
         setProfessores(profs || []);
       } catch {
         showToast.error('Erro ao carregar lista de professores');
       }
     }
     carregarProfessores();
-  }, []);
+  }, [estudioId]);
 
   const handleGerarRepasses = async () => {
     if (!estudioId) {
@@ -703,6 +706,7 @@ export default function Comissoes() {
           professores={professores}
           filtros={filtros}
           setFiltros={setFiltros}
+          estudioId={estudioId}
         />
       )}
 

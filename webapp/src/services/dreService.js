@@ -15,10 +15,11 @@ export const dreService = {
   /**
    * Carrega o DRE completo de um mês/ano.
    *
-   * @param {number} mes  — 0-indexed (igual a Date.getMonth())
-   * @param {number} ano  — 4 dígitos
+   * @param {number} mes        — 0-indexed (igual a Date.getMonth())
+   * @param {number} ano        — 4 dígitos
+   * @param {string} estudioId  — vem do useAuth
    */
-  async obterDRE(mes, ano) {
+  async obterDRE(mes, ano, estudioId) {
     const dataInicio = new Date(ano, mes, 1).toISOString().split('T')[0];
     const dataFim    = new Date(ano, mes + 1, 0).toISOString().split('T')[0];
 
@@ -31,6 +32,7 @@ export const dreService = {
       supabase
         .from('mensalidades')
         .select('id, valor_pago, status, data_vencimento, data_pagamento, alunos(nome_completo), planos(nome)')
+        .eq('estudio_id', estudioId)
         .gte('data_vencimento', dataInicio)
         .lte('data_vencimento', dataFim)
         .order('data_vencimento', { ascending: true }),
@@ -38,6 +40,7 @@ export const dreService = {
       supabase
         .from('despesas')
         .select('id, descricao, categoria, valor, status, data_vencimento, data_pagamento')
+        .eq('estudio_id', estudioId)
         .gte('data_vencimento', dataInicio)
         .lte('data_vencimento', dataFim)
         .order('data_vencimento', { ascending: true }),
@@ -45,12 +48,14 @@ export const dreService = {
       supabase
         .from('repasses_lancamentos')
         .select('id, valor, professor_id, professores(nome), created_at')
+        .eq('estudio_id', estudioId)
         .gte('created_at', `${dataInicio}T00:00:00`)
         .lte('created_at', `${dataFim}T23:59:59`),
 
       supabase
         .from('alunos')
         .select('id', { count: 'exact', head: true })
+        .eq('estudio_id', estudioId)
         .eq('ativo', true)
         .eq('role', 'aluno'),
     ]);
@@ -144,9 +149,10 @@ export const dreService = {
   /**
    * Histórico dos últimos N meses para o gráfico de evolução.
    *
-   * @param {number} meses — quantos meses para trás (padrão: 6)
+   * @param {number} meses      — quantos meses para trás (padrão: 6)
+   * @param {string} estudioId  — vem do useAuth
    */
-  async obterHistorico(meses = 6) {
+  async obterHistorico(meses = 6, estudioId) {
     const agora = new Date();
     const dataLimite = new Date(agora.getFullYear(), agora.getMonth() - meses + 1, 1)
       .toISOString().split('T')[0];
@@ -161,6 +167,7 @@ export const dreService = {
       supabase
         .from('mensalidades')
         .select('valor_pago, data_pagamento')
+        .eq('estudio_id', estudioId)
         .eq('status', 'pago')
         .gte('data_pagamento', dataLimite)
         .lte('data_pagamento', dataFim),
@@ -168,6 +175,7 @@ export const dreService = {
       supabase
         .from('despesas')
         .select('valor, data_pagamento')
+        .eq('estudio_id', estudioId)
         .eq('status', 'pago')
         .gte('data_pagamento', dataLimite)
         .lte('data_pagamento', dataFim),
@@ -175,6 +183,7 @@ export const dreService = {
       supabase
         .from('repasses_lancamentos')
         .select('valor, created_at')
+        .eq('estudio_id', estudioId)
         .gte('created_at', `${dataLimite}T00:00:00`)
         .lte('created_at', `${dataFim}T23:59:59`),
     ]);

@@ -53,10 +53,10 @@ export function useAuth() {
 
       try {
         const { data: membro, error: errMembro } = await supabase
-          .from('estudio_membros')
-          .select('estudio_id, role, referencia_id')
-          .eq('user_id', authId)
-          .single();
+  .from('estudio_membros')
+  .select('estudio_id, role')
+  .eq('user_id', authId)
+  .maybeSingle();
 
         if (errMembro && errMembro.code !== 'PGRST116') {
           console.error('Erro ao buscar estudio_membros:', errMembro);

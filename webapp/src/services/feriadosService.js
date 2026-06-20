@@ -30,10 +30,11 @@ export const feriadosService = {
     }
   },
 
-  async listarFeriadosDoAno(ano) {
+  async listarFeriadosDoAno(ano, estudioId) {
     const { data, error } = await supabase
       .from('feriados')
       .select('*')
+      .eq('estudio_id', estudioId)
       .gte('data', `${ano}-01-01`)
       .lte('data', `${ano}-12-31`)
       .order('data', { ascending: true });

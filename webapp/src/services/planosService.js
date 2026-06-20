@@ -1,10 +1,11 @@
 import { supabase } from '../lib/supabase';
 
 export const planosService = {
-  async listar() {
+  async listar(estudioId) {
     const { data, error } = await supabase
       .from('planos')
       .select('*')
+      .eq('estudio_id', estudioId)
       .order('id', { ascending: true });
 
     if (error) throw error;
@@ -23,7 +24,12 @@ export const planosService = {
 
     if (plano.id) {
       // UPDATE: estudio_id não precisa ser alterado
-      const { data, error } = await supabase.from('planos').update(payload).eq('id', plano.id).select();
+      const { data, error } = await supabase
+        .from('planos')
+        .update(payload)
+        .eq('id', plano.id)
+        .eq('estudio_id', estudioId)
+        .select();
       if (error) throw error;
       return data;
     } else {
@@ -36,8 +42,12 @@ export const planosService = {
     }
   },
 
-  async excluir(id) {
-    const { error } = await supabase.from('planos').delete().eq('id', id);
+  async excluir(id, estudioId) {
+    const { error } = await supabase
+      .from('planos')
+      .delete()
+      .eq('id', id)
+      .eq('estudio_id', estudioId);
     if (error) throw error;
     return true;
   }

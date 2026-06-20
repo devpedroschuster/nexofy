@@ -7,7 +7,7 @@ export function useComissoesProfessor(professorId, mesAno) {
 
   return useQuery({
     queryKey: ['comissoes', estudioId, professorId, mesAno],
-    queryFn: () => comissoesService.buscarDetalhes(professorId, mesAno),
+    queryFn: () => comissoesService.buscarDetalhes(professorId, mesAno, estudioId),
     enabled: !!estudioId && !!professorId && !!mesAno,
     retry: 2,
     staleTime: 1000 * 60 * 2,
@@ -20,7 +20,7 @@ export function useResumoMensal(mesAno) {
 
   return useQuery({
     queryKey: ['resumo-mensal', estudioId, mesAno],
-    queryFn: () => comissoesService.resumoMensal(mesAno),
+    queryFn: () => comissoesService.resumoMensal(mesAno, estudioId),
     enabled: !!estudioId && !!mesAno,
     retry: 2,
     staleTime: 1000 * 60 * 2,

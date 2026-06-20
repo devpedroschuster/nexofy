@@ -12,7 +12,7 @@ export function useFinanceiro(filtros) {
       const inicio = paraUTC(filtros.ano, filtros.mes - 1, 1);
       const fim    = paraUTC(filtros.ano, filtros.mes,     0);
 
-      return await financeiroService.listarMensalidades(inicio, fim);
+      return await financeiroService.listarMensalidades(inicio, fim, estudioId);
     },
     enabled: !!estudioId,
     keepPreviousData: true,

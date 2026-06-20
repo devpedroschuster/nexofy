@@ -1,13 +1,14 @@
 import { supabase } from '../lib/supabase';
 
 export const despesasService = {
-  async listar(mes, ano) {
+  async listar(mes, ano, estudioId) {
     const dataInicio = new Date(ano, mes - 1, 1).toISOString().split('T')[0];
     const dataFim    = new Date(ano, mes, 0).toISOString().split('T')[0];
 
     const { data, error } = await supabase
       .from('despesas')
       .select('*')
+      .eq('estudio_id', estudioId)
       .gte('data_vencimento', dataInicio)
       .lte('data_vencimento', dataFim)
       .order('data_vencimento', { ascending: false });
@@ -40,6 +41,7 @@ export const despesasService = {
     const { data: recorrentes, error: errBusca } = await supabase
       .from('despesas')
       .select('*')
+      .eq('estudio_id', estudioId)
       .gte('data_vencimento', dataInicioAnt)
       .lte('data_vencimento', dataFimAnt)
       .eq('recorrente', true);
@@ -53,6 +55,7 @@ export const despesasService = {
     const { data: existentes } = await supabase
       .from('despesas')
       .select('descricao, categoria')
+      .eq('estudio_id', estudioId)
       .gte('data_vencimento', dataInicioAtual)
       .lte('data_vencimento', dataFimAtual)
       .eq('recorrente', true);
@@ -104,6 +107,7 @@ export const despesasService = {
         .from('despesas')
         .update(payload)
         .eq('id', despesa.id)
+        .eq('estudio_id', estudioId)
         .select()
         .single();
       if (error) throw error;
@@ -119,21 +123,23 @@ export const despesasService = {
     }
   },
 
-  async excluir(id) {
+  async excluir(id, estudioId) {
     const { error } = await supabase
       .from('despesas')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('estudio_id', estudioId);
     if (error) throw error;
     return true;
   },
 
-  async registrarPagamento(id) {
+  async registrarPagamento(id, estudioId) {
     const hoje = new Date().toISOString();
     const { error } = await supabase
       .from('despesas')
       .update({ status: 'pago', data_pagamento: hoje })
-      .eq('id', id);
+      .eq('id', id)
+      .eq('estudio_id', estudioId);
 
     if (error) throw error;
     return true;

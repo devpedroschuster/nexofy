@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { alunosService } from '../services/alunosService';
 import { useEstudio } from '../hooks/useEstudio';
+import { useAuth } from '../hooks/useAuth';
 import { Gift, CalendarDays, Search, PartyPopper, Cake, MessageCircle } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -16,15 +17,17 @@ const MESES = [
 
 export default function Aniversariantes() {
   const { nomeEstudio } = useEstudio();
+  const { estudioId } = useAuth();
   const [alunos, setAlunos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth());
 
   useEffect(() => {
+    if (!estudioId) return;
     async function fetchAniversariantes() {
       try {
-        const data = await alunosService.listarAniversariantes();
+        const data = await alunosService.listarAniversariantes(estudioId);
         setAlunos(data || []);
       } catch (error) {
         console.error('Erro ao buscar aniversariantes', error);
@@ -33,7 +36,7 @@ export default function Aniversariantes() {
       }
     }
     fetchAniversariantes();
-  }, []);
+  }, [estudioId]);
 
   const alunosProcessados = useMemo(() => {
     const hoje = new Date();

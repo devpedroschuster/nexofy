@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase';
 
 export const alunosService = {
-  async listar(filtros = {}, paginacao = {}) {
+  async listar(filtros = {}, paginacao = {}, estudioId) {
     try {
       const { pagina = 1, tamanho = 25 } = paginacao;
       const inicio = (pagina - 1) * tamanho;
@@ -9,7 +9,8 @@ export const alunosService = {
 
       let query = supabase
         .from('alunos')
-        .select('*, planos(nome)', { count: 'exact' });
+        .select('*, planos(nome)', { count: 'exact' })
+        .eq('estudio_id', estudioId);
 
       if (filtros.role && filtros.role !== 'todos')
         query = query.eq('role', filtros.role);
@@ -32,11 +33,12 @@ export const alunosService = {
     }
   },
 
-  async listarAtivos() {
+  async listarAtivos(estudioId) {
     try {
       const { data, error } = await supabase
         .from('alunos')
         .select('id, nome_completo')
+        .eq('estudio_id', estudioId)
         .eq('ativo', true)
         .eq('role', 'aluno')
         .order('nome_completo');
@@ -113,10 +115,11 @@ export const alunosService = {
     }
   },
 
-  async listarAniversariantes() {
+  async listarAniversariantes(estudioId) {
     const { data, error } = await supabase
       .from('alunos')
       .select('id, nome_completo, data_nascimento, telefone, planos(nome)')
+      .eq('estudio_id', estudioId)
       .not('data_nascimento', 'is', null);
 
     if (error) throw error;
@@ -198,11 +201,12 @@ export const alunosService = {
    * Matricula um aluno em um plano de forma atômica via RPC.
    * Função SQL correspondente: matricular_aluno()
    */
-  async matricular(alunoId, planoId, { dataVencimento, modalidades = [] }) {
+  async matricular(alunoId, planoId, { dataVencimento, modalidades = [] }, estudioId) {
     try {
       const { data: plano, error: errPlano } = await supabase
         .from('planos')
         .select('id, nome, preco, duracao_meses')
+        .eq('estudio_id', estudioId)
         .eq('id', planoId)
         .single();
 

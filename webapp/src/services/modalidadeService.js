@@ -1,20 +1,22 @@
 import { supabase } from '../lib/supabase';
 
 export const modalidadeService = {
-  async listar() {
+  async listar(estudioId) {
     const { data, error } = await supabase
       .from('modalidades')
       .select('*, professores (nome)')
+      .eq('estudio_id', estudioId)
       .order('area')
       .order('nome');
     if (error) throw error;
     return data;
   },
 
-  async buscarPerfil(id) {
+  async buscarPerfil(id, estudioId) {
     const { data: horarios } = await supabase
       .from('agenda')
       .select('dia_semana, horario')
+      .eq('estudio_id', estudioId)
       .eq('modalidade_id', id)
       .eq('eh_recorrente', true)
       .order('dia_semana')
@@ -23,6 +25,7 @@ export const modalidadeService = {
     const { data: alunos, error: errAlunos } = await supabase
       .from('alunos')
       .select('id, nome_completo, planos(nome)')
+      .eq('estudio_id', estudioId)
       .eq('ativo', true)
       .contains('modalidades_selecionadas', [id])
       .order('nome_completo');
@@ -45,7 +48,11 @@ export const modalidadeService = {
 
     if (modalidade.id) {
       // UPDATE: estudio_id não precisa ser alterado
-      const { error } = await supabase.from('modalidades').update(payload).eq('id', modalidade.id);
+      const { error } = await supabase
+        .from('modalidades')
+        .update(payload)
+        .eq('id', modalidade.id)
+        .eq('estudio_id', estudioId);
       if (error) throw error;
     } else {
       const { error } = await supabase
@@ -56,8 +63,12 @@ export const modalidadeService = {
     return true;
   },
 
-  async excluir(id) {
-    const { error } = await supabase.from('modalidades').delete().eq('id', id);
+  async excluir(id, estudioId) {
+    const { error } = await supabase
+      .from('modalidades')
+      .delete()
+      .eq('id', id)
+      .eq('estudio_id', estudioId);
     if (error) throw error;
     return true;
   }
