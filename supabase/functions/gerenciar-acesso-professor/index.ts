@@ -6,13 +6,55 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const SENHA_PADRAO = 'Teste123';
+// SENHA_PADRAO removida — professores nascem sem senha e recebem magic link.
 
 function resp(body: object, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+/**
+ * Cria um auth user sem senha e envia magic link de primeiro acesso.
+ * Retorna o auth_id do usuário criado.
+ *
+ * Uso: chamado nas ações 'criar' e 'trocar_email' quando o e-mail não existe.
+ */
+async function criarUsuarioSemSenha(
+  admin: ReturnType<typeof createClient>,
+  emailNormalizado: string,
+  nome: string,
+): Promise<string> {
+  // 1. Cria o usuário sem password — impossibilita login com senha até ele definir uma.
+  const { data, error } = await admin.auth.admin.createUser({
+    email: emailNormalizado,
+    email_confirm: true,          // pula confirmação — acesso via magic link
+    user_metadata: { nome, role: 'professor' },
+    // Sem campo `password` → conta nasce bloqueada para signInWithPassword
+  });
+  if (error) throw error;
+
+  const novoAuthId = data.user.id;
+
+  // 2. Envia magic link de primeiro acesso.
+  //    O professor clica, é autenticado automaticamente e cai no fluxo
+  //    de /redefinir-senha (detectado via primeiro_acesso = true na tabela professores).
+  const { error: linkError } = await admin.auth.admin.generateLink({
+    type: 'magiclink',
+    email: emailNormalizado,
+  });
+
+  // Não é fatal — o admin pode reenviar o convite manualmente depois.
+  if (linkError) {
+    console.warn(
+      `[gerenciar-acesso-professor] Falha ao gerar magic link para ${emailNormalizado}: ${linkError.message}`,
+    );
+  } else {
+    console.log(`[gerenciar-acesso-professor] Magic link enviado para ${emailNormalizado}`);
+  }
+
+  return novoAuthId;
 }
 
 serve(async (req: Request) => {
@@ -50,19 +92,12 @@ serve(async (req: Request) => {
       let reutilizado = false;
 
       if (existente) {
-        // Usuário já existe: apenas vincula, não cria nem reseta senha
+        // Usuário já existe: apenas vincula, não cria nem envia link
         novoAuthId = existente.id;
         reutilizado = true;
       } else {
-        // Cria usuário com senha padrão + primeiro_acesso via user_metadata
-        const { data, error } = await admin.auth.admin.createUser({
-          email: emailNormalizado,
-          password: SENHA_PADRAO,
-          email_confirm: true,           // pula confirmação por email
-          user_metadata: { nome, role: 'professor' },
-        });
-        if (error) throw error;
-        novoAuthId = data.user.id;
+        // Cria sem senha + envia magic link de primeiro acesso
+        novoAuthId = await criarUsuarioSemSenha(admin, emailNormalizado, nome);
       }
 
       // Atualiza professores: auth_id, email e primeiro_acesso = true
@@ -166,14 +201,8 @@ serve(async (req: Request) => {
         novoAuthId = existente.id;
         reutilizado = true;
       } else {
-        const { data, error } = await admin.auth.admin.createUser({
-          email: emailNormalizado,
-          password: SENHA_PADRAO,
-          email_confirm: true,
-          user_metadata: { nome, role: 'professor' },
-        });
-        if (error) throw error;
-        novoAuthId = data.user.id;
+        // Cria sem senha + envia magic link de primeiro acesso
+        novoAuthId = await criarUsuarioSemSenha(admin, emailNormalizado, nome);
       }
 
       const { error: upErr } = await admin

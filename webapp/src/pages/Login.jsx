@@ -13,7 +13,7 @@
 //   3. Recuperar senha → modal inline → reset email via Supabase
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, KeyRound, X, Info } from 'lucide-react';
@@ -33,6 +33,40 @@ export default function Login() {
   const [modalAberto, setModalAberto] = useState(false);
 
   const navigate = useNavigate();
+
+  /* ── Captura sessão de magic link (professor novo) ──────────────────────── */
+/* ── Captura sessão de magic link (professor novo) ──────────────────────── */
+useEffect(() => {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    async (event, session) => {
+      // Só interessa o SIGNED_IN vindo de magic link (OTP).
+      // Login com senha já é tratado inteiramente no handleLogin.
+      if (event !== 'SIGNED_IN' || !session) return;
+      if (session.user.app_metadata?.provider !== 'email') return;
+      if (!session.user.confirmed_at) return; // ainda não era magic link confirmado
+
+      // Distingue magic link de signInWithPassword:
+      // magic link popula `last_sign_in_at` via OTP e não tem `amr` com 'password'
+      const amr = session.user.amr ?? session.amr;
+      const veioDeSenha = Array.isArray(amr) && amr.some(m => m.method === 'password');
+      if (veioDeSenha) return;
+
+      const { data: profData } = await supabase
+        .from('professores')
+        .select('primeiro_acesso, nome')
+        .eq('auth_id', session.user.id)
+        .maybeSingle();
+
+      if (profData?.primeiro_acesso) {
+        navigate('/redefinir-senha', {
+          state: { primeiroAcesso: true, nome: (profData.nome || '').split(' ')[0] },
+        });
+      }
+    }
+  );
+
+  return () => subscription.unsubscribe();
+}, []);
 
   /* ── Login ──────────────────────────────────────────────────────────────── */
   async function handleLogin(e) {

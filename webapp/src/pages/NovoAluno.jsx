@@ -601,7 +601,7 @@ const nomeEstudio = estudio?.nome;
     const texto =
       `Olá ${dadosCriados.nome}!\nSeu cadastro no ${nomeEstudio} foi criado.\n\n` +
       `Acesse: ${window.location.origin}\nLogin: ${dadosCriados.email}\n` +
-      `Senha Provisória: Teste123\n\nO sistema pedirá para você criar uma nova senha no primeiro acesso.`;
+      `Um e-mail de acesso foi enviado para ${dadosCriados.email}.\nO professor deve clicar no link para definir sua senha.`;
     navigator.clipboard.writeText(texto);
     setCopiado(true);
     setTimeout(() => setCopiado(false), 2000);

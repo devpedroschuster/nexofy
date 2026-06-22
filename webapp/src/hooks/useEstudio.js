@@ -10,18 +10,20 @@ import { supabase } from '../lib/supabase';
  *   estudio.nome // → "Espaço Iluminus"
  *   estudio.id   // → uuid do estúdio
  */
-export function useEstudio() {
+export function useEstudio(estudioId) {
   return useQuery({
-    queryKey: ['estudio-atual'],
+    queryKey: ['estudio', estudioId],
     queryFn: async () => {
+      if (!estudioId) return null;
       const { data, error } = await supabase
         .from('estudios')
         .select('*')
+        .eq('id', estudioId)
         .single();
-
       if (error) throw error;
       return data;
     },
+    enabled: !!estudioId,
     staleTime: 1000 * 60 * 10,
   });
 }
