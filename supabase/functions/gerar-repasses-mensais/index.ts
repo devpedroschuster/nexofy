@@ -51,6 +51,7 @@ interface Aluno {
 interface Plano {
   id: string;
   is_plano_livre: boolean;
+  preco: number | null;
 }
 
 interface ResumoProf {
@@ -107,12 +108,65 @@ serve(async (req: Request) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // ── AUTENTICAÇÃO E AUTORIZAÇÃO ───────────────────────────────────────────
+    // Endpoint em lote: sem este guard, qualquer chamador poderia gerar repasses
+    // financeiros para todos os professores/alunos de QUALQUER estúdio informado.
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return response({ error: 'Cabeçalho Authorization ausente ou inválido.' }, 401);
+    }
+
+    const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const { data: { user: caller }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !caller) {
+      return response({ error: 'Token inválido ou expirado.' }, 401);
+    }
+
+    // super_admin tem acesso global (independente de estudio_id); admin só no seu próprio estúdio.
+    const { data: membrosCaller, error: membroErr } = await supabase
+      .from('estudio_membros')
+      .select('role, estudio_id')
+      .eq('user_id', caller.id);
+
+    if (membroErr) {
+      console.error('[gerar-repasses-mensais] Erro ao verificar perfil do caller:', membroErr);
+      return response({ error: 'Erro ao verificar permissões do usuário.' }, 500);
+    }
+
+    const ehSuperAdmin = (membrosCaller ?? []).some((m) => m.role === 'super_admin');
+    const ehAdminDoEstudio = (membrosCaller ?? []).some(
+      (m) => m.role === 'admin' && m.estudio_id === estudioId,
+    );
+
+    if (!ehSuperAdmin && !ehAdminDoEstudio) {
+      return response({ error: 'Acesso negado. Apenas admins do estúdio podem gerar repasses.' }, 403);
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     const mesStr = String(mes).padStart(2, '0');
     const dataReferencia = `${ano}-${mesStr}-01`;
 
     const ultimoDia = new Date(ano, mes, 0).getDate();
     const inicioPeriodo = `${ano}-${mesStr}-01`;
     const fimPeriodo = `${ano}-${mesStr}-${String(ultimoDia).padStart(2, '0')}`;
+
+    // ── ATOMICIDADE ───────────────────────────────────────────────────────────
+    // REP-ATOMIC: a checagem "já existem" (passo 1) e o insert final (passo 9)
+    // não são atômicos entre si — cada chamada via supabase-js/PostgREST abre sua
+    // própria conexão/transação, então um pg_advisory_xact_lock adquirido aqui não
+    // sobreviveria até o insert do passo 9 (seria liberado ao fim desta query).
+    // A defesa real precisa estar no banco: aplique a migration abaixo (rede de
+    // segurança que sobrevive a chamadas concorrentes de verdade) e trate a
+    // violação de unicidade no insert do passo 9 como "já gerado" em vez de erro 500:
+    //
+    //   CREATE UNIQUE INDEX repasses_lote_unico
+    //     ON repasses_lancamentos (estudio_id, data_referencia, professor_id, modalidade, tipo_aula)
+    //     WHERE mensalidade_id IS NULL;
+    //
+    // ────────────────────────────────────────────────────────────────────────
 
     // ── 1. Previne dupla geração no mesmo mês (para este estúdio) ───────────
     const { data: jaExistem } = await supabase
@@ -193,15 +247,18 @@ serve(async (req: Request) => {
       mapaProfs.set(p.id, p.nome);
     }
 
-    // ── 5. Planos — identifica quais são "plano livre" (deste estúdio) ──────
+    // ── 5. Planos — is_plano_livre + preço, já em bulk (deste estúdio) ──────
+    // REP-N+1: preço buscado aqui junto, evitando 1 query por aluno no loop abaixo.
     const { data: planosRaw } = await supabase
       .from('planos')
-      .select('id, is_plano_livre')
+      .select('id, is_plano_livre, preco')
       .eq('estudio_id', estudioId);      // ← isolamento
 
     const mapaPlanos = new Map<string, boolean>();
+    const mapaPrecos = new Map<string, number>();
     for (const p of (planosRaw ?? []) as Plano[]) {
       mapaPlanos.set(p.id, p.is_plano_livre === true);
+      if (p.preco != null) mapaPrecos.set(p.id, Number(p.preco));
     }
 
     // ── 6. Alunos ativos com modalidades definidas (deste estúdio) ──────────
@@ -277,19 +334,14 @@ serve(async (req: Request) => {
           continue;
         }
 
-        const { data: plano } = await supabase
-          .from('planos')
-          .select('preco')
-          .eq('estudio_id', estudioId)   // ← isolamento
-          .eq('id', aluno.plano_id)
-          .single();
+        const precoPlano = aluno.plano_id ? mapaPrecos.get(aluno.plano_id) : undefined;
 
-        if (!plano?.preco) {
+        if (!precoPlano) {
           avisos.push(`"${aluno.nome_completo}" (plano livre): plano sem preço definido — sem repasse.`);
           continue;
         }
 
-        const valorTotal = Number(plano.preco);
+        const valorTotal = precoPlano;
         const pctProf = Number(cfg.plano_livre_pct_prof) / 100;
         const parteProfs = valorTotal * pctProf;
         const n = modsLivreValidas.length;
@@ -361,7 +413,18 @@ serve(async (req: Request) => {
       .from('repasses_lancamentos')
       .insert(itens);
 
-    if (errInsert) throw errInsert;
+    if (errInsert) {
+      // 23505 = unique_violation. Com o índice único parcial (ver nota acima),
+      // uma corrida entre duas chamadas concorrentes cai aqui em vez de duplicar
+      // repasses — tratamos como "já gerado por outra chamada", não como falha.
+      if (errInsert.code === '23505') {
+        return response({
+          error: `Repasses de ${mesStr}/${ano} já foram gerados (corrida detectada). Exclua-os antes de regerar.`,
+          jaGerados: true,
+        }, 409);
+      }
+      throw errInsert;
+    }
 
     // ── 10. Resumo por professor ────────────────────────────────────────────
     const resumoMap = new Map<string, ResumoProf>();

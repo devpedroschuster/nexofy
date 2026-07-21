@@ -62,9 +62,24 @@ serve(async (req: Request) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
   const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const anonKey     = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
   const admin       = createClient(supabaseUrl, serviceKey);
 
   try {
+    // ── AUTENTICAÇÃO ────────────────────────────────────────────────────────
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return resp({ error: 'Não autorizado.' }, 401);
+    }
+
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !user) {
+      return resp({ error: 'Não autorizado.' }, 401);
+    }
+
     const { acao, professor_id, auth_id, email, nome, estudio_id } = await req.json();
 
     // ── ISOLAMENTO MULTI-TENANT ────────────────────────────────────────────
@@ -75,6 +90,21 @@ serve(async (req: Request) => {
       return resp({ error: 'estudio_id é obrigatório no payload.' }, 400);
     }
     // ──────────────────────────────────────────────────────────────────────
+
+    // ── AUTORIZAÇÃO ──────────────────────────────────────────────────────────
+    // Exige que o usuário autenticado seja admin/super_admin do estúdio-alvo,
+    // caso contrário qualquer usuário autenticado poderia gerenciar acesso de
+    // professores em estúdios de terceiros (IDOR).
+    const { data: membro, error: membroErr } = await admin
+      .from('estudio_membros')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('estudio_id', estudio_id)
+      .maybeSingle();
+    if (membroErr) throw membroErr;
+    if (!membro || !['admin', 'super_admin'].includes(membro.role)) {
+      return resp({ error: 'Acesso negado.' }, 403);
+    }
 
     // ── CRIAR ────────────────────────────────────────────────────────────────
     if (acao === 'criar') {
@@ -172,71 +202,89 @@ serve(async (req: Request) => {
     }
 
     // ── TROCAR EMAIL ──────────────────────────────────────────────────────────
-    if (acao === 'trocar_email') {
-      if (!auth_id || !email || !professor_id) {
-        return resp({ error: 'auth_id, email e professor_id são obrigatórios' }, 400);
-      }
+if (acao === 'trocar_email') {
+  if (!auth_id || !email || !professor_id) {
+    return resp({ error: 'auth_id, email e professor_id são obrigatórios' }, 400);
+  }
 
-      const { data: aluno } = await admin
-        .from('alunos')
-        .select('id')
-        .eq('auth_id', auth_id)
-        .maybeSingle();
+  const { data: aluno } = await admin
+    .from('alunos')
+    .select('id')
+    .eq('auth_id', auth_id)
+    .maybeSingle();
 
-      if (!aluno) {
-        const { error: delErr } = await admin.auth.admin.deleteUser(auth_id);
-        if (delErr && !delErr.message.includes('User not found')) throw delErr;
-      }
+  const { data: outrosVinculos } = await admin
+    .from('estudio_membros')
+    .select('id')
+    .eq('user_id', auth_id)
+    .neq('estudio_id', estudio_id)
+    .limit(1);
 
-      const emailNormalizado = email.trim().toLowerCase();
-      const { data: { user: existente }, error: getUserErr2 } =
-   await admin.auth.admin.getUserByEmail(emailNormalizado);
- if (getUserErr2 && getUserErr2.status !== 404) throw getUserErr2;
+  const podeDeletarAuthAntigo = !aluno && (!outrosVinculos || outrosVinculos.length === 0);
 
-      let novoAuthId: string;
-      let reutilizado = false;
+  const emailNormalizado = email.trim().toLowerCase();
+  const { data: { user: existente }, error: getUserErr2 } =
+    await admin.auth.admin.getUserByEmail(emailNormalizado);
+  if (getUserErr2 && getUserErr2.status !== 404) throw getUserErr2;
 
-      if (existente) {
-        novoAuthId = existente.id;
-        reutilizado = true;
-      } else {
-        // Cria sem senha + envia magic link de primeiro acesso
-        novoAuthId = await criarUsuarioSemSenha(admin, emailNormalizado, nome);
-      }
+  let novoAuthId: string;
+  let reutilizado = false;
 
-      const { error: upErr } = await admin
-        .from('professores')
-        .update({
-          auth_id: novoAuthId,
-          email: emailNormalizado,
-          primeiro_acesso: !reutilizado,
-        })
-        .eq('id', professor_id)
-        .eq('estudio_id', estudio_id);  // ← isolamento
-      if (upErr) throw upErr;
+  if (existente) {
+    novoAuthId = existente.id;
+    reutilizado = true;
+  } else {
+    // Cria sem senha + envia magic link de primeiro acesso
+    novoAuthId = await criarUsuarioSemSenha(admin, emailNormalizado, nome);
+  }
 
-      // Atualiza o vínculo na estudio_membros com o novo auth_id
-      // Remove o vínculo antigo e insere o novo (upsert não funciona bem para troca de user_id)
-      await admin
-        .from('estudio_membros')
-        .delete()
-        .eq('estudio_id', estudio_id)
-        .eq('user_id', auth_id);         // remove vínculo do auth_id antigo
+  const { error: upErr } = await admin
+    .from('professores')
+    .update({
+      auth_id: novoAuthId,
+      email: emailNormalizado,
+      primeiro_acesso: !reutilizado,
+    })
+    .eq('id', professor_id)
+    .eq('estudio_id', estudio_id);  // ← isolamento
+  if (upErr) throw upErr;
 
-      const { error: memErr } = await admin
-        .from('estudio_membros')
-        .upsert(
-          {
-            estudio_id,
-            user_id: novoAuthId,
-            role: 'professor',
-          },
-          { onConflict: 'estudio_id,user_id' }
-        );
-      if (memErr) throw memErr;
+  // Atualiza o vínculo na estudio_membros com o novo auth_id
+  // Remove o vínculo antigo e insere o novo (upsert não funciona bem para troca de user_id)
+  await admin
+    .from('estudio_membros')
+    .delete()
+    .eq('estudio_id', estudio_id)
+    .eq('user_id', auth_id);         // remove vínculo do auth_id antigo
 
-      return resp({ auth_id: novoAuthId, reutilizado });
+  const { error: memErr } = await admin
+    .from('estudio_membros')
+    .upsert(
+      {
+        estudio_id,
+        user_id: novoAuthId,
+        role: 'professor',
+      },
+      { onConflict: 'estudio_id,user_id' }
+    );
+  if (memErr) throw memErr;
+
+  // Só agora, com tudo confirmado, deleta a conta auth antiga —
+  // e só se ela não tiver outros vínculos (aluno ou professor em outro estúdio).
+  let authAntigoDeletado = false;
+  if (podeDeletarAuthAntigo && novoAuthId !== auth_id) {
+    const { error: delErr } = await admin.auth.admin.deleteUser(auth_id);
+    if (delErr && !delErr.message.includes('User not found')) {
+      console.warn(
+        `[gerenciar-acesso-professor] Falha ao deletar auth antigo ${auth_id} após troca de e-mail: ${delErr.message}`,
+      );
+    } else {
+      authAntigoDeletado = true;
     }
+  }
+
+  return resp({ auth_id: novoAuthId, reutilizado, auth_antigo_deletado: authAntigoDeletado });
+}
 
     return resp({ error: `Ação desconhecida: ${acao}` }, 400);
 

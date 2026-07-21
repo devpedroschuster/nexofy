@@ -60,18 +60,21 @@ serve(async (req: Request) => {
 
   // Verifica role super_admin na tabela estudio_membros
   // (não confia apenas no user_metadata)
-  const { data: callerMembro, error: profileErr } = await admin
+  // Busca TODAS as linhas do caller: .maybeSingle() lançava erro se o usuário
+  // tivesse mais de um vínculo em estudio_membros (ex.: super_admin com um
+  // vínculo extra em um estúdio específico), bloqueando super_admins legítimos.
+  const { data: membrosCaller, error: profileErr } = await admin
     .from('estudio_membros')
     .select('role')
-    .eq('user_id', caller.id)
-    .maybeSingle();
+    .eq('user_id', caller.id);
 
   if (profileErr) {
     console.error('[criar-estudio] Erro ao verificar perfil do caller:', profileErr);
     return resp({ error: 'Erro ao verificar permissões do usuário.' }, 500);
   }
 
-  if (!callerMembro || callerMembro.role !== 'super_admin') {
+  const isSuperAdmin = (membrosCaller ?? []).some((m) => m.role === 'super_admin');
+  if (!isSuperAdmin) {
     return resp({ error: 'Acesso negado. Apenas super_admins podem criar estúdios.' }, 403);
   }
 

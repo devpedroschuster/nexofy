@@ -10,7 +10,8 @@
 //   - Expõe useImpersonation() para qualquer componente consumir
 //
 // DECISÃO DE SEGURANÇA — sem persistência entre sessões:
-//   O override vive apenas na transação Postgres atual (is_local=true no set_config).
+//   O override é persistido em impersonation_sessions (linked a auth.uid()), com TTL de 4h.
+//   Não depende de estado de conexão Postgres — seguro sob qualquer modo de pooling.
 //   O frontend reflete isso: ao recarregar a página o estado em memória é perdido
 //   e o override no servidor já expirou. Não há risco de "override esquecido".
 //

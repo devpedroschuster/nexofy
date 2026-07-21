@@ -101,6 +101,46 @@ serve(async (req: Request) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // ── AUTENTICAÇÃO E AUTORIZAÇÃO ───────────────────────────────────────────
+    // Endpoint de leitura, mas devolve receita/comissões detalhadas por professor.
+    // Sem este guard, qualquer chamador com um JWT válido de QUALQUER estúdio (ou
+    // sem JWT, se verify_jwt estiver desligado) poderia enumerar estudioIds e
+    // extrair a folha de comissões de estúdios concorrentes.
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return response({ error: 'Cabeçalho Authorization ausente ou inválido.' }, 401);
+    }
+
+    const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const { data: { user: caller }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !caller) {
+      return response({ error: 'Token inválido ou expirado.' }, 401);
+    }
+
+    // super_admin tem acesso global (independente de estudio_id); admin só no seu próprio estúdio.
+    const { data: membrosCaller, error: membroErr } = await supabase
+      .from('estudio_membros')
+      .select('role, estudio_id')
+      .eq('user_id', caller.id);
+
+    if (membroErr) {
+      console.error('[preview-repasses-mensais] Erro ao verificar perfil do caller:', membroErr);
+      return response({ error: 'Erro ao verificar permissões do usuário.' }, 500);
+    }
+
+    const ehSuperAdmin = (membrosCaller ?? []).some((m) => m.role === 'super_admin');
+    const ehAdminDoEstudio = (membrosCaller ?? []).some(
+      (m) => m.role === 'admin' && m.estudio_id === estudioId,
+    );
+
+    if (!ehSuperAdmin && !ehAdminDoEstudio) {
+      return response({ error: 'Acesso negado. Apenas admins do estúdio podem ver o preview de repasses.' }, 403);
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     const mesStr = String(mes).padStart(2, '0');
     const dataReferencia = `${ano}-${mesStr}-01`;
     const ultimoDia = new Date(ano, mes, 0).getDate();

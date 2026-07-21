@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 
 import { professoresService } from '../services/professoresService';
 import { useDebounce } from '../hooks/useDebounce';
+import { useAuth } from '../hooks/useAuth';
 
 import { showToast } from '../components/shared/Toast';
 
@@ -16,6 +17,8 @@ import Skeleton from '../components/ui/Skeleton';
 import EmptyState from '../components/ui/EmptyState';
 
 export default function Professores() {
+  const { estudioId } = useAuth();
+
   const [professores, setProfessores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
@@ -39,7 +42,7 @@ export default function Professores() {
   async function carregarProfessores() {
     setLoading(true);
     try {
-      const data = await professoresService.listar(buscaDebounced);
+      const data = await professoresService.listar(buscaDebounced, estudioId);
       setProfessores(data);
     } catch {
       showToast.error('Erro ao carregar lista.');
@@ -97,14 +100,14 @@ export default function Professores() {
         // Caso 1 — novo cadastro com email: chama Edge Function e ela já salva auth_id
         const { data: funcData, error: funcError } = await supabase.functions.invoke(
           'gerenciar-acesso-professor',
-          { body: { acao: 'criar', professor_id: null, email: emailNovo, nome: formProfessor.nome } },
+          { body: { acao: 'criar', professor_id: null, email: emailNovo, nome: formProfessor.nome, estudio_id: estudioId } },
         );
         if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
         if (funcData?.error) throw new Error(funcData.error);
 
         // Para novo cadastro a função não tem professor_id ainda — salvamos sem auth_id
         // e atualizamos logo após ter o id retornado pelo insert
-        const professorSalvo = await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id });
+        const professorSalvo = await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id }, estudioId);
         // A função foi chamada sem professor_id; corrige agora
         await supabase.from('professores').update({ auth_id: funcData.auth_id }).eq('id', professorSalvo.id);
         toastMsg = funcData.reutilizado
@@ -115,13 +118,13 @@ export default function Professores() {
         // Caso 2 — removeu o email: exclui acesso
         const { data: funcData, error: funcError } = await supabase.functions.invoke(
           'gerenciar-acesso-professor',
-          { body: { acao: 'remover', professor_id: formProfessor.id, auth_id: authIdAtual } },
+          { body: { acao: 'remover', professor_id: formProfessor.id, auth_id: authIdAtual, estudio_id: estudioId } },
         );
         if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
         if (funcData?.error) throw new Error(funcData.error);
 
         // Salva o restante dos campos (email e auth_id já foram limpos pela função)
-        await professoresService.salvar({ ...formProfessor, email: null, auth_id: null });
+        await professoresService.salvar({ ...formProfessor, email: null, auth_id: null }, estudioId);
         toastMsg = funcData.user_deletado
           ? 'E-mail removido e acesso excluído.'
           : 'E-mail removido. Acesso mantido pois pertence a um aluno.';
@@ -130,31 +133,36 @@ export default function Professores() {
         // Caso 3 — trocou o email: deleta antigo, cria novo
         const { data: funcData, error: funcError } = await supabase.functions.invoke(
           'gerenciar-acesso-professor',
-          { body: { acao: 'trocar_email', professor_id: formProfessor.id, auth_id: authIdAtual, email: emailNovo, nome: formProfessor.nome } },
+          { body: { acao: 'trocar_email', professor_id: formProfessor.id, auth_id: authIdAtual, email: emailNovo, nome: formProfessor.nome, estudio_id: estudioId } },
         );
         if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
         if (funcData?.error) throw new Error(funcData.error);
 
-        await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id });
-        toastMsg = 'E-mail atualizado e novo acesso criado!';
+        await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id }, estudioId);
+
+        toastMsg = funcData.reutilizado
+          ? 'E-mail atualizado e vinculado a um acesso existente!'
+          : funcData.auth_antigo_deletado
+            ? 'E-mail atualizado e novo acesso criado!'
+            : 'E-mail atualizado e novo acesso criado. O acesso antigo continua ativo (pertence a outro vínculo) e pode ser removido depois, se necessário.';
 
       } else if (!isNovoCadastro && !tinhaAcesso && temEmailNovo) {
         // Caso 4 — não tinha acesso, adicionou email: cria acesso
         const { data: funcData, error: funcError } = await supabase.functions.invoke(
           'gerenciar-acesso-professor',
-          { body: { acao: 'criar', professor_id: formProfessor.id, email: emailNovo, nome: formProfessor.nome } },
+          { body: { acao: 'criar', professor_id: formProfessor.id, email: emailNovo, nome: formProfessor.nome, estudio_id: estudioId } },
         );
         if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
         if (funcData?.error) throw new Error(funcData.error);
 
-        await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id });
+         await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id }, estudioId);
         toastMsg = funcData.reutilizado
           ? 'Professor vinculado ao acesso existente!'
           : 'Acesso criado e professor atualizado!';
 
       } else {
         // Casos 5 e 6 — sem mudança de acesso, salva só os dados
-        await professoresService.salvar({ ...formProfessor, email: emailNovo || null });
+        await professoresService.salvar({ ...formProfessor, email: emailNovo || null }, estudioId);
       }
 
       showToast.success(toastMsg);
@@ -169,7 +177,7 @@ export default function Professores() {
 
   async function alternarStatus() {
     try {
-      await professoresService.alternarStatus(profSelecionado.id, !profSelecionado.ativo);
+      await professoresService.alternarStatus(profSelecionado.id, !profSelecionado.ativo, estudioId);
       showToast.success(profSelecionado.ativo ? 'Professor desativado.' : 'Professor reativado!');
       modalStatus.fechar();
       carregarProfessores();

@@ -4,51 +4,40 @@
 // Todas as queries aqui são cross-tenant — leem de TODOS os estúdios.
 // O RLS deve permitir isso apenas para usuários com role 'super_admin'.
 //
-// NOTA: as queries de contagem (alunos, professores) usam `.select('*', { count: 'exact', head: true })`
-// com filtros por estudio_id para evitar carregar linhas desnecessárias.
+// NOTA: listarEstudios e metricasGlobais usam RPCs com agregação no banco
+// (receita_total_paga, listar_estudios_admin) em vez de somar/contar no
+// client, evitando carregar tabelas inteiras em memória e o truncamento
+// silencioso imposto pelo max_rows (1000) do PostgREST.
 
 import { supabase } from '../lib/supabase';
 
 // ── LISTA DE ESTÚDIOS ────────────────────────────────────────────────────────
 
+const DEFAULT_PAGE_SIZE = 50;
+
 /**
- * Retorna todos os estúdios com contagens de alunos e professores.
- * Cada item: { id, nome, slug, whatsapp, instagram, criado_em, status,
- *              total_alunos, total_professores }
+ * Retorna uma página de estúdios com contagens de alunos e professores,
+ * agregadas no banco via RPC (sem N+1, sem carregar tudo em memória).
+ * A busca é feita no servidor (nome/slug) para continuar funcionando
+ * corretamente junto com a paginação.
+ *
+ * @param {{ page?: number, pageSize?: number, busca?: string }} opts  page é 0-based.
+ * @returns {Promise<{ estudios: Array, totalCount: number }>}
  */
-async function listarEstudios() {
-  // 1. Busca todos os estúdios
-  const { data: estudios, error } = await supabase
-    .from('estudios')
-    .select('id, nome, slug, whatsapp, instagram, criado_em, status')
-    .order('criado_em', { ascending: false });
+async function listarEstudios({ page = 0, pageSize = DEFAULT_PAGE_SIZE, busca = '' } = {}) {
+  const { data, error } = await supabase.rpc('listar_estudios_admin', {
+    p_limit: pageSize,
+    p_offset: page * pageSize,
+    p_busca: busca?.trim() || null,
+  });
 
   if (error) throw error;
-  if (!estudios?.length) return [];
+  if (!data?.length) return { estudios: [], totalCount: 0 };
 
-  // 2. Para cada estúdio, busca contagens em paralelo
-  const comContagens = await Promise.all(
-    estudios.map(async (e) => {
-      const [{ count: total_alunos }, { count: total_professores }] = await Promise.all([
-        supabase
-          .from('alunos')
-          .select('*', { count: 'exact', head: true })
-          .eq('estudio_id', e.id),
-        supabase
-          .from('professores')
-          .select('*', { count: 'exact', head: true })
-          .eq('estudio_id', e.id),
-      ]);
+  const totalCount = Number(data[0].total_count ?? 0);
+  const estudios = data.map(({ total_count, ...e }) => e);
 
-      return {
-        ...e,
-        total_alunos:      total_alunos      ?? 0,
-        total_professores: total_professores ?? 0,
-      };
-    })
-  );
-
-  return comContagens;
+  return { estudios, totalCount };
 }
 
 // ── MÉTRICAS GLOBAIS ─────────────────────────────────────────────────────────
@@ -59,27 +48,23 @@ async function listarEstudios() {
  */
 async function metricasGlobais() {
   const [
-    { count: totalEstudios },
-    { count: totalAlunos },
-    { data: receita },
+    { count: totalEstudios, error: errEstudios },
+    { count: totalAlunos, error: errAlunos },
+    { data: receitaTotal, error: errReceita },
   ] = await Promise.all([
     supabase.from('estudios').select('*', { count: 'exact', head: true }),
     supabase.from('alunos').select('*', { count: 'exact', head: true }),
-    supabase
-      .from('mensalidades')
-      .select('valor_pago')
-      .eq('status', 'pago'),
+    supabase.rpc('receita_total_paga'),
   ]);
 
-  const receitaTotal = (receita ?? []).reduce(
-    (acc, m) => acc + Number(m.valor_pago ?? 0),
-    0
-  );
+  if (errEstudios) throw errEstudios;
+  if (errAlunos) throw errAlunos;
+  if (errReceita) throw errReceita;
 
   return {
     totalEstudios: totalEstudios ?? 0,
     totalAlunos:   totalAlunos   ?? 0,
-    receitaTotal,
+    receitaTotal:  Number(receitaTotal ?? 0),
   };
 }
 
@@ -113,6 +98,20 @@ async function criarEstudio({ nome, slug, adminEmail, adminNome, whatsapp, insta
 
   return data;
 }
+
+// ── Exemplo de uso no hook (TabelaEstudios.jsx) ──────────────────────────────
+//
+// const { data, isLoading } = useQuery({
+//   queryKey: ['super-admin', 'estudios', busca, pagina],
+//   queryFn: () => superAdminService.listarEstudios({ page: pagina, busca }),
+//   staleTime: 1000 * 60,
+//   keepPreviousData: true,
+// });
+// const estudios   = data?.estudios ?? [];
+// const totalCount = data?.totalCount ?? 0;
+//
+// A filtragem client-side com `estudios.filter(...)` deve ser removida —
+// a busca agora acontece no servidor via p_busca.
 
 export const superAdminService = {
   listarEstudios,

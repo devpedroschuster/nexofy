@@ -450,14 +450,15 @@ function response(body: object, status = 200): Response {
 
 // REP-07: distribui `total` em centavos exatos entre `n` parcelas.
 function distribuirCentavos(total: number, n: number): number[] {
-  const base = Math.floor((total / n) * 100) / 100;
-  const parcelas = Array(n).fill(base);
-  const restoCentavos = Math.round((total - base * n) * 100);
+  const totalCentavos = Math.round(total * 100);
+  const baseCentavos = Math.floor(totalCentavos / n);
+  const parcelasCentavos = Array(n).fill(baseCentavos);
+  const restoCentavos = totalCentavos - baseCentavos * n;
+
   for (let i = 0; i < restoCentavos; i++) {
-    parcelas[n - 1 - i] += 0.01;
-    parcelas[n - 1 - i] = Math.round(parcelas[n - 1 - i] * 100) / 100;
+    parcelasCentavos[n - 1 - i] += 1;
   }
-  return parcelas;
+  return parcelasCentavos.map(c => c / 100);
 }
 
 // REP-01: interface expandida com campos de avulsa e experimental
@@ -507,7 +508,38 @@ serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const anonKey     = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // ── AUTENTICAÇÃO ────────────────────────────────────────────────────────
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return response({ error: 'Não autorizado.' }, 401);
+    }
+
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !user) {
+      return response({ error: 'Não autorizado.' }, 401);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── AUTORIZAÇÃO ──────────────────────────────────────────────────────────
+    // Só admin/super_admin do estúdio-alvo pode gerar/regerar repasses.
+    // Sem isso, qualquer usuário autenticado (professor, aluno) poderia apagar
+    // e recriar lançamentos financeiros de outro estúdio.
+    const { data: membro, error: membroErr } = await supabase
+      .from('estudio_membros')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('estudio_id', estudioId)
+      .maybeSingle();
+    if (membroErr) throw membroErr;
+    if (!membro || !['admin', 'super_admin'].includes(membro.role)) {
+      return response({ error: 'Acesso negado.' }, 403);
+    }
 
     // ── 1. Busca a mensalidade — confirma que pertence a este estúdio ────────
     const { data: mens, error: errMens } = await supabase
@@ -538,13 +570,6 @@ serve(async (req: Request) => {
     if (errConfig || !config) throw new Error('Configurações de repasse não encontradas.');
     const cfg = config as ConfigRepasse;
 
-    // ── 3. Idempotência: remove repasses anteriores desta mensalidade ────────
-    await supabase
-      .from('repasses_lancamentos')
-      .delete()
-      .eq('mensalidade_id', mensalidadeId)
-      .eq('estudio_id', estudioId);      // ← isolamento (redundante mas defensivo)
-
     // Data de referência = primeiro dia do mês do pagamento
     const dataBase = mensalidade.data_pagamento || mensalidade.data_vencimento;
     const [anoRef, mesRef] = dataBase.substring(0, 7).split('-').map(Number);
@@ -564,6 +589,11 @@ serve(async (req: Request) => {
       valor: number;
       data_referencia: string;
     }[] = [];
+
+    // ── 3. Repasses de lote a remover, coletados durante o cálculo abaixo ────
+    // (antes eram deletados um a um dentro do loop; agora só coletamos os ids
+    // e o delete real acontece junto com o insert, dentro da RPC transacional).
+    const idsLoteRemover: string[] = [];
 
     // ── 3b. Repasses já gerados pelo lote mensal (mensalidade_id IS NULL) ────
     const { data: repassesLote } = await supabase
@@ -635,9 +665,7 @@ serve(async (req: Request) => {
         const chave = `${mod.nome}|plano_livre`;
         const idLote = loteJaGerado.get(chave);
         if (idLote) {
-          await supabase.from('repasses_lancamentos').delete()
-            .eq('id', idLote)
-            .eq('estudio_id', estudioId); // ← isolamento
+          idsLoteRemover.push(idLote);
         }
         itens.push({
           estudio_id: estudioId,          // ← isolamento
@@ -687,9 +715,7 @@ serve(async (req: Request) => {
         const chave = `${mod.nome}|regular`;
         const idLote = loteJaGerado.get(chave);
         if (idLote) {
-          await supabase.from('repasses_lancamentos').delete()
-            .eq('id', idLote)
-            .eq('estudio_id', estudioId); // ← isolamento
+          idsLoteRemover.push(idLote);
         }
         itens.push({
           estudio_id: estudioId,          // ← isolamento
@@ -753,11 +779,17 @@ serve(async (req: Request) => {
       return response({ aviso: 'Nenhum repasse calculado para este tipo de aula.', gerados: 0 });
     }
 
-    const { error: errInsert } = await supabase
-      .from('repasses_lancamentos')
-      .insert(itens);
+    // Delete (antigos + lote sobreposto) e insert (novos) na mesma transação
+    // Postgres — se qualquer parte falhar, tudo é revertido, eliminando a
+    // janela de inconsistência que existia com delete/insert via client.
+    const { error: errRpc } = await supabase.rpc('substituir_repasses_mensalidade', {
+      p_estudio_id: estudioId,
+      p_mensalidade_id: mensalidadeId,
+      p_ids_lote_remover: idsLoteRemover,
+      p_itens: itens,
+    });
 
-    if (errInsert) throw errInsert;
+    if (errRpc) throw errRpc;
 
     return response({
       sucesso: true,
@@ -839,6 +871,7 @@ interface Aluno {
 interface Plano {
   id: string;
   is_plano_livre: boolean;
+  preco: number | null;
 }
 
 interface ResumoProf {
@@ -895,12 +928,65 @@ serve(async (req: Request) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // ── AUTENTICAÇÃO E AUTORIZAÇÃO ───────────────────────────────────────────
+    // Endpoint em lote: sem este guard, qualquer chamador poderia gerar repasses
+    // financeiros para todos os professores/alunos de QUALQUER estúdio informado.
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return response({ error: 'Cabeçalho Authorization ausente ou inválido.' }, 401);
+    }
+
+    const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const { data: { user: caller }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !caller) {
+      return response({ error: 'Token inválido ou expirado.' }, 401);
+    }
+
+    // super_admin tem acesso global (independente de estudio_id); admin só no seu próprio estúdio.
+    const { data: membrosCaller, error: membroErr } = await supabase
+      .from('estudio_membros')
+      .select('role, estudio_id')
+      .eq('user_id', caller.id);
+
+    if (membroErr) {
+      console.error('[gerar-repasses-mensais] Erro ao verificar perfil do caller:', membroErr);
+      return response({ error: 'Erro ao verificar permissões do usuário.' }, 500);
+    }
+
+    const ehSuperAdmin = (membrosCaller ?? []).some((m) => m.role === 'super_admin');
+    const ehAdminDoEstudio = (membrosCaller ?? []).some(
+      (m) => m.role === 'admin' && m.estudio_id === estudioId,
+    );
+
+    if (!ehSuperAdmin && !ehAdminDoEstudio) {
+      return response({ error: 'Acesso negado. Apenas admins do estúdio podem gerar repasses.' }, 403);
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     const mesStr = String(mes).padStart(2, '0');
     const dataReferencia = `${ano}-${mesStr}-01`;
 
     const ultimoDia = new Date(ano, mes, 0).getDate();
     const inicioPeriodo = `${ano}-${mesStr}-01`;
     const fimPeriodo = `${ano}-${mesStr}-${String(ultimoDia).padStart(2, '0')}`;
+
+    // ── ATOMICIDADE ───────────────────────────────────────────────────────────
+    // REP-ATOMIC: a checagem "já existem" (passo 1) e o insert final (passo 9)
+    // não são atômicos entre si — cada chamada via supabase-js/PostgREST abre sua
+    // própria conexão/transação, então um pg_advisory_xact_lock adquirido aqui não
+    // sobreviveria até o insert do passo 9 (seria liberado ao fim desta query).
+    // A defesa real precisa estar no banco: aplique a migration abaixo (rede de
+    // segurança que sobrevive a chamadas concorrentes de verdade) e trate a
+    // violação de unicidade no insert do passo 9 como "já gerado" em vez de erro 500:
+    //
+    //   CREATE UNIQUE INDEX repasses_lote_unico
+    //     ON repasses_lancamentos (estudio_id, data_referencia, professor_id, modalidade, tipo_aula)
+    //     WHERE mensalidade_id IS NULL;
+    //
+    // ────────────────────────────────────────────────────────────────────────
 
     // ── 1. Previne dupla geração no mesmo mês (para este estúdio) ───────────
     const { data: jaExistem } = await supabase
@@ -981,15 +1067,18 @@ serve(async (req: Request) => {
       mapaProfs.set(p.id, p.nome);
     }
 
-    // ── 5. Planos — identifica quais são "plano livre" (deste estúdio) ──────
+    // ── 5. Planos — is_plano_livre + preço, já em bulk (deste estúdio) ──────
+    // REP-N+1: preço buscado aqui junto, evitando 1 query por aluno no loop abaixo.
     const { data: planosRaw } = await supabase
       .from('planos')
-      .select('id, is_plano_livre')
+      .select('id, is_plano_livre, preco')
       .eq('estudio_id', estudioId);      // ← isolamento
 
     const mapaPlanos = new Map<string, boolean>();
+    const mapaPrecos = new Map<string, number>();
     for (const p of (planosRaw ?? []) as Plano[]) {
       mapaPlanos.set(p.id, p.is_plano_livre === true);
+      if (p.preco != null) mapaPrecos.set(p.id, Number(p.preco));
     }
 
     // ── 6. Alunos ativos com modalidades definidas (deste estúdio) ──────────
@@ -1065,19 +1154,14 @@ serve(async (req: Request) => {
           continue;
         }
 
-        const { data: plano } = await supabase
-          .from('planos')
-          .select('preco')
-          .eq('estudio_id', estudioId)   // ← isolamento
-          .eq('id', aluno.plano_id)
-          .single();
+        const precoPlano = aluno.plano_id ? mapaPrecos.get(aluno.plano_id) : undefined;
 
-        if (!plano?.preco) {
+        if (!precoPlano) {
           avisos.push(`"${aluno.nome_completo}" (plano livre): plano sem preço definido — sem repasse.`);
           continue;
         }
 
-        const valorTotal = Number(plano.preco);
+        const valorTotal = precoPlano;
         const pctProf = Number(cfg.plano_livre_pct_prof) / 100;
         const parteProfs = valorTotal * pctProf;
         const n = modsLivreValidas.length;
@@ -1149,7 +1233,18 @@ serve(async (req: Request) => {
       .from('repasses_lancamentos')
       .insert(itens);
 
-    if (errInsert) throw errInsert;
+    if (errInsert) {
+      // 23505 = unique_violation. Com o índice único parcial (ver nota acima),
+      // uma corrida entre duas chamadas concorrentes cai aqui em vez de duplicar
+      // repasses — tratamos como "já gerado por outra chamada", não como falha.
+      if (errInsert.code === '23505') {
+        return response({
+          error: `Repasses de ${mesStr}/${ano} já foram gerados (corrida detectada). Exclua-os antes de regerar.`,
+          jaGerados: true,
+        }, 409);
+      }
+      throw errInsert;
+    }
 
     // ── 10. Resumo por professor ────────────────────────────────────────────
     const resumoMap = new Map<string, ResumoProf>();
@@ -1299,6 +1394,46 @@ serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // ── AUTENTICAÇÃO E AUTORIZAÇÃO ───────────────────────────────────────────
+    // Endpoint de leitura, mas devolve receita/comissões detalhadas por professor.
+    // Sem este guard, qualquer chamador com um JWT válido de QUALQUER estúdio (ou
+    // sem JWT, se verify_jwt estiver desligado) poderia enumerar estudioIds e
+    // extrair a folha de comissões de estúdios concorrentes.
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return response({ error: 'Cabeçalho Authorization ausente ou inválido.' }, 401);
+    }
+
+    const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const { data: { user: caller }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !caller) {
+      return response({ error: 'Token inválido ou expirado.' }, 401);
+    }
+
+    // super_admin tem acesso global (independente de estudio_id); admin só no seu próprio estúdio.
+    const { data: membrosCaller, error: membroErr } = await supabase
+      .from('estudio_membros')
+      .select('role, estudio_id')
+      .eq('user_id', caller.id);
+
+    if (membroErr) {
+      console.error('[preview-repasses-mensais] Erro ao verificar perfil do caller:', membroErr);
+      return response({ error: 'Erro ao verificar permissões do usuário.' }, 500);
+    }
+
+    const ehSuperAdmin = (membrosCaller ?? []).some((m) => m.role === 'super_admin');
+    const ehAdminDoEstudio = (membrosCaller ?? []).some(
+      (m) => m.role === 'admin' && m.estudio_id === estudioId,
+    );
+
+    if (!ehSuperAdmin && !ehAdminDoEstudio) {
+      return response({ error: 'Acesso negado. Apenas admins do estúdio podem ver o preview de repasses.' }, 403);
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     const mesStr = String(mes).padStart(2, '0');
     const dataReferencia = `${ano}-${mesStr}-01`;
@@ -2526,48 +2661,6 @@ export function useDebounce(value, delay = 500) {
   }, [value, delay]);
 
   return debouncedValue;
-}
-</file>
-
-<file path="webapp/src/hooks/useEstudioPublico.js">
-// webapp/src/hooks/useEstudioPublico.js
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
-import { getSlugFromHostname } from '../lib/resolveEstudio';
-
-/**
- * Busca dados públicos do estúdio pelo slug do hostname.
- * Usado em Landing e Login (pré-autenticação), onde o RLS por auth.uid()
- * ainda não está disponível.
- *
- * Retorna tudo que useQuery retorna, mais `slug` para mensagens de erro.
- *
- * Casos:
- *  - slug null (localhost sem VITE_DEV_SLUG) → data: null, sem request ao banco
- *  - slug válido mas não existe no banco     → data: null (maybeSingle)
- *  - slug encontrado                         → data: { id, nome, slug, ... }
- */
-export function useEstudioPublico() {
-  const slug = getSlugFromHostname();
-
-  const query = useQuery({
-    queryKey: ['estudio-publico', slug],
-    queryFn: async () => {
-      if (!slug) return null;
-
-      const { data, error } = await supabase
-        .from('estudios')
-        .select('id, nome, slug, whatsapp, instagram, maps_url')
-        .eq('slug', slug)
-        .maybeSingle(); // retorna null sem lançar erro quando não encontra
-
-      if (error) throw error;
-      return data;
-    },
-    staleTime: 1000 * 60 * 60, // 1h — dados de contato raramente mudam
-  });
-
-  return { ...query, slug };
 }
 </file>
 
@@ -4303,12 +4396,12 @@ export default function ModalCriarEstudio({ aberto, fechar }) {
 <file path="webapp/src/pages/SuperAdmin/components/TabelaEstudios.jsx">
 // webapp/src/pages/SuperAdmin/components/TabelaEstudios.jsx
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   Building2, Users, GraduationCap, MoreHorizontal,
-  Pause, Play, Eye, Calendar, Loader2,
+  Pause, Play, Eye, Calendar, Loader2, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
@@ -4317,6 +4410,9 @@ import { ModalConfirmacao } from '../../../components/ui/Modal';
 import { showToast } from '../../../components/shared/Toast';
 import { superAdminService } from '../../../services/superAdminService';
 import { useImpersonation } from '../../../contexts/ImpersonationContext';
+import { useDebounce } from '../../../hooks/useDebounce';
+
+const PAGE_SIZE = 50;
 
 function formatarData(iso) {
   if (!iso) return '—';
@@ -4473,12 +4569,30 @@ export default function TabelaEstudios({ busca }) {
 
   const [confirmacao, setConfirmacao] = useState(null);
   const [acessandoId, setAcessandoId] = useState(null);
+  const [pagina, setPagina] = useState(0); // 0-based, casa com p_offset da RPC
 
-  const { data: estudios = [], isLoading } = useQuery({
-    queryKey: ['super-admin', 'estudios'],
-    queryFn:  superAdminService.listarEstudios,
+  const buscaDebounced = useDebounce(busca, 300);
+
+  // Sempre que a busca mudar, volta pra primeira pagina —
+  // senao o usuario pode ficar "preso" numa pagina que nao existe mais no resultado filtrado.
+  useEffect(() => {
+    setPagina(0);
+  }, [buscaDebounced]);
+
+  const { data, isLoading, isPlaceholderData } = useQuery({
+    queryKey: ['super-admin', 'estudios', buscaDebounced, pagina],
+    queryFn: () => superAdminService.listarEstudios({
+      page: pagina,
+      pageSize: PAGE_SIZE,
+      busca: buscaDebounced,
+    }),
     staleTime: 1000 * 60,
+    placeholderData: (prev) => prev, // evita flash de loading ao trocar de pagina
   });
+
+  const estudios     = data?.estudios ?? [];
+  const totalCount   = data?.totalCount ?? 0;
+  const totalPaginas = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const { mutate: alterarStatus, isPending: isAlterando } = useMutation({
     mutationFn: ({ id, status }) => superAdminService.alterarStatusEstudio(id, status),
@@ -4507,12 +4621,8 @@ export default function TabelaEstudios({ busca }) {
     }
   }
 
-  const filtrados = busca
-    ? estudios.filter((e) => {
-        const q = busca.toLowerCase();
-        return e.nome.toLowerCase().includes(q) || e.slug.includes(q);
-      })
-    : estudios;
+  // A busca e a paginacao acontecem no servidor agora (RPC listar_estudios_admin),
+  // entao `estudios` ja vem filtrado e paginado — sem `.filter()` client-side.
 
   return (
     <>
@@ -4533,16 +4643,16 @@ export default function TabelaEstudios({ busca }) {
             <tbody>
               {isLoading
                 ? [...Array(5)].map((_, i) => <SkeletonLinha key={i} />)
-                : filtrados.length === 0
+                : estudios.length === 0
                 ? (
                   <tr>
                     <td colSpan={6} className="py-12">
                       <EmptyState
                         icon={<Building2 size={28} />}
-                        title={busca ? 'Nenhum estudio encontrado' : 'Nenhum estudio cadastrado'}
+                        title={buscaDebounced ? 'Nenhum estudio encontrado' : 'Nenhum estudio cadastrado'}
                         description={
-                          busca
-                            ? `Nenhum resultado para "${busca}".`
+                          buscaDebounced
+                            ? `Nenhum resultado para "${buscaDebounced}".`
                             : 'Crie o primeiro estudio usando o botao acima.'
                         }
                         className="border-0 bg-transparent"
@@ -4550,7 +4660,7 @@ export default function TabelaEstudios({ busca }) {
                     </td>
                   </tr>
                 )
-                : filtrados.map((e) => (
+                : estudios.map((e) => (
                   <LinhaEstudio
                     key={e.id}
                     estudio={e}
@@ -4565,12 +4675,36 @@ export default function TabelaEstudios({ busca }) {
           </table>
         </div>
 
-        {!isLoading && filtrados.length > 0 && (
-          <div className="px-6 py-3 border-t border-border bg-muted/20">
+        {!isLoading && estudios.length > 0 && (
+          <div className="px-6 py-3 border-t border-border bg-muted/20 flex items-center justify-between gap-4 flex-wrap">
             <p className="text-xs text-muted-foreground font-medium">
-              {filtrados.length} estudio{filtrados.length !== 1 ? 's' : ''}
-              {busca && ` encontrado${filtrados.length !== 1 ? 's' : ''} para "${busca}"`}
+              {totalCount} estudio{totalCount !== 1 ? 's' : ''}
+              {buscaDebounced && ` encontrado${totalCount !== 1 ? 's' : ''} para "${buscaDebounced}"`}
             </p>
+
+            {totalPaginas > 1 && (
+              <div className="flex items-center gap-3">
+                <button
+                  className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+                  disabled={pagina === 0 || isPlaceholderData}
+                  onClick={() => setPagina((p) => Math.max(0, p - 1))}
+                  aria-label="Pagina anterior"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="text-xs font-bold text-foreground tabular-nums">
+                  {pagina + 1} / {totalPaginas}
+                </span>
+                <button
+                  className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+                  disabled={pagina + 1 >= totalPaginas || isPlaceholderData}
+                  onClick={() => setPagina((p) => p + 1)}
+                  aria-label="Proxima pagina"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -6173,497 +6307,6 @@ export default function ConfiguracoesRepasse() {
 }
 </file>
 
-<file path="webapp/src/pages/Dashboard.jsx">
-import React, { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { dashboardService } from '../services/dashboardService';
-import {
-  AlertCircle, Clock, Cake, MessageCircle,
-  CheckCircle2, Bell, Users, CalendarCheck,
-  ChevronRight, Wallet,
-} from 'lucide-react';
-import { addDays, format, startOfMonth } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-import { formatarMoeda } from '../lib/utils';
-import Surface from '../components/ui/Surface';
-import Skeleton from '../components/ui/Skeleton';
-import Badge from '../components/ui/Badge';
-import Button from '../components/ui/Button';
-import Modal, { useModal } from '../components/ui/Modal';
-import { Link } from 'react-router-dom';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function calcularIdade(dataNasc) {
-  if (!dataNasc) return null;
-  const hoje = new Date();
-  const nasc = new Date(dataNasc + 'T12:00:00');
-  let idade = hoje.getFullYear() - nasc.getFullYear();
-  if (
-    hoje.getMonth() < nasc.getMonth() ||
-    (hoje.getMonth() === nasc.getMonth() && hoje.getDate() < nasc.getDate())
-  ) idade--;
-  return idade;
-}
-
-function aniversariantesDoDia(alunos) {
-  const hoje = new Date();
-  const mesHoje = hoje.getMonth() + 1;
-  const diaHoje = hoje.getDate();
-  return (alunos || []).filter(a => {
-    if (!a.data_nascimento) return false;
-    const [, m, d] = a.data_nascimento.split('-').map(Number);
-    return m === mesHoje && d === diaHoje;
-  });
-}
-
-function aniversariantesProximos(alunos, dias = 7) {
-  const hoje = new Date();
-  return (alunos || []).filter(a => {
-    if (!a.data_nascimento) return false;
-    for (let i = 1; i <= dias; i++) {
-      const d = addDays(hoje, i);
-      const [, m, day] = a.data_nascimento.split('-').map(Number);
-      if (m === d.getMonth() + 1 && day === d.getDate()) return true;
-    }
-    return false;
-  }).sort((a, b) => {
-    const [, ma, da] = a.data_nascimento.split('-').map(Number);
-    const [, mb, db] = b.data_nascimento.split('-').map(Number);
-    return ma !== mb ? ma - mb : da - db;
-  });
-}
-
-function gerarLinkWhatsApp(telefone, mensagem) {
-  const num = (telefone || '').replace(/\D/g, '');
-  return `https://wa.me/55${num}?text=${encodeURIComponent(mensagem)}`;
-}
-
-// ── Seção de avisos com barra colorida ───────────────────────────────────────
-function SecaoAviso({ tipo, icone, titulo, children }) {
-  const ESTILOS = {
-    danger:  'border-l-4 border-destructive bg-destructive-soft',
-    warning: 'border-l-4 border-warning bg-warning-soft',
-    success: 'border-l-4 border-success bg-success-soft',
-    info:    'border-l-4 border-info bg-info-soft',
-    brand:   'border-l-4 border-primary bg-primary-soft',
-  };
-  const COR_ICONE = {
-    danger:  'text-destructive',
-    warning: 'text-warning',
-    success: 'text-success',
-    info:    'text-info',
-    brand:   'text-primary',
-  };
-  return (
-    <Surface variant="card" padding="none" className="overflow-hidden">
-      <div className={`${ESTILOS[tipo]} px-5 py-4 flex items-center gap-3`}>
-        <span className={`shrink-0 ${COR_ICONE[tipo]}`}>{icone}</span>
-        <h3 className={`font-black text-sm ${COR_ICONE[tipo]}`}>{titulo}</h3>
-      </div>
-      <div className="p-5">{children}</div>
-    </Surface>
-  );
-}
-
-// ── Card de aluno compacto ─────────────────────────────────────────────────────
-function CardAluno({ nome, info, acao, badge }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-2.5 border-b border-border/60 last:border-0">
-      <div className="flex-1 min-w-0">
-        <p className="font-bold text-foreground text-sm truncate">{nome}</p>
-        {info && <p className="text-xs text-muted-foreground">{info}</p>}
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {badge}
-        {acao}
-      </div>
-    </div>
-  );
-}
-
-// ── Página principal ──────────────────────────────────────────────────────────
-export default function Dashboard() {
-  const modalInadimplencia = useModal();
-
-  const agora        = new Date();
-  const hojeIso      = agora.toISOString().split('T')[0];
-  const inicioMes    = startOfMonth(agora).toISOString();
-  const limite7Dias  = format(addDays(agora, 7), 'yyyy-MM-dd');
-
-  // ── Query única — todas as chamadas rodam em paralelo via Promise.all ─────
-  const {
-    data: {
-      totalAlunos        = 0,
-      pagamentosMes      = [],
-      listaInadimplentes = [],
-      alunosPlanosVencendo = [],
-      todosAlunos        = [],
-    } = {},
-    isLoading,
-  } = useQuery({
-    queryKey: ['dashboard', hojeIso, inicioMes, limite7Dias],
-    queryFn:  () => dashboardService.obterTudoDashboard({ hojeIso, inicioMes, limite7Dias }),
-    staleTime: 1000 * 60 * 5,
-  });
-
-  // Aliases de loading para manter compatibilidade com os Skeletons abaixo
-  const loadingAlunos  = isLoading;
-  const loadingPag     = isLoading;
-  const loadingInadim  = isLoading;
-  const loadingVencendo = isLoading;
-
-  // ── Derivações ─────────────────────────────────────────────────────────────
-  const faturamentoMes = useMemo(
-    () => pagamentosMes.reduce((acc, m) => acc + Number(m.valor_pago), 0),
-    [pagamentosMes]
-  );
-
-  const inadimplenciaTotal = useMemo(
-    () => listaInadimplentes.reduce((acc, m) => acc + Number(m.valor_pago), 0),
-    [listaInadimplentes]
-  );
-
-  const aniversariantesHoje     = useMemo(() => aniversariantesDoDia(todosAlunos), [todosAlunos]);
-  const aniversariantesEmBreve  = useMemo(() => aniversariantesProximos(todosAlunos, 7), [todosAlunos]);
-
-  const nomesMes = format(agora, 'MMMM', { locale: ptBR });
-  const nomesMesCapitalizado = nomesMes.charAt(0).toUpperCase() + nomesMes.slice(1);
-
-  const handleCobranca = (aluno, vencimento, valor) => {
-    const data = format(new Date(vencimento + 'T12:00:00'), 'dd/MM/yyyy');
-    const msg  = `Olá, ${aluno?.nome_completo?.split(' ')[0]}! Seu pagamento de ${formatarMoeda(valor)}, com vencimento em ${data}, ainda está em aberto. Podemos verificar juntos? 🙏`;
-    window.open(gerarLinkWhatsApp(aluno?.telefone, msg), '_blank');
-  };
-
-  const handleParabens = (aluno) => {
-    const msg = `Feliz aniversário, ${aluno.nome_completo?.split(' ')[0]}! 🎂 Toda a equipe do espaço deseja a você um dia incrível!`;
-    window.open(gerarLinkWhatsApp(aluno.telefone, msg), '_blank');
-  };
-
-  // ── Render ─────────────────────────────────────────────────────────────────
-  return (
-    <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-500 bg-background min-h-screen">
-
-      {/* Cabeçalho */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
-        <div>
-          <h1 className="text-3xl font-black text-foreground tracking-tight flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-primary-soft flex items-center justify-center">
-              <Bell size={20} className="text-primary" />
-            </div>
-            Painel de Avisos
-          </h1>
-          <p className="text-muted-foreground font-medium mt-1">
-            {format(agora, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })
-              .replace(/^./, c => c.toUpperCase())}
-          </p>
-        </div>
-        <Link to="/resultado-financeiro">
-          <Button variant="outline" size="sm" rightIcon={<ChevronRight size={16} />}>
-            Ver DRE do mês
-          </Button>
-        </Link>
-      </div>
-
-      {/* Métricas rápidas do mês */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <Surface variant="card" padding="lg" className="flex items-center gap-4">
-          <div className="w-11 h-11 rounded-2xl bg-success-soft flex items-center justify-center shrink-0">
-            <Wallet size={20} className="text-success" />
-          </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Receita {nomesMesCapitalizado}
-            </p>
-            {loadingPag
-              ? <Skeleton className="h-6 w-24 mt-1" />
-              : <p className="text-lg font-black text-foreground">{formatarMoeda(faturamentoMes)}</p>
-            }
-          </div>
-        </Surface>
-
-        <Surface variant="card" padding="lg" className="flex items-center gap-4">
-          <div className="w-11 h-11 rounded-2xl bg-brand-soft bg-primary-soft flex items-center justify-center shrink-0">
-            <Users size={20} className="text-primary" />
-          </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Alunos Ativos
-            </p>
-            {loadingAlunos
-              ? <Skeleton className="h-6 w-16 mt-1" />
-              : <p className="text-lg font-black text-foreground">{totalAlunos}</p>
-            }
-          </div>
-        </Surface>
-
-        <Surface variant="card" padding="lg" className="flex items-center gap-4 col-span-2 md:col-span-1">
-          <div className="w-11 h-11 rounded-2xl bg-destructive-soft flex items-center justify-center shrink-0">
-            <AlertCircle size={20} className="text-destructive" />
-          </div>
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Em Atraso
-            </p>
-            {loadingInadim
-              ? <Skeleton className="h-6 w-24 mt-1" />
-              : (
-                <p className="text-lg font-black text-destructive">
-                  {listaInadimplentes.length} alunos
-                </p>
-              )
-            }
-          </div>
-        </Surface>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* Coluna esquerda */}
-        <div className="space-y-6">
-
-          {/* Pagamentos em atraso */}
-          {loadingInadim ? (
-            <Skeleton className="h-48 w-full rounded-2xl" />
-          ) : listaInadimplentes.length > 0 ? (
-            <SecaoAviso
-              tipo="danger"
-              icone={<AlertCircle size={18} />}
-              titulo={`${listaInadimplentes.length} pagamento${listaInadimplentes.length > 1 ? 's' : ''} em atraso — ${formatarMoeda(inadimplenciaTotal)} em aberto`}
-            >
-              <div className="space-y-1">
-                {listaInadimplentes.slice(0, 5).map(item => (
-                  <CardAluno
-                    key={item.id}
-                    nome={item.alunos?.nome_completo}
-                    info={`Venc: ${format(new Date(item.data_vencimento + 'T12:00:00'), 'dd/MM/yyyy')} · ${formatarMoeda(item.valor_pago)}`}
-                    acao={
-                      item.alunos?.telefone && (
-                        <button
-                          onClick={() => handleCobranca(item.alunos, item.data_vencimento, item.valor_pago)}
-                          className="text-xs bg-[#25D366] text-white px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 hover:bg-[#20bd5a] transition-colors"
-                        >
-                          <MessageCircle size={13} /> Cobrar
-                        </button>
-                      )
-                    }
-                  />
-                ))}
-                {listaInadimplentes.length > 5 && (
-                  <button
-                    onClick={modalInadimplencia.abrir}
-                    className="text-xs text-muted-foreground hover:text-foreground font-bold pt-2 flex items-center gap-1"
-                  >
-                    Ver mais {listaInadimplentes.length - 5} <ChevronRight size={13} />
-                  </button>
-                )}
-              </div>
-            </SecaoAviso>
-          ) : (
-            <SecaoAviso
-              tipo="success"
-              icone={<CheckCircle2 size={18} />}
-              titulo="Nenhum pagamento em atraso 🎉"
-            >
-              <p className="text-sm text-success font-medium">
-                Todos os alunos estão em dia com os pagamentos neste mês.
-              </p>
-            </SecaoAviso>
-          )}
-
-          {/* Planos vencendo em 7 dias */}
-          {loadingVencendo ? (
-            <Skeleton className="h-48 w-full rounded-2xl" />
-          ) : alunosPlanosVencendo.length > 0 ? (
-            <SecaoAviso
-              tipo="warning"
-              icone={<Clock size={18} />}
-              titulo={`${alunosPlanosVencendo.length} plano${alunosPlanosVencendo.length > 1 ? 's' : ''} vencendo nos próximos 7 dias`}
-            >
-              <div className="space-y-1">
-                {alunosPlanosVencendo.map(a => (
-                  <CardAluno
-                    key={a.id}
-                    nome={a.nome_completo}
-                    info={`Vence em ${format(new Date(a.data_fim_plano + 'T12:00:00'), 'dd/MM/yyyy')}`}
-                    badge={
-                      <Badge tone="warning">
-                        {Math.ceil(
-                          (new Date(a.data_fim_plano + 'T12:00:00') - agora) / (1000 * 60 * 60 * 24)
-                        )}d
-                      </Badge>
-                    }
-                  />
-                ))}
-              </div>
-              <p className="text-xs text-warning font-medium mt-3">
-                💡 Entre em contato para garantir a renovação antes do vencimento.
-              </p>
-            </SecaoAviso>
-          ) : (
-            <SecaoAviso
-              tipo="info"
-              icone={<CalendarCheck size={18} />}
-              titulo="Nenhum plano vencendo esta semana"
-            >
-              <p className="text-sm text-info font-medium">
-                Todos os planos têm vencimento além dos próximos 7 dias.
-              </p>
-            </SecaoAviso>
-          )}
-        </div>
-
-        {/* Coluna direita */}
-        <div className="space-y-6">
-
-          {/* Aniversariantes hoje */}
-          {aniversariantesHoje.length > 0 && (
-            <SecaoAviso
-              tipo="brand"
-              icone={<Cake size={18} />}
-              titulo={`🎂 ${aniversariantesHoje.length > 1 ? `${aniversariantesHoje.length} aniversariantes` : 'Aniversariante'} hoje!`}
-            >
-              <div className="space-y-1">
-                {aniversariantesHoje.map(a => (
-                  <CardAluno
-                    key={a.id}
-                    nome={a.nome_completo}
-                    info={`${calcularIdade(a.data_nascimento)} anos hoje 🎉`}
-                    acao={
-                      a.telefone && (
-                        <button
-                          onClick={() => handleParabens(a)}
-                          className="text-xs bg-[#25D366] text-white px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 hover:bg-[#20bd5a] transition-colors"
-                        >
-                          <MessageCircle size={13} /> Parabéns
-                        </button>
-                      )
-                    }
-                  />
-                ))}
-              </div>
-            </SecaoAviso>
-          )}
-
-          {/* Aniversariantes próximos 7 dias */}
-          {aniversariantesEmBreve.length > 0 ? (
-            <SecaoAviso
-              tipo="info"
-              icone={<Cake size={18} />}
-              titulo={`${aniversariantesEmBreve.length} aniversário${aniversariantesEmBreve.length > 1 ? 's' : ''} nos próximos 7 dias`}
-            >
-              <div className="space-y-1">
-                {aniversariantesEmBreve.map(a => {
-                  const [, m, d] = a.data_nascimento.split('-').map(Number);
-                  const dataAniv = new Date(agora.getFullYear(), m - 1, d);
-                  return (
-                    <CardAluno
-                      key={a.id}
-                      nome={a.nome_completo}
-                      info={format(dataAniv, "dd 'de' MMMM", { locale: ptBR })}
-                      badge={
-                        <Badge tone="info">
-                          {Math.ceil((dataAniv - agora) / (1000 * 60 * 60 * 24))}d
-                        </Badge>
-                      }
-                      acao={
-                        a.telefone && (
-                          <button
-                            onClick={() => handleParabens(a)}
-                            className="text-xs bg-[#25D366] text-white px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 hover:bg-[#20bd5a] transition-colors"
-                          >
-                            <MessageCircle size={13} />
-                          </button>
-                        )
-                      }
-                    />
-                  );
-                })}
-              </div>
-            </SecaoAviso>
-          ) : aniversariantesHoje.length === 0 ? (
-            <SecaoAviso
-              tipo="info"
-              icone={<Cake size={18} />}
-              titulo="Nenhum aniversário nos próximos 7 dias"
-            >
-              <p className="text-sm text-info font-medium">
-                Aproveite para checar os aniversários do mês na seção de Aniversariantes.
-              </p>
-            </SecaoAviso>
-          ) : null}
-
-          {/* Link rápido para DRE */}
-          <Surface variant="card" padding="lg">
-            <div className="flex items-start gap-4">
-              <div className="w-11 h-11 rounded-2xl bg-primary-soft flex items-center justify-center shrink-0">
-                <Wallet size={20} className="text-primary" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-black text-foreground text-sm">Resultado Financeiro</h3>
-                <p className="text-xs text-muted-foreground mt-1 mb-3">
-                  Acesse o DRE completo com receitas, despesas, comissões e lucro líquido do mês.
-                </p>
-                <Link to="/resultado-financeiro">
-                  <Button variant="brand" size="sm" rightIcon={<ChevronRight size={16} />}>
-                    Ver DRE completo
-                  </Button>
-                </Link>
-              </div>
-            </div>
-          </Surface>
-        </div>
-      </div>
-
-      {/* Modal de inadimplência completo */}
-      <Modal
-        aberto={modalInadimplencia.aberto}
-        fechar={modalInadimplencia.fechar}
-        title="Pagamentos em Atraso"
-        size="md"
-      >
-        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1 custom-scrollbar">
-          <div className="bg-destructive-soft border border-destructive/20 p-4 rounded-2xl flex justify-between items-center mb-2">
-            <div>
-              <p className="text-xs font-bold text-destructive">Total em atraso</p>
-              <h3 className="text-2xl font-black text-destructive">{formatarMoeda(inadimplenciaTotal)}</h3>
-            </div>
-            <div className="text-right">
-              <p className="text-xs font-bold text-destructive">Alunos</p>
-              <h3 className="text-2xl font-black text-destructive">{listaInadimplentes.length}</h3>
-            </div>
-          </div>
-          {listaInadimplentes.map(item => (
-            <div
-              key={item.id}
-              className="bg-card border border-border p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 hover:border-destructive/30 transition-colors"
-            >
-              <div>
-                <h4 className="font-bold text-foreground">{item.alunos?.nome_completo}</h4>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">
-                    Venc: {format(new Date(item.data_vencimento + 'T12:00:00'), 'dd/MM/yyyy')}
-                  </span>
-                  <span className="text-xs font-black text-destructive">
-                    {formatarMoeda(item.valor_pago)}
-                  </span>
-                </div>
-              </div>
-              <button
-                onClick={() => handleCobranca(item.alunos, item.data_vencimento, item.valor_pago)}
-                className="w-full sm:w-auto bg-[#25D366] text-white px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-[#20bd5a] transition-colors"
-              >
-                <MessageCircle size={16} /> Cobrar via WhatsApp
-              </button>
-            </div>
-          ))}
-        </div>
-      </Modal>
-    </div>
-  );
-}
-</file>
-
 <file path="webapp/src/pages/Despesas.jsx">
 import React, { useEffect, useState } from 'react';
 import { 
@@ -7707,486 +7350,6 @@ footer { background: var(--bg2); border-top: 1px solid var(--border); padding: 6
   .profile-top { grid-template-columns: 1fr; }
   .data-grid { grid-template-columns: 1fr; }
   .stats-row { grid-template-columns: 1fr 1fr; }
-}
-</file>
-
-<file path="webapp/src/pages/Landing.jsx">
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
-import './landing.css';
-import { useEstudioPublico } from '../hooks/useEstudioPublico';
-
-export default function Landing() {
-  const navigate = useNavigate();
-
-  // ── Dados públicos do estúdio (resolvido pelo subdomínio) ────────────
-  const { data: estudio, isLoading: estudioLoading, slug } = useEstudioPublico();
-
-  // ── Lead form state ─────────────────────────────────────────────────
-  const [leadNome, setLeadNome] = useState('');
-  const [leadTel, setLeadTel] = useState('');
-  const [leadLoading, setLeadLoading] = useState(false);
-  const [leadStatus, setLeadStatus] = useState(null); // 'ok' | 'err' | null
-  const [leadErro, setLeadErro] = useState('');
-
-  // ── Plans from Supabase ──────────────────────────────────────────────
-  const [planos, setPlanos] = useState([]);
-  const [planosLoading, setPlanosLoading] = useState(true);
-
-  useEffect(() => {
-    // Só busca planos quando o estúdio estiver resolvido e tiver id
-    if (!estudio?.id) return;
-
-    async function carregarPlanos() {
-      try {
-        const { data, error } = await supabase
-          .from('planos')
-          .select('id, nome, preco, duracao_meses, frequencia_semanal, regras_acesso')
-          .eq('estudio_id', estudio.id)
-          .order('preco', { ascending: true });
-        if (!error && data) setPlanos(data);
-      } catch (_) {
-        // Silently fail — seção de planos ficará oculta
-      } finally {
-        setPlanosLoading(false);
-      }
-    }
-    carregarPlanos();
-  }, [estudio?.id]);
-
-  // ── Tela de erro: slug no hostname mas estúdio não encontrado no banco
-  if (!estudioLoading && slug && !estudio) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-6 text-center">
-        <div>
-          <p style={{ fontSize: '48px', marginBottom: '16px' }}>🔍</p>
-          <h1 style={{ fontSize: '24px', fontWeight: 900, color: '#1f2937', marginBottom: '8px' }}>
-            Estúdio não encontrado
-          </h1>
-          <p style={{ color: '#6b7280' }}>
-            Nenhum estúdio cadastrado para <strong>{slug}</strong>.gestao.app
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Helpers ──────────────────────────────────────────────────────────
-  const scrollTo = (id) => {
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  function formatTelefone(val) {
-    const digits = val.replace(/\D/g, '').slice(0, 11);
-    if (digits.length <= 2) return digits;
-    if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
-    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
-  }
-
-  async function handleLeadSubmit(e) {
-    e.preventDefault();
-    if (!leadNome.trim() || !leadTel.trim()) return;
-    setLeadLoading(true);
-    setLeadStatus(null);
-    setLeadErro('');
-    try {
-      const { error } = await supabase
-        .from('presencas_agenda')
-        .insert([{
-          estudio_id: estudio.id,                    // ← isolamento multi-tenant
-          nome_visitante: leadNome.trim(),
-          telefone_visitante: leadTel.replace(/\D/g, ''),
-          status_conversao: 'pendente',
-        }]);
-
-      if (error) throw error;
-      setLeadStatus('ok');
-      setLeadNome('');
-      setLeadTel('');
-    } catch (err) {
-      console.error(err);
-      setLeadStatus('err');
-      setLeadErro('Não conseguimos registrar agora. Tente novamente ou fale pelo WhatsApp.');
-    } finally {
-      setLeadLoading(false);
-    }
-  }
-
-  // ── Plan helpers ─────────────────────────────────────────────────────
-  const isFeatured = (plano, todos) => {
-    if (todos.length === 0) return false;
-    const mid = Math.floor(todos.length / 2);
-    return todos.indexOf(plano) === mid;
-  };
-
-  // ── Dados de contato (Supabase > fallback hardcoded) ─────────────────
-  const nomeEstudio   = estudio?.nome         ?? 'Gestão App';
-  const whatsappNum   = estudio?.whatsapp     ?? '';
-  const WHATSAPP_URL  = whatsappNum
-    ? `https://wa.me/${whatsappNum}?text=Olá!%20Vi%20o%20site%20e%20quero%20saber%20mais.`
-    : '#';
-  const INSTAGRAM = estudio?.instagram ?? '#';
-  const MAPS_URL      = estudio?.maps_url      ?? '#';
-  const MAPS_EMBED    = estudio?.maps_embed_url ?? '';
-
-  return (
-    <div id="page-landing">
-
-      {/* ── Navbar ─────────────────────────────────────────────────── */}
-      <nav className="navbar">
-        <a className="nav-logo" href="/">
-          <div className="logo-mark">{nomeEstudio.charAt(0).toUpperCase()}</div>
-          <span className="logo-name">{nomeEstudio.toUpperCase()}</span>
-        </a>
-        <div className="nav-links">
-          <button className="nav-link" onClick={() => scrollTo('sec-aulas')}>Modalidades</button>
-          <button className="nav-link" onClick={() => scrollTo('sec-planos')}>Planos</button>
-          <button className="nav-link" onClick={() => scrollTo('sec-footer')}>Contato</button>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => navigate('/login')}
-          >
-            Já sou aluno →
-          </button>
-        </div>
-      </nav>
-
-      {/* ── Hero ───────────────────────────────────────────────────── */}
-      <section className="hero">
-        <div className="hero-deco">
-          <div className="hero-blob"></div>
-          <div className="hero-circle" style={{ width: '600px', height: '600px', top: '50%', left: '50%', transform: 'translate(-50%,-50%)' }}></div>
-          <div className="hero-circle" style={{ width: '400px', height: '400px', top: '50%', left: '50%', transform: 'translate(-50%,-50%)' }}></div>
-          <div className="hero-circle" style={{ width: '220px', height: '220px', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: 'rgba(217,142,115,.05)' }}></div>
-        </div>
-
-        <div className="hero-content" style={{ maxWidth: '680px', position: 'relative', zIndex: 1 }}>
-          <div className="hero-tag anim-fade-up">
-            <span className="hero-dot"></span>
-            Funcional · Dança · Bem-estar
-          </div>
-
-          <h1 className="anim-fade-up s1">
-            Mova-se,<br />expresse-se,<br /><em>ilumine-se.</em>
-          </h1>
-
-          <p className="hero-sub anim-fade-up s2">
-            Treinamento funcional e dança para quem quer resultado e não abre mão de se sentir bem.
-            Primeira aula grátis — sem compromisso.
-          </p>
-
-          {/* ── Inline Lead Form ──────────────────────────────────── */}
-          <div className="hero-form-wrap anim-fade-up s3">
-            {leadStatus === 'ok' ? (
-              <div className="lead-success anim-scale-in">
-                <span className="lead-success-icon">✓</span>
-                <div>
-                  <strong>Perfeito! Aguarde nosso contato.</strong>
-                  <span>Nossa equipe vai chamar você em breve pelo WhatsApp.</span>
-                </div>
-              </div>
-            ) : (
-              <form className="hero-form" onSubmit={handleLeadSubmit}>
-                <div className="hero-form-fields">
-                  <div className="inp-group" style={{ marginBottom: 0 }}>
-                    <input
-                      className={`inp${leadStatus === 'err' ? ' error' : ''}`}
-                      type="text"
-                      placeholder="Seu nome"
-                      value={leadNome}
-                      onChange={e => setLeadNome(e.target.value)}
-                      required
-                      autoComplete="given-name"
-                    />
-                  </div>
-                  <div className="inp-group" style={{ marginBottom: 0 }}>
-                    <input
-                      className={`inp${leadStatus === 'err' ? ' error' : ''}`}
-                      type="tel"
-                      placeholder="WhatsApp (com DDD)"
-                      value={leadTel}
-                      onChange={e => setLeadTel(formatTelefone(e.target.value))}
-                      required
-                      autoComplete="tel"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="btn btn-primary hero-form-submit"
-                    disabled={leadLoading || !estudio}
-                  >
-                    {leadLoading
-                      ? <><span className="spinner"></span> Enviando…</>
-                      : 'Quero uma aula experimental'}
-                  </button>
-                </div>
-                {leadStatus === 'err' && (
-                  <p className="inp-err" style={{ marginTop: '10px' }}>{leadErro}</p>
-                )}
-                <p className="hero-form-hint">
-                  Gratuito, sem cartão, sem compromisso.{whatsappNum && (
-                    <> Ou{' '}
-                      <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="hero-form-link">
-                        fale direto no WhatsApp →
-                      </a>
-                    </>
-                  )}
-                </p>
-              </form>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Modalidades ────────────────────────────────────────────── */}
-      <section id="sec-aulas" className="section section-alt">
-        <div className="section-header">
-          <div className="section-tag">O que oferecemos</div>
-          <h2 className="section-title">Nossas Modalidades</h2>
-          <p className="section-sub">
-            Duas práticas poderosas sob o mesmo teto, com instrutores apaixonados
-            e metodologias que realmente funcionam.
-          </p>
-        </div>
-        <div className="modality-grid">
-          {/* Card Funcional */}
-          <div className="modality-card funcional anim-fade-up">
-            <div className="modality-icon" style={{ background: 'rgba(217,142,115,.15)', fontSize: '26px' }}>⚡</div>
-            <h3 className="modality-title" style={{ color: 'var(--pri)' }}>Funcional</h3>
-            <p className="modality-desc">
-              Treinamento de alta performance que desenvolve força, equilíbrio e
-              condicionamento completo — para todos os níveis.
-            </p>
-            <div className="schedule-label" style={{ color: 'var(--pri)' }}>Grade de horários</div>
-            <div className="schedule-item">Seg / Qua / Sex — 07:00 e 09:00</div>
-            <div className="schedule-item">Seg a Sex — 18:30</div>
-            <div className="schedule-item">Sábados — 09:00</div>
-            <div style={{ marginTop: '28px' }}>
-              <button className="btn btn-outline btn-sm" onClick={() => scrollTo('hero-form-anchor')}>
-                Quero experimentar
-              </button>
-            </div>
-          </div>
-
-          {/* Card Dança */}
-          <div className="modality-card danca anim-fade-up s1">
-            <div className="modality-icon" style={{ background: 'rgba(138,154,91,.15)', fontSize: '26px' }}>✦</div>
-            <h3 className="modality-title" style={{ color: 'var(--sec-d)' }}>Dança</h3>
-            <p className="modality-desc">
-              Do samba ao contemporâneo, celebramos o movimento e a expressão
-              artística em aulas que energizam corpo e mente.
-            </p>
-            <div className="schedule-label" style={{ color: 'var(--sec-d)' }}>Grade de horários</div>
-            <div className="schedule-item">Terças e Quintas — 19:00 e 20:00</div>
-            <div className="schedule-item">Quartas — 20:00</div>
-            <div className="schedule-item">Sábados — 10:00</div>
-            <div style={{ marginTop: '28px' }}>
-              <button
-                className="btn btn-sm"
-                style={{ background: 'var(--sec)', color: '#fff' }}
-                onClick={() => scrollTo('hero-form-anchor')}
-              >
-                Quero experimentar
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Planos (Supabase) ──────────────────────────────────────── */}
-      {(planosLoading || planos.length > 0) && (
-        <section id="sec-planos" className="section">
-          <div className="section-header">
-            <div className="section-tag">Invista em você</div>
-            <h2 className="section-title">Nossos Planos</h2>
-            <p className="section-sub">
-              Escolha o plano que encaixa na sua rotina. Sem taxa de adesão.
-            </p>
-          </div>
-
-          {planosLoading ? (
-            <div className="plans-loading">
-              <div className="plans-skeleton"></div>
-              <div className="plans-skeleton"></div>
-              <div className="plans-skeleton"></div>
-            </div>
-          ) : (
-            <div
-              className="plans-grid"
-              style={planos.length === 1 ? { gridTemplateColumns: '1fr', maxWidth: '360px' } :
-                     planos.length === 2 ? { gridTemplateColumns: 'repeat(2,1fr)', maxWidth: '660px' } : {}}
-            >
-              {planos.map((plano) => {
-                const featured = isFeatured(plano, planos);
-                const regras = Array.isArray(plano.regras_acesso) ? plano.regras_acesso : [];
-                return (
-                  <div key={plano.id} className={`plan-card${featured ? ' featured' : ''}`}>
-                    {featured && <div className="plan-popular">Mais escolhido</div>}
-                    <div className="plan-name">{plano.nome}</div>
-                    <div className="plan-price">
-                      <span style={{ fontSize: '18px', color: 'var(--muted)', alignSelf: 'flex-start', paddingTop: '8px' }}>R$</span>
-                      <span className="plan-price-num">
-                        {Number(plano.preco).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                      </span>
-                      <span className="plan-price-per">/mês</span>
-                    </div>
-                    <div className="plan-features">
-                      {plano.duracao_meses && (
-                        <div className="plan-feat">
-                          <span className="feat-check">✓</span>
-                          <span>{plano.duracao_meses} {plano.duracao_meses === 1 ? 'mês' : 'meses'} de acesso</span>
-                        </div>
-                      )}
-                      {plano.frequencia_semanal && (
-                        <div className="plan-feat">
-                          <span className="feat-check">✓</span>
-                          <span>{plano.frequencia_semanal}× por semana</span>
-                        </div>
-                      )}
-                      {regras.map((r, i) => (
-                        <div key={i} className="plan-feat">
-                          <span className="feat-check">✓</span>
-                          <span>{r}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      className={`btn btn-full${featured ? ' btn-primary' : ' btn-outline'}`}
-                      onClick={() => scrollTo('hero-form-anchor')}
-                    >
-                      Começar agora
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* ── Anchor for "Quero experimentar" scrolls ────────────────── */}
-      <div id="hero-form-anchor" style={{ height: 0 }}></div>
-
-      {/* ── Second CTA strip ───────────────────────────────────────── */}
-      <section className="cta-strip">
-        <div className="cta-strip-inner">
-          <div>
-            <div className="cta-strip-title">Primeira aula é por nossa conta.</div>
-            <div className="cta-strip-sub">Venha conhecer o espaço sem compromisso algum.</div>
-          </div>
-          <div className="cta-strip-btns">
-            <button
-              className="btn btn-primary"
-              onClick={() => scrollTo('hero-form-anchor')}
-              style={{ padding: '14px 36px', fontSize: '15px' }}
-            >
-              Agendar aula grátis
-            </button>
-            {whatsappNum && (
-              <a
-                href={WHATSAPP_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="btn btn-wa"
-                style={{ padding: '14px 28px', fontSize: '15px' }}
-              >
-                💬 WhatsApp
-              </a>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Footer ─────────────────────────────────────────────────── */}
-      <footer id="sec-footer">
-        <div className="footer-grid">
-          {/* Brand col */}
-          <div>
-            <div className="nav-logo" style={{ marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div className="logo-mark">{nomeEstudio.charAt(0).toUpperCase()}</div>
-              <span className="logo-name">{nomeEstudio.toUpperCase()}</span>
-            </div>
-            <p style={{ fontSize: '14px', color: 'var(--muted)', lineHeight: '1.75', maxWidth: '260px' }}>
-              Espaço de movimento criado para quem quer resultado real e se sentir bem no processo.
-            </p>
-          </div>
-
-          {/* Contato col */}
-          <div>
-            <div className="footer-col-title">Contato</div>
-            {whatsappNum && (
-              <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="footer-link">
-                📱 WhatsApp
-              </a>
-            )}
-            {INSTAGRAM_URL !== '#' && (
-              <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" className="footer-link">
-                📷 Instagram
-              </a>
-            )}
-            {MAPS_URL !== '#' && (
-              <a href={MAPS_URL} target="_blank" rel="noreferrer" className="footer-link">
-                📍 Como chegar
-              </a>
-            )}
-          </div>
-
-          {/* Endereço col — só exibe se tiver mapa */}
-          {MAPS_URL !== '#' && (
-            <div>
-              <div className="footer-col-title">Localização</div>
-              <a
-                href={MAPS_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="btn btn-ghost btn-sm"
-                style={{ marginTop: '14px', display: 'inline-flex' }}
-              >
-                Abrir no Maps →
-              </a>
-            </div>
-          )}
-
-          {/* Links col */}
-          <div>
-            <div className="footer-col-title">Navegação</div>
-            <button className="footer-link" onClick={() => scrollTo('sec-aulas')}>Modalidades</button>
-            <button className="footer-link" onClick={() => scrollTo('sec-planos')}>Planos</button>
-            <button className="footer-link" onClick={() => navigate('/login')}>Área do Aluno</button>
-          </div>
-        </div>
-
-        {/* Google Maps embed — só exibe se o estúdio tiver configurado */}
-        {MAPS_EMBED && (
-          <div className="footer-map">
-            <iframe
-              title={`Localização ${nomeEstudio}`}
-              src={MAPS_EMBED}
-              width="100%"
-              height="200"
-              style={{ border: 0, borderRadius: '12px', filter: 'grayscale(20%)' }}
-              allowFullScreen=""
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-            ></iframe>
-          </div>
-        )}
-
-        <div className="footer-bottom">
-          <span className="footer-copy">© {new Date().getFullYear()} {nomeEstudio} · Todos os direitos reservados.</span>
-          {INSTAGRAM_URL !== '#' && (
-            <span className="footer-copy">
-              <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--pri)', fontWeight: 700, textDecoration: 'none' }}>
-                Instagram
-              </a>
-            </span>
-          )}
-        </div>
-      </footer>
-    </div>
-  );
 }
 </file>
 
@@ -10240,6 +9403,7 @@ import { supabase } from '../lib/supabase';
 
 import { professoresService } from '../services/professoresService';
 import { useDebounce } from '../hooks/useDebounce';
+import { useAuth } from '../hooks/useAuth';
 
 import { showToast } from '../components/shared/Toast';
 
@@ -10252,6 +9416,8 @@ import Skeleton from '../components/ui/Skeleton';
 import EmptyState from '../components/ui/EmptyState';
 
 export default function Professores() {
+  const { estudioId } = useAuth();
+
   const [professores, setProfessores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
@@ -10275,7 +9441,7 @@ export default function Professores() {
   async function carregarProfessores() {
     setLoading(true);
     try {
-      const data = await professoresService.listar(buscaDebounced);
+      const data = await professoresService.listar(buscaDebounced, estudioId);
       setProfessores(data);
     } catch {
       showToast.error('Erro ao carregar lista.');
@@ -10333,14 +9499,14 @@ export default function Professores() {
         // Caso 1 — novo cadastro com email: chama Edge Function e ela já salva auth_id
         const { data: funcData, error: funcError } = await supabase.functions.invoke(
           'gerenciar-acesso-professor',
-          { body: { acao: 'criar', professor_id: null, email: emailNovo, nome: formProfessor.nome } },
+          { body: { acao: 'criar', professor_id: null, email: emailNovo, nome: formProfessor.nome, estudio_id: estudioId } },
         );
         if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
         if (funcData?.error) throw new Error(funcData.error);
 
         // Para novo cadastro a função não tem professor_id ainda — salvamos sem auth_id
         // e atualizamos logo após ter o id retornado pelo insert
-        const professorSalvo = await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id });
+        const professorSalvo = await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id }, estudioId);
         // A função foi chamada sem professor_id; corrige agora
         await supabase.from('professores').update({ auth_id: funcData.auth_id }).eq('id', professorSalvo.id);
         toastMsg = funcData.reutilizado
@@ -10351,13 +9517,13 @@ export default function Professores() {
         // Caso 2 — removeu o email: exclui acesso
         const { data: funcData, error: funcError } = await supabase.functions.invoke(
           'gerenciar-acesso-professor',
-          { body: { acao: 'remover', professor_id: formProfessor.id, auth_id: authIdAtual } },
+          { body: { acao: 'remover', professor_id: formProfessor.id, auth_id: authIdAtual, estudio_id: estudioId } },
         );
         if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
         if (funcData?.error) throw new Error(funcData.error);
 
         // Salva o restante dos campos (email e auth_id já foram limpos pela função)
-        await professoresService.salvar({ ...formProfessor, email: null, auth_id: null });
+        await professoresService.salvar({ ...formProfessor, email: null, auth_id: null }, estudioId);
         toastMsg = funcData.user_deletado
           ? 'E-mail removido e acesso excluído.'
           : 'E-mail removido. Acesso mantido pois pertence a um aluno.';
@@ -10366,31 +9532,31 @@ export default function Professores() {
         // Caso 3 — trocou o email: deleta antigo, cria novo
         const { data: funcData, error: funcError } = await supabase.functions.invoke(
           'gerenciar-acesso-professor',
-          { body: { acao: 'trocar_email', professor_id: formProfessor.id, auth_id: authIdAtual, email: emailNovo, nome: formProfessor.nome } },
+          { body: { acao: 'trocar_email', professor_id: formProfessor.id, auth_id: authIdAtual, email: emailNovo, nome: formProfessor.nome, estudio_id: estudioId } },
         );
         if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
         if (funcData?.error) throw new Error(funcData.error);
 
-        await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id });
+        await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id }, estudioId);
         toastMsg = 'E-mail atualizado e novo acesso criado!';
 
       } else if (!isNovoCadastro && !tinhaAcesso && temEmailNovo) {
         // Caso 4 — não tinha acesso, adicionou email: cria acesso
         const { data: funcData, error: funcError } = await supabase.functions.invoke(
           'gerenciar-acesso-professor',
-          { body: { acao: 'criar', professor_id: formProfessor.id, email: emailNovo, nome: formProfessor.nome } },
+          { body: { acao: 'criar', professor_id: formProfessor.id, email: emailNovo, nome: formProfessor.nome, estudio_id: estudioId } },
         );
         if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
         if (funcData?.error) throw new Error(funcData.error);
 
-        await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id });
+         await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id }, estudioId);
         toastMsg = funcData.reutilizado
           ? 'Professor vinculado ao acesso existente!'
           : 'Acesso criado e professor atualizado!';
 
       } else {
         // Casos 5 e 6 — sem mudança de acesso, salva só os dados
-        await professoresService.salvar({ ...formProfessor, email: emailNovo || null });
+        await professoresService.salvar({ ...formProfessor, email: emailNovo || null }, estudioId);
       }
 
       showToast.success(toastMsg);
@@ -10405,7 +9571,7 @@ export default function Professores() {
 
   async function alternarStatus() {
     try {
-      await professoresService.alternarStatus(profSelecionado.id, !profSelecionado.ativo);
+      await professoresService.alternarStatus(profSelecionado.id, !profSelecionado.ativo, estudioId);
       showToast.success(profSelecionado.ativo ? 'Professor desativado.' : 'Professor reativado!');
       modalStatus.fechar();
       carregarProfessores();
@@ -10781,11 +9947,15 @@ export async function uploadLogo(estudioId, file) {
 import { supabase } from '../lib/supabase';
 
 export const professoresService = {
-  async listar(busca = '') {
+  async listar(busca = '', estudioId) {
     let query = supabase
       .from('professores')
       .select('*')
       .order('nome');
+
+      if (estudioId) {
+      query = query.eq('estudio_id', estudioId);
+    }
 
     if (busca) {
       query = query.ilike('nome', `%${busca}%`);
@@ -10829,11 +9999,17 @@ export const professoresService = {
     }
   },
 
-  async alternarStatus(id, novoStatus) {
-    const { error } = await supabase
+  async alternarStatus(id, novoStatus, estudioId) {
+    let query = supabase
       .from('professores')
       .update({ ativo: novoStatus })
       .eq('id', id);
+
+    if (estudioId) {
+      query = query.eq('estudio_id', estudioId);
+    }
+
+    const { error } = await query;
 
     if (error) throw error;
     return true;
@@ -10848,51 +10024,40 @@ export const professoresService = {
 // Todas as queries aqui são cross-tenant — leem de TODOS os estúdios.
 // O RLS deve permitir isso apenas para usuários com role 'super_admin'.
 //
-// NOTA: as queries de contagem (alunos, professores) usam `.select('*', { count: 'exact', head: true })`
-// com filtros por estudio_id para evitar carregar linhas desnecessárias.
+// NOTA: listarEstudios e metricasGlobais usam RPCs com agregação no banco
+// (receita_total_paga, listar_estudios_admin) em vez de somar/contar no
+// client, evitando carregar tabelas inteiras em memória e o truncamento
+// silencioso imposto pelo max_rows (1000) do PostgREST.
 
 import { supabase } from '../lib/supabase';
 
 // ── LISTA DE ESTÚDIOS ────────────────────────────────────────────────────────
 
+const DEFAULT_PAGE_SIZE = 50;
+
 /**
- * Retorna todos os estúdios com contagens de alunos e professores.
- * Cada item: { id, nome, slug, whatsapp, instagram, criado_em, status,
- *              total_alunos, total_professores }
+ * Retorna uma página de estúdios com contagens de alunos e professores,
+ * agregadas no banco via RPC (sem N+1, sem carregar tudo em memória).
+ * A busca é feita no servidor (nome/slug) para continuar funcionando
+ * corretamente junto com a paginação.
+ *
+ * @param {{ page?: number, pageSize?: number, busca?: string }} opts  page é 0-based.
+ * @returns {Promise<{ estudios: Array, totalCount: number }>}
  */
-async function listarEstudios() {
-  // 1. Busca todos os estúdios
-  const { data: estudios, error } = await supabase
-    .from('estudios')
-    .select('id, nome, slug, whatsapp, instagram, criado_em, status')
-    .order('criado_em', { ascending: false });
+async function listarEstudios({ page = 0, pageSize = DEFAULT_PAGE_SIZE, busca = '' } = {}) {
+  const { data, error } = await supabase.rpc('listar_estudios_admin', {
+    p_limit: pageSize,
+    p_offset: page * pageSize,
+    p_busca: busca?.trim() || null,
+  });
 
   if (error) throw error;
-  if (!estudios?.length) return [];
+  if (!data?.length) return { estudios: [], totalCount: 0 };
 
-  // 2. Para cada estúdio, busca contagens em paralelo
-  const comContagens = await Promise.all(
-    estudios.map(async (e) => {
-      const [{ count: total_alunos }, { count: total_professores }] = await Promise.all([
-        supabase
-          .from('alunos')
-          .select('*', { count: 'exact', head: true })
-          .eq('estudio_id', e.id),
-        supabase
-          .from('professores')
-          .select('*', { count: 'exact', head: true })
-          .eq('estudio_id', e.id),
-      ]);
+  const totalCount = Number(data[0].total_count ?? 0);
+  const estudios = data.map(({ total_count, ...e }) => e);
 
-      return {
-        ...e,
-        total_alunos:      total_alunos      ?? 0,
-        total_professores: total_professores ?? 0,
-      };
-    })
-  );
-
-  return comContagens;
+  return { estudios, totalCount };
 }
 
 // ── MÉTRICAS GLOBAIS ─────────────────────────────────────────────────────────
@@ -10903,27 +10068,23 @@ async function listarEstudios() {
  */
 async function metricasGlobais() {
   const [
-    { count: totalEstudios },
-    { count: totalAlunos },
-    { data: receita },
+    { count: totalEstudios, error: errEstudios },
+    { count: totalAlunos, error: errAlunos },
+    { data: receitaTotal, error: errReceita },
   ] = await Promise.all([
     supabase.from('estudios').select('*', { count: 'exact', head: true }),
     supabase.from('alunos').select('*', { count: 'exact', head: true }),
-    supabase
-      .from('mensalidades')
-      .select('valor_pago')
-      .eq('status', 'pago'),
+    supabase.rpc('receita_total_paga'),
   ]);
 
-  const receitaTotal = (receita ?? []).reduce(
-    (acc, m) => acc + Number(m.valor_pago ?? 0),
-    0
-  );
+  if (errEstudios) throw errEstudios;
+  if (errAlunos) throw errAlunos;
+  if (errReceita) throw errReceita;
 
   return {
     totalEstudios: totalEstudios ?? 0,
     totalAlunos:   totalAlunos   ?? 0,
-    receitaTotal,
+    receitaTotal:  Number(receitaTotal ?? 0),
   };
 }
 
@@ -10957,6 +10118,20 @@ async function criarEstudio({ nome, slug, adminEmail, adminNome, whatsapp, insta
 
   return data;
 }
+
+// ── Exemplo de uso no hook (TabelaEstudios.jsx) ──────────────────────────────
+//
+// const { data, isLoading } = useQuery({
+//   queryKey: ['super-admin', 'estudios', busca, pagina],
+//   queryFn: () => superAdminService.listarEstudios({ page: pagina, busca }),
+//   staleTime: 1000 * 60,
+//   keepPreviousData: true,
+// });
+// const estudios   = data?.estudios ?? [];
+// const totalCount = data?.totalCount ?? 0;
+//
+// A filtragem client-side com `estudios.filter(...)` deve ser removida —
+// a busca agora acontece no servidor via p_busca.
 
 export const superAdminService = {
   listarEstudios,
@@ -11251,7 +10426,7 @@ verify_jwt = false  # Permite chamada do cron sem auth
 [[cron]]
 name = "cobrancas-mensais"
 schedule = "0 8 1 * *"   # Dia 1 de cada mês, às 08h
-command = "POST https://<tciiepqmnrrcjnqhspvw>.supabase.co/functions/v1/gerar-mensalidades"
+command = "POST https://<tciiepqmnrrcjnqhspvw>.supabase.co/functions/v1/gerar-mensalidades -H 'x-cron-secret: ${CRON_SECRET}'"
 </file>
 
 <file path="supabase/functions/lembretes-aula/index.ts">
@@ -12337,103 +11512,6 @@ export function FormField({
     </div>
   );
 }
-</file>
-
-<file path="webapp/src/components/ui/Skeleton.jsx">
-// src/components/ui/Skeleton.jsx
-// ─── Midnight Indigo · Skeleton ───────────────────────────────────────────────
-//
-// Componentes de loading state consistentes com o design system.
-// Usa animate-pulse (Tailwind) + tokens do Midnight Indigo.
-// ─────────────────────────────────────────────────────────────────────────────
-
-import React from 'react';
-import { cn } from '../../lib/cn';
-
-/* ── Base Skeleton ───────────────────────────────────────────────────────────── */
-export function Skeleton({ className, ...rest }) {
-  return (
-    <div
-      className={cn('animate-pulse rounded-lg bg-muted', className)}
-      aria-hidden="true"
-      {...rest}
-    />
-  );
-}
-
-/* ── Linha de texto ─────────────────────────────────────────────────────────── */
-export function SkeletonText({ lines = 3, className }) {
-  return (
-    <div className={cn('space-y-2', className)} aria-hidden="true">
-      {Array.from({ length: lines }).map((_, i) => (
-        <Skeleton
-          key={i}
-          className={cn('h-4', i === lines - 1 ? 'w-3/4' : 'w-full')}
-        />
-      ))}
-    </div>
-  );
-}
-
-/* ── Card Skeleton ──────────────────────────────────────────────────────────── */
-export function SkeletonCard({ className }) {
-  return (
-    <div
-      className={cn(
-        'rounded-xl border border-border bg-card p-6 space-y-4',
-        className
-      )}
-      aria-hidden="true"
-    >
-      <div className="flex items-center gap-3">
-        <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
-        <div className="flex-1 space-y-2">
-          <Skeleton className="h-4 w-1/2" />
-          <Skeleton className="h-3 w-1/3" />
-        </div>
-      </div>
-      <SkeletonText lines={3} />
-    </div>
-  );
-}
-
-/* ── Row Skeleton (NOVO) ───────────────────────────────────────────────────── */
-export function SkeletonRow({ className }) {
-  return (
-    <div
-      className={cn('flex items-center gap-4 p-4', className)}
-      aria-hidden="true"
-    >
-      <Skeleton className="h-12 w-12 rounded-full shrink-0" />
-      <div className="flex-1 space-y-2">
-        <Skeleton className="h-4 w-1/2" />
-        <Skeleton className="h-3 w-1/3" />
-      </div>
-    </div>
-  );
-}
-
-/* ── Avatar Skeleton ────────────────────────────────────────────────────────── */
-export function SkeletonAvatar({ size = 'md', className }) {
-  const sizes = {
-    sm: 'h-8 w-8',
-    md: 'h-10 w-10',
-    lg: 'h-12 w-12',
-  };
-  return (
-    <Skeleton
-      className={cn('rounded-full shrink-0', sizes[size] ?? sizes.md, className)}
-    />
-  );
-}
-
-/* ── Compound component: anexa as variantes ao Skeleton base ───────────────── */
-Skeleton.Text = SkeletonText;
-Skeleton.Card = SkeletonCard;
-Skeleton.Row = SkeletonRow;
-Skeleton.Avatar = SkeletonAvatar;
-
-export default Skeleton;
 </file>
 
 <file path="webapp/src/components/ui/Surface.jsx">
@@ -14163,6 +13241,48 @@ export function useEstudio(estudioId) {
     enabled: !!estudioId,
     staleTime: 1000 * 60 * 10,
   });
+}
+</file>
+
+<file path="webapp/src/hooks/useEstudioPublico.js">
+// webapp/src/hooks/useEstudioPublico.js
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '../lib/supabase';
+import { getSlugFromHostname } from '../lib/resolveEstudio';
+
+/**
+ * Busca dados públicos do estúdio pelo slug do hostname.
+ * Usado em Landing e Login (pré-autenticação), onde o RLS por auth.uid()
+ * ainda não está disponível.
+ *
+ * Retorna tudo que useQuery retorna, mais `slug` para mensagens de erro.
+ *
+ * Casos:
+ *  - slug null (localhost sem VITE_DEV_SLUG) → data: null, sem request ao banco
+ *  - slug válido mas não existe no banco     → data: null (maybeSingle)
+ *  - slug encontrado                         → data: { id, nome, slug, ... }
+ */
+export function useEstudioPublico() {
+  const slug = getSlugFromHostname();
+
+  const query = useQuery({
+    queryKey: ['estudio-publico', slug],
+    queryFn: async () => {
+      if (!slug) return null;
+
+      const { data, error } = await supabase
+        .from('estudios')
+        .select('id, nome, slug, whatsapp, instagram, maps_url')
+        .eq('slug', slug)
+        .maybeSingle(); // retorna null sem lançar erro quando não encontra
+
+      if (error) throw error;
+      return data;
+    },
+    staleTime: 1000 * 60 * 60, // 1h — dados de contato raramente mudam
+  });
+
+  return { ...query, slug };
 }
 </file>
 
@@ -16378,7 +15498,6 @@ import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import Skeleton from '../components/ui/Skeleton';
-import { SkeletonCard } from '../components/ui/Skeleton';
 import Surface from '../components/ui/Surface';
 
 const MESES = [
@@ -16572,7 +15691,7 @@ export default function Aniversariantes() {
           <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-muted/30">
             {loading ? (
               <div className="space-y-3">
-                {[1, 2, 3, 4].map(i => <SkeletonCard key={i} className="bg-card rounded-3xl" />)}
+                {[1, 2, 3, 4].map(i => <Skeleton.Row key={i} className="bg-card rounded-3xl" />)}
               </div>
             ) : aniversariantesFiltrados.length === 0 ? (
               <div className="h-full flex items-center justify-center">
@@ -17206,6 +16325,497 @@ const nomeEstudio = estudio?.nome;
           </div>
         )}
       </div>
+    </div>
+  );
+}
+</file>
+
+<file path="webapp/src/pages/Dashboard.jsx">
+import React, { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { dashboardService } from '../services/dashboardService';
+import {
+  AlertCircle, Clock, Cake, MessageCircle,
+  CheckCircle2, Bell, Users, CalendarCheck,
+  ChevronRight, Wallet,
+} from 'lucide-react';
+import { addDays, format, startOfMonth } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { formatarMoeda } from '../lib/utils';
+import Surface from '../components/ui/Surface';
+import Skeleton from '../components/ui/Skeleton';
+import Badge from '../components/ui/Badge';
+import Button from '../components/ui/Button';
+import Modal, { useModal } from '../components/ui/Modal';
+import { Link } from 'react-router-dom';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function calcularIdade(dataNasc) {
+  if (!dataNasc) return null;
+  const hoje = new Date();
+  const nasc = new Date(dataNasc + 'T12:00:00');
+  let idade = hoje.getFullYear() - nasc.getFullYear();
+  if (
+    hoje.getMonth() < nasc.getMonth() ||
+    (hoje.getMonth() === nasc.getMonth() && hoje.getDate() < nasc.getDate())
+  ) idade--;
+  return idade;
+}
+
+function aniversariantesDoDia(alunos) {
+  const hoje = new Date();
+  const mesHoje = hoje.getMonth() + 1;
+  const diaHoje = hoje.getDate();
+  return (alunos || []).filter(a => {
+    if (!a.data_nascimento) return false;
+    const [, m, d] = a.data_nascimento.split('-').map(Number);
+    return m === mesHoje && d === diaHoje;
+  });
+}
+
+function aniversariantesProximos(alunos, dias = 7) {
+  const hoje = new Date();
+  return (alunos || []).filter(a => {
+    if (!a.data_nascimento) return false;
+    for (let i = 1; i <= dias; i++) {
+      const d = addDays(hoje, i);
+      const [, m, day] = a.data_nascimento.split('-').map(Number);
+      if (m === d.getMonth() + 1 && day === d.getDate()) return true;
+    }
+    return false;
+  }).sort((a, b) => {
+    const [, ma, da] = a.data_nascimento.split('-').map(Number);
+    const [, mb, db] = b.data_nascimento.split('-').map(Number);
+    return ma !== mb ? ma - mb : da - db;
+  });
+}
+
+function gerarLinkWhatsApp(telefone, mensagem) {
+  const num = (telefone || '').replace(/\D/g, '');
+  return `https://wa.me/55${num}?text=${encodeURIComponent(mensagem)}`;
+}
+
+// ── Seção de avisos com barra colorida ───────────────────────────────────────
+function SecaoAviso({ tipo, icone, titulo, children }) {
+  const ESTILOS = {
+    danger:  'border-l-4 border-destructive bg-destructive-soft',
+    warning: 'border-l-4 border-warning bg-warning-soft',
+    success: 'border-l-4 border-success bg-success-soft',
+    info:    'border-l-4 border-info bg-info-soft',
+    brand:   'border-l-4 border-primary bg-primary-soft',
+  };
+  const COR_ICONE = {
+    danger:  'text-destructive',
+    warning: 'text-warning',
+    success: 'text-success',
+    info:    'text-info',
+    brand:   'text-primary',
+  };
+  return (
+    <Surface variant="card" padding="none" className="overflow-hidden">
+      <div className={`${ESTILOS[tipo]} px-5 py-4 flex items-center gap-3`}>
+        <span className={`shrink-0 ${COR_ICONE[tipo]}`}>{icone}</span>
+        <h3 className={`font-black text-sm ${COR_ICONE[tipo]}`}>{titulo}</h3>
+      </div>
+      <div className="p-5">{children}</div>
+    </Surface>
+  );
+}
+
+// ── Card de aluno compacto ─────────────────────────────────────────────────────
+function CardAluno({ nome, info, acao, badge }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5 border-b border-border/60 last:border-0">
+      <div className="flex-1 min-w-0">
+        <p className="font-bold text-foreground text-sm truncate">{nome}</p>
+        {info && <p className="text-xs text-muted-foreground">{info}</p>}
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {badge}
+        {acao}
+      </div>
+    </div>
+  );
+}
+
+// ── Página principal ──────────────────────────────────────────────────────────
+export default function Dashboard() {
+  const modalInadimplencia = useModal();
+
+  const agora        = new Date();
+  const hojeIso      = agora.toISOString().split('T')[0];
+  const inicioMes    = startOfMonth(agora).toISOString();
+  const limite7Dias  = format(addDays(agora, 7), 'yyyy-MM-dd');
+
+  // ── Query única — todas as chamadas rodam em paralelo via Promise.all ─────
+  const {
+    data: {
+      totalAlunos        = 0,
+      pagamentosMes      = [],
+      listaInadimplentes = [],
+      alunosPlanosVencendo = [],
+      todosAlunos        = [],
+    } = {},
+    isLoading,
+  } = useQuery({
+    queryKey: ['dashboard', hojeIso, inicioMes, limite7Dias],
+    queryFn:  () => dashboardService.obterTudoDashboard({ hojeIso, inicioMes, limite7Dias }),
+    staleTime: 1000 * 60 * 5,
+  });
+
+  // Aliases de loading para manter compatibilidade com os Skeletons abaixo
+  const loadingAlunos  = isLoading;
+  const loadingPag     = isLoading;
+  const loadingInadim  = isLoading;
+  const loadingVencendo = isLoading;
+
+  // ── Derivações ─────────────────────────────────────────────────────────────
+  const faturamentoMes = useMemo(
+    () => pagamentosMes.reduce((acc, m) => acc + Number(m.valor_pago), 0),
+    [pagamentosMes]
+  );
+
+  const inadimplenciaTotal = useMemo(
+    () => listaInadimplentes.reduce((acc, m) => acc + Number(m.valor_pago), 0),
+    [listaInadimplentes]
+  );
+
+  const aniversariantesHoje     = useMemo(() => aniversariantesDoDia(todosAlunos), [todosAlunos]);
+  const aniversariantesEmBreve  = useMemo(() => aniversariantesProximos(todosAlunos, 7), [todosAlunos]);
+
+  const nomesMes = format(agora, 'MMMM', { locale: ptBR });
+  const nomesMesCapitalizado = nomesMes.charAt(0).toUpperCase() + nomesMes.slice(1);
+
+  const handleCobranca = (aluno, vencimento, valor) => {
+    const data = format(new Date(vencimento + 'T12:00:00'), 'dd/MM/yyyy');
+    const msg  = `Olá, ${aluno?.nome_completo?.split(' ')[0]}! Seu pagamento de ${formatarMoeda(valor)}, com vencimento em ${data}, ainda está em aberto. Podemos verificar juntos? 🙏`;
+    window.open(gerarLinkWhatsApp(aluno?.telefone, msg), '_blank');
+  };
+
+  const handleParabens = (aluno) => {
+    const msg = `Feliz aniversário, ${aluno.nome_completo?.split(' ')[0]}! 🎂 Toda a equipe do espaço deseja a você um dia incrível!`;
+    window.open(gerarLinkWhatsApp(aluno.telefone, msg), '_blank');
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-500 bg-background min-h-screen">
+
+      {/* Cabeçalho */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+        <div>
+          <h1 className="text-3xl font-black text-foreground tracking-tight flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-primary-soft flex items-center justify-center">
+              <Bell size={20} className="text-primary" />
+            </div>
+            Painel de Avisos
+          </h1>
+          <p className="text-muted-foreground font-medium mt-1">
+            {format(agora, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })
+              .replace(/^./, c => c.toUpperCase())}
+          </p>
+        </div>
+        <Link to="/resultado-financeiro">
+          <Button variant="outline" size="sm" rightIcon={<ChevronRight size={16} />}>
+            Ver DRE do mês
+          </Button>
+        </Link>
+      </div>
+
+      {/* Métricas rápidas do mês */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <Surface variant="card" padding="lg" className="flex items-center gap-4">
+          <div className="w-11 h-11 rounded-2xl bg-success-soft flex items-center justify-center shrink-0">
+            <Wallet size={20} className="text-success" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Receita {nomesMesCapitalizado}
+            </p>
+            {loadingPag
+              ? <Skeleton className="h-6 w-24 mt-1" />
+              : <p className="text-lg font-black text-foreground">{formatarMoeda(faturamentoMes)}</p>
+            }
+          </div>
+        </Surface>
+
+        <Surface variant="card" padding="lg" className="flex items-center gap-4">
+          <div className="w-11 h-11 rounded-2xl bg-brand-soft bg-primary-soft flex items-center justify-center shrink-0">
+            <Users size={20} className="text-primary" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Alunos Ativos
+            </p>
+            {loadingAlunos
+              ? <Skeleton className="h-6 w-16 mt-1" />
+              : <p className="text-lg font-black text-foreground">{totalAlunos}</p>
+            }
+          </div>
+        </Surface>
+
+        <Surface variant="card" padding="lg" className="flex items-center gap-4 col-span-2 md:col-span-1">
+          <div className="w-11 h-11 rounded-2xl bg-destructive-soft flex items-center justify-center shrink-0">
+            <AlertCircle size={20} className="text-destructive" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Em Atraso
+            </p>
+            {loadingInadim
+              ? <Skeleton className="h-6 w-24 mt-1" />
+              : (
+                <p className="text-lg font-black text-destructive">
+                  {listaInadimplentes.length} alunos
+                </p>
+              )
+            }
+          </div>
+        </Surface>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Coluna esquerda */}
+        <div className="space-y-6">
+
+          {/* Pagamentos em atraso */}
+          {loadingInadim ? (
+            <Skeleton className="h-48 w-full rounded-2xl" />
+          ) : listaInadimplentes.length > 0 ? (
+            <SecaoAviso
+              tipo="danger"
+              icone={<AlertCircle size={18} />}
+              titulo={`${listaInadimplentes.length} pagamento${listaInadimplentes.length > 1 ? 's' : ''} em atraso — ${formatarMoeda(inadimplenciaTotal)} em aberto`}
+            >
+              <div className="space-y-1">
+                {listaInadimplentes.slice(0, 5).map(item => (
+                  <CardAluno
+                    key={item.id}
+                    nome={item.alunos?.nome_completo}
+                    info={`Venc: ${format(new Date(item.data_vencimento + 'T12:00:00'), 'dd/MM/yyyy')} · ${formatarMoeda(item.valor_pago)}`}
+                    acao={
+                      item.alunos?.telefone && (
+                        <button
+                          onClick={() => handleCobranca(item.alunos, item.data_vencimento, item.valor_pago)}
+                          className="text-xs bg-[#25D366] text-white px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 hover:bg-[#20bd5a] transition-colors"
+                        >
+                          <MessageCircle size={13} /> Cobrar
+                        </button>
+                      )
+                    }
+                  />
+                ))}
+                {listaInadimplentes.length > 5 && (
+                  <button
+                    onClick={modalInadimplencia.abrir}
+                    className="text-xs text-muted-foreground hover:text-foreground font-bold pt-2 flex items-center gap-1"
+                  >
+                    Ver mais {listaInadimplentes.length - 5} <ChevronRight size={13} />
+                  </button>
+                )}
+              </div>
+            </SecaoAviso>
+          ) : (
+            <SecaoAviso
+              tipo="success"
+              icone={<CheckCircle2 size={18} />}
+              titulo="Nenhum pagamento em atraso 🎉"
+            >
+              <p className="text-sm text-success font-medium">
+                Todos os alunos estão em dia com os pagamentos neste mês.
+              </p>
+            </SecaoAviso>
+          )}
+
+          {/* Planos vencendo em 7 dias */}
+          {loadingVencendo ? (
+            <Skeleton className="h-48 w-full rounded-2xl" />
+          ) : alunosPlanosVencendo.length > 0 ? (
+            <SecaoAviso
+              tipo="warning"
+              icone={<Clock size={18} />}
+              titulo={`${alunosPlanosVencendo.length} plano${alunosPlanosVencendo.length > 1 ? 's' : ''} vencendo nos próximos 7 dias`}
+            >
+              <div className="space-y-1">
+                {alunosPlanosVencendo.map(a => (
+                  <CardAluno
+                    key={a.id}
+                    nome={a.nome_completo}
+                    info={`Vence em ${format(new Date(a.data_fim_plano + 'T12:00:00'), 'dd/MM/yyyy')}`}
+                    badge={
+                      <Badge tone="warning">
+                        {Math.ceil(
+                          (new Date(a.data_fim_plano + 'T12:00:00') - agora) / (1000 * 60 * 60 * 24)
+                        )}d
+                      </Badge>
+                    }
+                  />
+                ))}
+              </div>
+              <p className="text-xs text-warning font-medium mt-3">
+                💡 Entre em contato para garantir a renovação antes do vencimento.
+              </p>
+            </SecaoAviso>
+          ) : (
+            <SecaoAviso
+              tipo="info"
+              icone={<CalendarCheck size={18} />}
+              titulo="Nenhum plano vencendo esta semana"
+            >
+              <p className="text-sm text-info font-medium">
+                Todos os planos têm vencimento além dos próximos 7 dias.
+              </p>
+            </SecaoAviso>
+          )}
+        </div>
+
+        {/* Coluna direita */}
+        <div className="space-y-6">
+
+          {/* Aniversariantes hoje */}
+          {aniversariantesHoje.length > 0 && (
+            <SecaoAviso
+              tipo="brand"
+              icone={<Cake size={18} />}
+              titulo={`🎂 ${aniversariantesHoje.length > 1 ? `${aniversariantesHoje.length} aniversariantes` : 'Aniversariante'} hoje!`}
+            >
+              <div className="space-y-1">
+                {aniversariantesHoje.map(a => (
+                  <CardAluno
+                    key={a.id}
+                    nome={a.nome_completo}
+                    info={`${calcularIdade(a.data_nascimento)} anos hoje 🎉`}
+                    acao={
+                      a.telefone && (
+                        <button
+                          onClick={() => handleParabens(a)}
+                          className="text-xs bg-[#25D366] text-white px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 hover:bg-[#20bd5a] transition-colors"
+                        >
+                          <MessageCircle size={13} /> Parabéns
+                        </button>
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            </SecaoAviso>
+          )}
+
+          {/* Aniversariantes próximos 7 dias */}
+          {aniversariantesEmBreve.length > 0 ? (
+            <SecaoAviso
+              tipo="info"
+              icone={<Cake size={18} />}
+              titulo={`${aniversariantesEmBreve.length} aniversário${aniversariantesEmBreve.length > 1 ? 's' : ''} nos próximos 7 dias`}
+            >
+              <div className="space-y-1">
+                {aniversariantesEmBreve.map(a => {
+                  const [, m, d] = a.data_nascimento.split('-').map(Number);
+                  const dataAniv = new Date(agora.getFullYear(), m - 1, d);
+                  return (
+                    <CardAluno
+                      key={a.id}
+                      nome={a.nome_completo}
+                      info={format(dataAniv, "dd 'de' MMMM", { locale: ptBR })}
+                      badge={
+                        <Badge tone="info">
+                          {Math.ceil((dataAniv - agora) / (1000 * 60 * 60 * 24))}d
+                        </Badge>
+                      }
+                      acao={
+                        a.telefone && (
+                          <button
+                            onClick={() => handleParabens(a)}
+                            className="text-xs bg-[#25D366] text-white px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 hover:bg-[#20bd5a] transition-colors"
+                          >
+                            <MessageCircle size={13} />
+                          </button>
+                        )
+                      }
+                    />
+                  );
+                })}
+              </div>
+            </SecaoAviso>
+          ) : aniversariantesHoje.length === 0 ? (
+            <SecaoAviso
+              tipo="info"
+              icone={<Cake size={18} />}
+              titulo="Nenhum aniversário nos próximos 7 dias"
+            >
+              <p className="text-sm text-info font-medium">
+                Aproveite para checar os aniversários do mês na seção de Aniversariantes.
+              </p>
+            </SecaoAviso>
+          ) : null}
+
+          {/* Link rápido para DRE */}
+          <Surface variant="card" padding="lg">
+            <div className="flex items-start gap-4">
+              <div className="w-11 h-11 rounded-2xl bg-primary-soft flex items-center justify-center shrink-0">
+                <Wallet size={20} className="text-primary" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-black text-foreground text-sm">Resultado Financeiro</h3>
+                <p className="text-xs text-muted-foreground mt-1 mb-3">
+                  Acesse o DRE completo com receitas, despesas, comissões e lucro líquido do mês.
+                </p>
+                <Link to="/resultado-financeiro">
+                  <Button variant="brand" size="sm" rightIcon={<ChevronRight size={16} />}>
+                    Ver DRE completo
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </Surface>
+        </div>
+      </div>
+
+      {/* Modal de inadimplência completo */}
+      <Modal
+        aberto={modalInadimplencia.aberto}
+        fechar={modalInadimplencia.fechar}
+        title="Pagamentos em Atraso"
+        size="md"
+      >
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1 custom-scrollbar">
+          <div className="bg-destructive-soft border border-destructive/20 p-4 rounded-2xl flex justify-between items-center mb-2">
+            <div>
+              <p className="text-xs font-bold text-destructive">Total em atraso</p>
+              <h3 className="text-2xl font-black text-destructive">{formatarMoeda(inadimplenciaTotal)}</h3>
+            </div>
+            <div className="text-right">
+              <p className="text-xs font-bold text-destructive">Alunos</p>
+              <h3 className="text-2xl font-black text-destructive">{listaInadimplentes.length}</h3>
+            </div>
+          </div>
+          {listaInadimplentes.map(item => (
+            <div
+              key={item.id}
+              className="bg-card border border-border p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 hover:border-destructive/30 transition-colors"
+            >
+              <div>
+                <h4 className="font-bold text-foreground">{item.alunos?.nome_completo}</h4>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xs font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded-md">
+                    Venc: {format(new Date(item.data_vencimento + 'T12:00:00'), 'dd/MM/yyyy')}
+                  </span>
+                  <span className="text-xs font-black text-destructive">
+                    {formatarMoeda(item.valor_pago)}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => handleCobranca(item.alunos, item.data_vencimento, item.valor_pago)}
+                className="w-full sm:w-auto bg-[#25D366] text-white px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-[#20bd5a] transition-colors"
+              >
+                <MessageCircle size={16} /> Cobrar via WhatsApp
+              </button>
+            </div>
+          ))}
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -17990,6 +17600,486 @@ const CardMetrica = ({ titulo, valor, icone, tone }) => (
     </div>
   </Surface>
 );
+</file>
+
+<file path="webapp/src/pages/Landing.jsx">
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+import './landing.css';
+import { useEstudioPublico } from '../hooks/useEstudioPublico';
+
+export default function Landing() {
+  const navigate = useNavigate();
+
+  // ── Dados públicos do estúdio (resolvido pelo subdomínio) ────────────
+  const { data: estudio, isLoading: estudioLoading, slug } = useEstudioPublico();
+
+  // ── Lead form state ─────────────────────────────────────────────────
+  const [leadNome, setLeadNome] = useState('');
+  const [leadTel, setLeadTel] = useState('');
+  const [leadLoading, setLeadLoading] = useState(false);
+  const [leadStatus, setLeadStatus] = useState(null); // 'ok' | 'err' | null
+  const [leadErro, setLeadErro] = useState('');
+
+  // ── Plans from Supabase ──────────────────────────────────────────────
+  const [planos, setPlanos] = useState([]);
+  const [planosLoading, setPlanosLoading] = useState(true);
+
+  useEffect(() => {
+    // Só busca planos quando o estúdio estiver resolvido e tiver id
+    if (!estudio?.id) return;
+
+    async function carregarPlanos() {
+      try {
+        const { data, error } = await supabase
+          .from('planos')
+          .select('id, nome, preco, duracao_meses, frequencia_semanal, regras_acesso')
+          .eq('estudio_id', estudio.id)
+          .order('preco', { ascending: true });
+        if (!error && data) setPlanos(data);
+      } catch (_) {
+        // Silently fail — seção de planos ficará oculta
+      } finally {
+        setPlanosLoading(false);
+      }
+    }
+    carregarPlanos();
+  }, [estudio?.id]);
+
+  // ── Tela de erro: slug no hostname mas estúdio não encontrado no banco
+  if (!estudioLoading && slug && !estudio) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-6 text-center">
+        <div>
+          <p style={{ fontSize: '48px', marginBottom: '16px' }}>🔍</p>
+          <h1 style={{ fontSize: '24px', fontWeight: 900, color: '#1f2937', marginBottom: '8px' }}>
+            Estúdio não encontrado
+          </h1>
+          <p style={{ color: '#6b7280' }}>
+            Nenhum estúdio cadastrado para <strong>{slug}</strong>.gestao.app
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────
+  const scrollTo = (id) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  function formatTelefone(val) {
+    const digits = val.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+
+  async function handleLeadSubmit(e) {
+    e.preventDefault();
+    if (!leadNome.trim() || !leadTel.trim()) return;
+    setLeadLoading(true);
+    setLeadStatus(null);
+    setLeadErro('');
+    try {
+      const { error } = await supabase
+        .from('presencas_agenda')
+        .insert([{
+          estudio_id: estudio.id,                    // ← isolamento multi-tenant
+          nome_visitante: leadNome.trim(),
+          telefone_visitante: leadTel.replace(/\D/g, ''),
+          status_conversao: 'pendente',
+        }]);
+
+      if (error) throw error;
+      setLeadStatus('ok');
+      setLeadNome('');
+      setLeadTel('');
+    } catch (err) {
+      console.error(err);
+      setLeadStatus('err');
+      setLeadErro('Não conseguimos registrar agora. Tente novamente ou fale pelo WhatsApp.');
+    } finally {
+      setLeadLoading(false);
+    }
+  }
+
+  // ── Plan helpers ─────────────────────────────────────────────────────
+  const isFeatured = (plano, todos) => {
+    if (todos.length === 0) return false;
+    const mid = Math.floor(todos.length / 2);
+    return todos.indexOf(plano) === mid;
+  };
+
+  // ── Dados de contato (Supabase > fallback hardcoded) ─────────────────
+  const nomeEstudio   = estudio?.nome         ?? 'Gestão App';
+  const whatsappNum   = estudio?.whatsapp     ?? '';
+  const WHATSAPP_URL  = whatsappNum
+    ? `https://wa.me/${whatsappNum}?text=Olá!%20Vi%20o%20site%20e%20quero%20saber%20mais.`
+    : '#';
+  const INSTAGRAM = estudio?.instagram ?? '#';
+  const MAPS_URL      = estudio?.maps_url      ?? '#';
+  const MAPS_EMBED    = estudio?.maps_embed_url ?? '';
+
+  return (
+    <div id="page-landing">
+
+      {/* ── Navbar ─────────────────────────────────────────────────── */}
+      <nav className="navbar">
+        <a className="nav-logo" href="/">
+          <div className="logo-mark">{nomeEstudio.charAt(0).toUpperCase()}</div>
+          <span className="logo-name">{nomeEstudio.toUpperCase()}</span>
+        </a>
+        <div className="nav-links">
+          <button className="nav-link" onClick={() => scrollTo('sec-aulas')}>Modalidades</button>
+          <button className="nav-link" onClick={() => scrollTo('sec-planos')}>Planos</button>
+          <button className="nav-link" onClick={() => scrollTo('sec-footer')}>Contato</button>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => navigate('/login')}
+          >
+            Já sou aluno →
+          </button>
+        </div>
+      </nav>
+
+      {/* ── Hero ───────────────────────────────────────────────────── */}
+      <section className="hero">
+        <div className="hero-deco">
+          <div className="hero-blob"></div>
+          <div className="hero-circle" style={{ width: '600px', height: '600px', top: '50%', left: '50%', transform: 'translate(-50%,-50%)' }}></div>
+          <div className="hero-circle" style={{ width: '400px', height: '400px', top: '50%', left: '50%', transform: 'translate(-50%,-50%)' }}></div>
+          <div className="hero-circle" style={{ width: '220px', height: '220px', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: 'rgba(217,142,115,.05)' }}></div>
+        </div>
+
+        <div className="hero-content" style={{ maxWidth: '680px', position: 'relative', zIndex: 1 }}>
+          <div className="hero-tag anim-fade-up">
+            <span className="hero-dot"></span>
+            Funcional · Dança · Bem-estar
+          </div>
+
+          <h1 className="anim-fade-up s1">
+            Mova-se,<br />expresse-se,<br /><em>ilumine-se.</em>
+          </h1>
+
+          <p className="hero-sub anim-fade-up s2">
+            Treinamento funcional e dança para quem quer resultado e não abre mão de se sentir bem.
+            Primeira aula grátis — sem compromisso.
+          </p>
+
+          {/* ── Inline Lead Form ──────────────────────────────────── */}
+          <div className="hero-form-wrap anim-fade-up s3">
+            {leadStatus === 'ok' ? (
+              <div className="lead-success anim-scale-in">
+                <span className="lead-success-icon">✓</span>
+                <div>
+                  <strong>Perfeito! Aguarde nosso contato.</strong>
+                  <span>Nossa equipe vai chamar você em breve pelo WhatsApp.</span>
+                </div>
+              </div>
+            ) : (
+              <form className="hero-form" onSubmit={handleLeadSubmit}>
+                <div className="hero-form-fields">
+                  <div className="inp-group" style={{ marginBottom: 0 }}>
+                    <input
+                      className={`inp${leadStatus === 'err' ? ' error' : ''}`}
+                      type="text"
+                      placeholder="Seu nome"
+                      value={leadNome}
+                      onChange={e => setLeadNome(e.target.value)}
+                      required
+                      autoComplete="given-name"
+                    />
+                  </div>
+                  <div className="inp-group" style={{ marginBottom: 0 }}>
+                    <input
+                      className={`inp${leadStatus === 'err' ? ' error' : ''}`}
+                      type="tel"
+                      placeholder="WhatsApp (com DDD)"
+                      value={leadTel}
+                      onChange={e => setLeadTel(formatTelefone(e.target.value))}
+                      required
+                      autoComplete="tel"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="btn btn-primary hero-form-submit"
+                    disabled={leadLoading || !estudio}
+                  >
+                    {leadLoading
+                      ? <><span className="spinner"></span> Enviando…</>
+                      : 'Quero uma aula experimental'}
+                  </button>
+                </div>
+                {leadStatus === 'err' && (
+                  <p className="inp-err" style={{ marginTop: '10px' }}>{leadErro}</p>
+                )}
+                <p className="hero-form-hint">
+                  Gratuito, sem cartão, sem compromisso.{whatsappNum && (
+                    <> Ou{' '}
+                      <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="hero-form-link">
+                        fale direto no WhatsApp →
+                      </a>
+                    </>
+                  )}
+                </p>
+              </form>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Modalidades ────────────────────────────────────────────── */}
+      <section id="sec-aulas" className="section section-alt">
+        <div className="section-header">
+          <div className="section-tag">O que oferecemos</div>
+          <h2 className="section-title">Nossas Modalidades</h2>
+          <p className="section-sub">
+            Duas práticas poderosas sob o mesmo teto, com instrutores apaixonados
+            e metodologias que realmente funcionam.
+          </p>
+        </div>
+        <div className="modality-grid">
+          {/* Card Funcional */}
+          <div className="modality-card funcional anim-fade-up">
+            <div className="modality-icon" style={{ background: 'rgba(217,142,115,.15)', fontSize: '26px' }}>⚡</div>
+            <h3 className="modality-title" style={{ color: 'var(--pri)' }}>Funcional</h3>
+            <p className="modality-desc">
+              Treinamento de alta performance que desenvolve força, equilíbrio e
+              condicionamento completo — para todos os níveis.
+            </p>
+            <div className="schedule-label" style={{ color: 'var(--pri)' }}>Grade de horários</div>
+            <div className="schedule-item">Seg / Qua / Sex — 07:00 e 09:00</div>
+            <div className="schedule-item">Seg a Sex — 18:30</div>
+            <div className="schedule-item">Sábados — 09:00</div>
+            <div style={{ marginTop: '28px' }}>
+              <button className="btn btn-outline btn-sm" onClick={() => scrollTo('hero-form-anchor')}>
+                Quero experimentar
+              </button>
+            </div>
+          </div>
+
+          {/* Card Dança */}
+          <div className="modality-card danca anim-fade-up s1">
+            <div className="modality-icon" style={{ background: 'rgba(138,154,91,.15)', fontSize: '26px' }}>✦</div>
+            <h3 className="modality-title" style={{ color: 'var(--sec-d)' }}>Dança</h3>
+            <p className="modality-desc">
+              Do samba ao contemporâneo, celebramos o movimento e a expressão
+              artística em aulas que energizam corpo e mente.
+            </p>
+            <div className="schedule-label" style={{ color: 'var(--sec-d)' }}>Grade de horários</div>
+            <div className="schedule-item">Terças e Quintas — 19:00 e 20:00</div>
+            <div className="schedule-item">Quartas — 20:00</div>
+            <div className="schedule-item">Sábados — 10:00</div>
+            <div style={{ marginTop: '28px' }}>
+              <button
+                className="btn btn-sm"
+                style={{ background: 'var(--sec)', color: '#fff' }}
+                onClick={() => scrollTo('hero-form-anchor')}
+              >
+                Quero experimentar
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Planos (Supabase) ──────────────────────────────────────── */}
+      {(planosLoading || planos.length > 0) && (
+        <section id="sec-planos" className="section">
+          <div className="section-header">
+            <div className="section-tag">Invista em você</div>
+            <h2 className="section-title">Nossos Planos</h2>
+            <p className="section-sub">
+              Escolha o plano que encaixa na sua rotina. Sem taxa de adesão.
+            </p>
+          </div>
+
+          {planosLoading ? (
+            <div className="plans-loading">
+              <div className="plans-skeleton"></div>
+              <div className="plans-skeleton"></div>
+              <div className="plans-skeleton"></div>
+            </div>
+          ) : (
+            <div
+              className="plans-grid"
+              style={planos.length === 1 ? { gridTemplateColumns: '1fr', maxWidth: '360px' } :
+                     planos.length === 2 ? { gridTemplateColumns: 'repeat(2,1fr)', maxWidth: '660px' } : {}}
+            >
+              {planos.map((plano) => {
+                const featured = isFeatured(plano, planos);
+                const regras = Array.isArray(plano.regras_acesso) ? plano.regras_acesso : [];
+                return (
+                  <div key={plano.id} className={`plan-card${featured ? ' featured' : ''}`}>
+                    {featured && <div className="plan-popular">Mais escolhido</div>}
+                    <div className="plan-name">{plano.nome}</div>
+                    <div className="plan-price">
+                      <span style={{ fontSize: '18px', color: 'var(--muted)', alignSelf: 'flex-start', paddingTop: '8px' }}>R$</span>
+                      <span className="plan-price-num">
+                        {Number(plano.preco).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </span>
+                      <span className="plan-price-per">/mês</span>
+                    </div>
+                    <div className="plan-features">
+                      {plano.duracao_meses && (
+                        <div className="plan-feat">
+                          <span className="feat-check">✓</span>
+                          <span>{plano.duracao_meses} {plano.duracao_meses === 1 ? 'mês' : 'meses'} de acesso</span>
+                        </div>
+                      )}
+                      {plano.frequencia_semanal && (
+                        <div className="plan-feat">
+                          <span className="feat-check">✓</span>
+                          <span>{plano.frequencia_semanal}× por semana</span>
+                        </div>
+                      )}
+                      {regras.map((r, i) => (
+                        <div key={i} className="plan-feat">
+                          <span className="feat-check">✓</span>
+                          <span>{r}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      className={`btn btn-full${featured ? ' btn-primary' : ' btn-outline'}`}
+                      onClick={() => scrollTo('hero-form-anchor')}
+                    >
+                      Começar agora
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── Anchor for "Quero experimentar" scrolls ────────────────── */}
+      <div id="hero-form-anchor" style={{ height: 0 }}></div>
+
+      {/* ── Second CTA strip ───────────────────────────────────────── */}
+      <section className="cta-strip">
+        <div className="cta-strip-inner">
+          <div>
+            <div className="cta-strip-title">Primeira aula é por nossa conta.</div>
+            <div className="cta-strip-sub">Venha conhecer o espaço sem compromisso algum.</div>
+          </div>
+          <div className="cta-strip-btns">
+            <button
+              className="btn btn-primary"
+              onClick={() => scrollTo('hero-form-anchor')}
+              style={{ padding: '14px 36px', fontSize: '15px' }}
+            >
+              Agendar aula grátis
+            </button>
+            {whatsappNum && (
+              <a
+                href={WHATSAPP_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-wa"
+                style={{ padding: '14px 28px', fontSize: '15px' }}
+              >
+                💬 WhatsApp
+              </a>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Footer ─────────────────────────────────────────────────── */}
+      <footer id="sec-footer">
+        <div className="footer-grid">
+          {/* Brand col */}
+          <div>
+            <div className="nav-logo" style={{ marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div className="logo-mark">{nomeEstudio.charAt(0).toUpperCase()}</div>
+              <span className="logo-name">{nomeEstudio.toUpperCase()}</span>
+            </div>
+            <p style={{ fontSize: '14px', color: 'var(--muted)', lineHeight: '1.75', maxWidth: '260px' }}>
+              Espaço de movimento criado para quem quer resultado real e se sentir bem no processo.
+            </p>
+          </div>
+
+          {/* Contato col */}
+          <div>
+            <div className="footer-col-title">Contato</div>
+            {whatsappNum && (
+              <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="footer-link">
+                📱 WhatsApp
+              </a>
+            )}
+            {INSTAGRAM_URL !== '#' && (
+              <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" className="footer-link">
+                📷 Instagram
+              </a>
+            )}
+            {MAPS_URL !== '#' && (
+              <a href={MAPS_URL} target="_blank" rel="noreferrer" className="footer-link">
+                📍 Como chegar
+              </a>
+            )}
+          </div>
+
+          {/* Endereço col — só exibe se tiver mapa */}
+          {MAPS_URL !== '#' && (
+            <div>
+              <div className="footer-col-title">Localização</div>
+              <a
+                href={MAPS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-ghost btn-sm"
+                style={{ marginTop: '14px', display: 'inline-flex' }}
+              >
+                Abrir no Maps →
+              </a>
+            </div>
+          )}
+
+          {/* Links col */}
+          <div>
+            <div className="footer-col-title">Navegação</div>
+            <button className="footer-link" onClick={() => scrollTo('sec-aulas')}>Modalidades</button>
+            <button className="footer-link" onClick={() => scrollTo('sec-planos')}>Planos</button>
+            <button className="footer-link" onClick={() => navigate('/login')}>Área do Aluno</button>
+          </div>
+        </div>
+
+        {/* Google Maps embed — só exibe se o estúdio tiver configurado */}
+        {MAPS_EMBED && (
+          <div className="footer-map">
+            <iframe
+              title={`Localização ${nomeEstudio}`}
+              src={MAPS_EMBED}
+              width="100%"
+              height="200"
+              style={{ border: 0, borderRadius: '12px', filter: 'grayscale(20%)' }}
+              allowFullScreen=""
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            ></iframe>
+          </div>
+        )}
+
+        <div className="footer-bottom">
+          <span className="footer-copy">© {new Date().getFullYear()} {nomeEstudio} · Todos os direitos reservados.</span>
+          {INSTAGRAM_URL !== '#' && (
+            <span className="footer-copy">
+              <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--pri)', fontWeight: 700, textDecoration: 'none' }}>
+                Instagram
+              </a>
+            </span>
+          )}
+        </div>
+      </footer>
+    </div>
+  );
+}
 </file>
 
 <file path="webapp/src/pages/Leads.jsx">
@@ -21393,12 +21483,23 @@ serve(async (req: Request) => {
   // verify_jwt = false é necessário para o cron interno (que não envia JWT).
   // Chamadas manuais (vindas do frontend ou de ferramentas externas) DEVEM
   // enviar um header Authorization válido e o usuário precisa ser admin do
-  // estúdio informado. Sem esse guard, qualquer sessão autenticada poderia
-  // disparar a geração de mensalidades para qualquer estúdio.
+  // estúdio informado.
+  //
+  // IMPORTANTE: "é cron" NUNCA é inferido pela ausência do header
+  // Authorization — isso é trivialmente falsificável (um atacante só
+  // precisa omitir o header para pular a checagem de admin). A invocação
+  // do cron é validada por um segredo compartilhado explícito, enviado em
+  // um header dedicado que não colide com Authorization.
   const authHeader = req.headers.get('Authorization') ?? ''
-  const isCronInvocation = !authHeader
+  const cronSecret = req.headers.get('x-cron-secret') ?? ''
+  const expectedCronSecret = Deno.env.get('CRON_SECRET') ?? ''
+  const isCronInvocation = expectedCronSecret.length > 0 && cronSecret === expectedCronSecret
 
   if (!isCronInvocation) {
+    if (!authHeader) {
+      return response({ erro: 'Não autorizado.' }, 401)
+    }
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const anonKey    = Deno.env.get('SUPABASE_ANON_KEY')!
 
@@ -21470,13 +21571,18 @@ serve(async (req: Request) => {
     const alunosValidos = alunos.filter((a: AlunoComPlano) => Number(a.planos?.preco) > 0)
 
     // 3. Verifica duplicatas: mensalidades já geradas neste mês para este estúdio
-    const { data: jaGeradas } = await supabase
-      .from('mensalidades')
-      .select('aluno_id')
-      .eq('estudio_id', estudioId)   // ← isolamento
-      .gte('data_vencimento', `${ano}-${mesStr}-01`)
-      .lte('data_vencimento', `${ano}-${mesStr}-31`)
+    // FIX: antes comparava strings 'YYYY-MM-DD' com .gte/.lte e um "-31"
+    // fixo — funciona por sorte na comparação lexicográfica, mas é frágil
+    // (silenciosamente errado se o formato/tipo da coluna mudar). Agora
+    // delega a checagem de mês a uma RPC que usa date_trunc no Postgres.
+    const { data: jaGeradas, error: errJaGeradas } = await supabase
+      .rpc('alunos_com_mensalidade_no_mes', {
+        p_estudio_id: estudioId,
+        p_data_referencia: data_vencimento, // já é '${ano}-${mesStr}-10', mesmo mês de referência
+      })
       .returns<MensalidadeExistente[]>()
+
+    if (errJaGeradas) throw errJaGeradas
 
     const comMensalidade = new Set((jaGeradas || []).map((m: MensalidadeExistente) => m.aluno_id))
 
@@ -21634,9 +21740,24 @@ serve(async (req: Request) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
   const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const anonKey     = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
   const admin       = createClient(supabaseUrl, serviceKey);
 
   try {
+    // ── AUTENTICAÇÃO ────────────────────────────────────────────────────────
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return resp({ error: 'Não autorizado.' }, 401);
+    }
+
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !user) {
+      return resp({ error: 'Não autorizado.' }, 401);
+    }
+
     const { acao, professor_id, auth_id, email, nome, estudio_id } = await req.json();
 
     // ── ISOLAMENTO MULTI-TENANT ────────────────────────────────────────────
@@ -21647,6 +21768,21 @@ serve(async (req: Request) => {
       return resp({ error: 'estudio_id é obrigatório no payload.' }, 400);
     }
     // ──────────────────────────────────────────────────────────────────────
+
+    // ── AUTORIZAÇÃO ──────────────────────────────────────────────────────────
+    // Exige que o usuário autenticado seja admin/super_admin do estúdio-alvo,
+    // caso contrário qualquer usuário autenticado poderia gerenciar acesso de
+    // professores em estúdios de terceiros (IDOR).
+    const { data: membro, error: membroErr } = await admin
+      .from('estudio_membros')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('estudio_id', estudio_id)
+      .maybeSingle();
+    if (membroErr) throw membroErr;
+    if (!membro || !['admin', 'super_admin'].includes(membro.role)) {
+      return resp({ error: 'Acesso negado.' }, 403);
+    }
 
     // ── CRIAR ────────────────────────────────────────────────────────────────
     if (acao === 'criar') {
@@ -21818,6 +21954,103 @@ serve(async (req: Request) => {
     return resp({ error: msg }, 500);
   }
 });
+</file>
+
+<file path="webapp/src/components/ui/Skeleton.jsx">
+// src/components/ui/Skeleton.jsx
+// ─── Midnight Indigo · Skeleton ───────────────────────────────────────────────
+//
+// Componentes de loading state consistentes com o design system.
+// Usa animate-pulse (Tailwind) + tokens do Midnight Indigo.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import React from 'react';
+import { cn } from '../../lib/cn';
+
+/* ── Base Skeleton ───────────────────────────────────────────────────────────── */
+export function Skeleton({ className, ...rest }) {
+  return (
+    <div
+      className={cn('animate-pulse rounded-lg bg-muted', className)}
+      aria-hidden="true"
+      {...rest}
+    />
+  );
+}
+
+/* ── Linha de texto ─────────────────────────────────────────────────────────── */
+export function SkeletonText({ lines = 3, className }) {
+  return (
+    <div className={cn('space-y-2', className)} aria-hidden="true">
+      {Array.from({ length: lines }).map((_, i) => (
+        <Skeleton
+          key={i}
+          className={cn('h-4', i === lines - 1 ? 'w-3/4' : 'w-full')}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ── Card Skeleton ──────────────────────────────────────────────────────────── */
+export function SkeletonCard({ className }) {
+  return (
+    <div
+      className={cn(
+        'rounded-xl border border-border bg-card p-6 space-y-4',
+        className
+      )}
+      aria-hidden="true"
+    >
+      <div className="flex items-center gap-3">
+        <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-3 w-1/3" />
+        </div>
+      </div>
+      <SkeletonText lines={3} />
+    </div>
+  );
+}
+
+/* ── Row Skeleton (NOVO) ───────────────────────────────────────────────────── */
+export function SkeletonRow({ className }) {
+  return (
+    <div
+      className={cn('flex items-center gap-4 p-4', className)}
+      aria-hidden="true"
+    >
+      <Skeleton className="h-12 w-12 rounded-full shrink-0" />
+      <div className="flex-1 space-y-2">
+        <Skeleton className="h-4 w-1/2" />
+        <Skeleton className="h-3 w-1/3" />
+      </div>
+    </div>
+  );
+}
+
+/* ── Avatar Skeleton ────────────────────────────────────────────────────────── */
+export function SkeletonAvatar({ size = 'md', className }) {
+  const sizes = {
+    sm: 'h-8 w-8',
+    md: 'h-10 w-10',
+    lg: 'h-12 w-12',
+  };
+  return (
+    <Skeleton
+      className={cn('rounded-full shrink-0', sizes[size] ?? sizes.md, className)}
+    />
+  );
+}
+
+/* ── Compound component: anexa as variantes ao Skeleton base ───────────────── */
+Skeleton.Text = SkeletonText;
+Skeleton.Card = SkeletonCard;
+Skeleton.Row = SkeletonRow;
+Skeleton.Avatar = SkeletonAvatar;
+
+export default Skeleton;
 </file>
 
 <file path="webapp/src/components/Sidebar.jsx">
@@ -25426,7 +25659,7 @@ export const financeiroService = {
       let proximaData;
       if (ultimaDataStr) {
         const d = new Date(ultimaDataStr + 'T12:00:00');
-        d.setDate(d.getDate() + 30);
+d.setMonth(d.getMonth() + 1);
         proximaData = d.toISOString().split('T')[0];
       } else {
         proximaData = `${ano}-${String(mesNumero).padStart(2, '0')}-10`;
@@ -25533,8 +25766,18 @@ export const financeiroService = {
       .eq('estudio_id', estudioId);
     if (error) throw error;
 
-    const resultado = await gerarRepassesDaMensalidade(id, estudioId);
-    return { ok: true, resultado };
+try {
+      // FIX (sprint RLS): mesmo tratamento de adicionarPagamentoManual —
+      // a mensalidade já foi marcada como 'pago' acima; se a geração do
+      // repasse falhar (edge function fora do ar, config ausente etc.),
+      // isso não pode derrubar a confirmação inteira nem esconder do
+      // usuário que o repasse ficou pendente.
+      const resultado = await gerarRepassesDaMensalidade(id, estudioId);
+      return { ok: true, resultado };
+    } catch (repasseError) {
+      console.warn('[financeiroService.confirmarPagamento] Repasse não gerado automaticamente.', repasseError);
+      return { ok: true, _avisoRepasse: 'Pagamento confirmado, mas repasse não gerado automaticamente. Verifique manualmente.' };
+    }
   },
 };
 </file>
@@ -28976,18 +29219,21 @@ serve(async (req: Request) => {
 
   // Verifica role super_admin na tabela estudio_membros
   // (não confia apenas no user_metadata)
-  const { data: callerMembro, error: profileErr } = await admin
+  // Busca TODAS as linhas do caller: .maybeSingle() lançava erro se o usuário
+  // tivesse mais de um vínculo em estudio_membros (ex.: super_admin com um
+  // vínculo extra em um estúdio específico), bloqueando super_admins legítimos.
+  const { data: membrosCaller, error: profileErr } = await admin
     .from('estudio_membros')
     .select('role')
-    .eq('user_id', caller.id)
-    .maybeSingle();
+    .eq('user_id', caller.id);
 
   if (profileErr) {
     console.error('[criar-estudio] Erro ao verificar perfil do caller:', profileErr);
     return resp({ error: 'Erro ao verificar permissões do usuário.' }, 500);
   }
 
-  if (!callerMembro || callerMembro.role !== 'super_admin') {
+  const isSuperAdmin = (membrosCaller ?? []).some((m) => m.role === 'super_admin');
+  if (!isSuperAdmin) {
     return resp({ error: 'Acesso negado. Apenas super_admins podem criar estúdios.' }, 403);
   }
 

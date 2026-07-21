@@ -28,14 +28,15 @@ function response(body: object, status = 200): Response {
 
 // REP-07: distribui `total` em centavos exatos entre `n` parcelas.
 function distribuirCentavos(total: number, n: number): number[] {
-  const base = Math.floor((total / n) * 100) / 100;
-  const parcelas = Array(n).fill(base);
-  const restoCentavos = Math.round((total - base * n) * 100);
+  const totalCentavos = Math.round(total * 100);
+  const baseCentavos = Math.floor(totalCentavos / n);
+  const parcelasCentavos = Array(n).fill(baseCentavos);
+  const restoCentavos = totalCentavos - baseCentavos * n;
+
   for (let i = 0; i < restoCentavos; i++) {
-    parcelas[n - 1 - i] += 0.01;
-    parcelas[n - 1 - i] = Math.round(parcelas[n - 1 - i] * 100) / 100;
+    parcelasCentavos[n - 1 - i] += 1;
   }
-  return parcelas;
+  return parcelasCentavos.map(c => c / 100);
 }
 
 // REP-01: interface expandida com campos de avulsa e experimental
@@ -85,7 +86,38 @@ serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const anonKey     = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // ── AUTENTICAÇÃO ────────────────────────────────────────────────────────
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return response({ error: 'Não autorizado.' }, 401);
+    }
+
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !user) {
+      return response({ error: 'Não autorizado.' }, 401);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── AUTORIZAÇÃO ──────────────────────────────────────────────────────────
+    // Só admin/super_admin do estúdio-alvo pode gerar/regerar repasses.
+    // Sem isso, qualquer usuário autenticado (professor, aluno) poderia apagar
+    // e recriar lançamentos financeiros de outro estúdio.
+    const { data: membro, error: membroErr } = await supabase
+      .from('estudio_membros')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('estudio_id', estudioId)
+      .maybeSingle();
+    if (membroErr) throw membroErr;
+    if (!membro || !['admin', 'super_admin'].includes(membro.role)) {
+      return response({ error: 'Acesso negado.' }, 403);
+    }
 
     // ── 1. Busca a mensalidade — confirma que pertence a este estúdio ────────
     const { data: mens, error: errMens } = await supabase
@@ -116,13 +148,6 @@ serve(async (req: Request) => {
     if (errConfig || !config) throw new Error('Configurações de repasse não encontradas.');
     const cfg = config as ConfigRepasse;
 
-    // ── 3. Idempotência: remove repasses anteriores desta mensalidade ────────
-    await supabase
-      .from('repasses_lancamentos')
-      .delete()
-      .eq('mensalidade_id', mensalidadeId)
-      .eq('estudio_id', estudioId);      // ← isolamento (redundante mas defensivo)
-
     // Data de referência = primeiro dia do mês do pagamento
     const dataBase = mensalidade.data_pagamento || mensalidade.data_vencimento;
     const [anoRef, mesRef] = dataBase.substring(0, 7).split('-').map(Number);
@@ -142,6 +167,11 @@ serve(async (req: Request) => {
       valor: number;
       data_referencia: string;
     }[] = [];
+
+    // ── 3. Repasses de lote a remover, coletados durante o cálculo abaixo ────
+    // (antes eram deletados um a um dentro do loop; agora só coletamos os ids
+    // e o delete real acontece junto com o insert, dentro da RPC transacional).
+    const idsLoteRemover: string[] = [];
 
     // ── 3b. Repasses já gerados pelo lote mensal (mensalidade_id IS NULL) ────
     const { data: repassesLote } = await supabase
@@ -213,9 +243,7 @@ serve(async (req: Request) => {
         const chave = `${mod.nome}|plano_livre`;
         const idLote = loteJaGerado.get(chave);
         if (idLote) {
-          await supabase.from('repasses_lancamentos').delete()
-            .eq('id', idLote)
-            .eq('estudio_id', estudioId); // ← isolamento
+          idsLoteRemover.push(idLote);
         }
         itens.push({
           estudio_id: estudioId,          // ← isolamento
@@ -265,9 +293,7 @@ serve(async (req: Request) => {
         const chave = `${mod.nome}|regular`;
         const idLote = loteJaGerado.get(chave);
         if (idLote) {
-          await supabase.from('repasses_lancamentos').delete()
-            .eq('id', idLote)
-            .eq('estudio_id', estudioId); // ← isolamento
+          idsLoteRemover.push(idLote);
         }
         itens.push({
           estudio_id: estudioId,          // ← isolamento
@@ -331,11 +357,17 @@ serve(async (req: Request) => {
       return response({ aviso: 'Nenhum repasse calculado para este tipo de aula.', gerados: 0 });
     }
 
-    const { error: errInsert } = await supabase
-      .from('repasses_lancamentos')
-      .insert(itens);
+    // Delete (antigos + lote sobreposto) e insert (novos) na mesma transação
+    // Postgres — se qualquer parte falhar, tudo é revertido, eliminando a
+    // janela de inconsistência que existia com delete/insert via client.
+    const { error: errRpc } = await supabase.rpc('substituir_repasses_mensalidade', {
+      p_estudio_id: estudioId,
+      p_mensalidade_id: mensalidadeId,
+      p_ids_lote_remover: idsLoteRemover,
+      p_itens: itens,
+    });
 
-    if (errInsert) throw errInsert;
+    if (errRpc) throw errRpc;
 
     return response({
       sucesso: true,

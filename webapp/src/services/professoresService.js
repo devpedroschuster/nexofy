@@ -1,11 +1,15 @@
 import { supabase } from '../lib/supabase';
 
 export const professoresService = {
-  async listar(busca = '') {
+  async listar(busca = '', estudioId) {
     let query = supabase
       .from('professores')
       .select('*')
       .order('nome');
+
+      if (estudioId) {
+      query = query.eq('estudio_id', estudioId);
+    }
 
     if (busca) {
       query = query.ilike('nome', `%${busca}%`);
@@ -49,11 +53,17 @@ export const professoresService = {
     }
   },
 
-  async alternarStatus(id, novoStatus) {
-    const { error } = await supabase
+  async alternarStatus(id, novoStatus, estudioId) {
+    let query = supabase
       .from('professores')
       .update({ ativo: novoStatus })
       .eq('id', id);
+
+    if (estudioId) {
+      query = query.eq('estudio_id', estudioId);
+    }
+
+    const { error } = await query;
 
     if (error) throw error;
     return true;

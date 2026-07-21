@@ -1,11 +1,11 @@
 // webapp/src/pages/SuperAdmin/components/TabelaEstudios.jsx
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   Building2, Users, GraduationCap, MoreHorizontal,
-  Pause, Play, Eye, Calendar, Loader2,
+  Pause, Play, Eye, Calendar, Loader2, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
@@ -14,6 +14,9 @@ import { ModalConfirmacao } from '../../../components/ui/Modal';
 import { showToast } from '../../../components/shared/Toast';
 import { superAdminService } from '../../../services/superAdminService';
 import { useImpersonation } from '../../../contexts/ImpersonationContext';
+import { useDebounce } from '../../../hooks/useDebounce';
+
+const PAGE_SIZE = 50;
 
 function formatarData(iso) {
   if (!iso) return '—';
@@ -170,12 +173,30 @@ export default function TabelaEstudios({ busca }) {
 
   const [confirmacao, setConfirmacao] = useState(null);
   const [acessandoId, setAcessandoId] = useState(null);
+  const [pagina, setPagina] = useState(0); // 0-based, casa com p_offset da RPC
 
-  const { data: estudios = [], isLoading } = useQuery({
-    queryKey: ['super-admin', 'estudios'],
-    queryFn:  superAdminService.listarEstudios,
+  const buscaDebounced = useDebounce(busca, 300);
+
+  // Sempre que a busca mudar, volta pra primeira pagina —
+  // senao o usuario pode ficar "preso" numa pagina que nao existe mais no resultado filtrado.
+  useEffect(() => {
+    setPagina(0);
+  }, [buscaDebounced]);
+
+  const { data, isLoading, isPlaceholderData } = useQuery({
+    queryKey: ['super-admin', 'estudios', buscaDebounced, pagina],
+    queryFn: () => superAdminService.listarEstudios({
+      page: pagina,
+      pageSize: PAGE_SIZE,
+      busca: buscaDebounced,
+    }),
     staleTime: 1000 * 60,
+    placeholderData: (prev) => prev, // evita flash de loading ao trocar de pagina
   });
+
+  const estudios     = data?.estudios ?? [];
+  const totalCount   = data?.totalCount ?? 0;
+  const totalPaginas = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const { mutate: alterarStatus, isPending: isAlterando } = useMutation({
     mutationFn: ({ id, status }) => superAdminService.alterarStatusEstudio(id, status),
@@ -204,12 +225,8 @@ export default function TabelaEstudios({ busca }) {
     }
   }
 
-  const filtrados = busca
-    ? estudios.filter((e) => {
-        const q = busca.toLowerCase();
-        return e.nome.toLowerCase().includes(q) || e.slug.includes(q);
-      })
-    : estudios;
+  // A busca e a paginacao acontecem no servidor agora (RPC listar_estudios_admin),
+  // entao `estudios` ja vem filtrado e paginado — sem `.filter()` client-side.
 
   return (
     <>
@@ -230,16 +247,16 @@ export default function TabelaEstudios({ busca }) {
             <tbody>
               {isLoading
                 ? [...Array(5)].map((_, i) => <SkeletonLinha key={i} />)
-                : filtrados.length === 0
+                : estudios.length === 0
                 ? (
                   <tr>
                     <td colSpan={6} className="py-12">
                       <EmptyState
                         icon={<Building2 size={28} />}
-                        title={busca ? 'Nenhum estudio encontrado' : 'Nenhum estudio cadastrado'}
+                        title={buscaDebounced ? 'Nenhum estudio encontrado' : 'Nenhum estudio cadastrado'}
                         description={
-                          busca
-                            ? `Nenhum resultado para "${busca}".`
+                          buscaDebounced
+                            ? `Nenhum resultado para "${buscaDebounced}".`
                             : 'Crie o primeiro estudio usando o botao acima.'
                         }
                         className="border-0 bg-transparent"
@@ -247,7 +264,7 @@ export default function TabelaEstudios({ busca }) {
                     </td>
                   </tr>
                 )
-                : filtrados.map((e) => (
+                : estudios.map((e) => (
                   <LinhaEstudio
                     key={e.id}
                     estudio={e}
@@ -262,12 +279,36 @@ export default function TabelaEstudios({ busca }) {
           </table>
         </div>
 
-        {!isLoading && filtrados.length > 0 && (
-          <div className="px-6 py-3 border-t border-border bg-muted/20">
+        {!isLoading && estudios.length > 0 && (
+          <div className="px-6 py-3 border-t border-border bg-muted/20 flex items-center justify-between gap-4 flex-wrap">
             <p className="text-xs text-muted-foreground font-medium">
-              {filtrados.length} estudio{filtrados.length !== 1 ? 's' : ''}
-              {busca && ` encontrado${filtrados.length !== 1 ? 's' : ''} para "${busca}"`}
+              {totalCount} estudio{totalCount !== 1 ? 's' : ''}
+              {buscaDebounced && ` encontrado${totalCount !== 1 ? 's' : ''} para "${buscaDebounced}"`}
             </p>
+
+            {totalPaginas > 1 && (
+              <div className="flex items-center gap-3">
+                <button
+                  className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+                  disabled={pagina === 0 || isPlaceholderData}
+                  onClick={() => setPagina((p) => Math.max(0, p - 1))}
+                  aria-label="Pagina anterior"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="text-xs font-bold text-foreground tabular-nums">
+                  {pagina + 1} / {totalPaginas}
+                </span>
+                <button
+                  className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+                  disabled={pagina + 1 >= totalPaginas || isPlaceholderData}
+                  onClick={() => setPagina((p) => p + 1)}
+                  aria-label="Proxima pagina"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

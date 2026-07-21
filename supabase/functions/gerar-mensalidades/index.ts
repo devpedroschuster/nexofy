@@ -50,12 +50,23 @@ serve(async (req: Request) => {
   // verify_jwt = false é necessário para o cron interno (que não envia JWT).
   // Chamadas manuais (vindas do frontend ou de ferramentas externas) DEVEM
   // enviar um header Authorization válido e o usuário precisa ser admin do
-  // estúdio informado. Sem esse guard, qualquer sessão autenticada poderia
-  // disparar a geração de mensalidades para qualquer estúdio.
+  // estúdio informado.
+  //
+  // IMPORTANTE: "é cron" NUNCA é inferido pela ausência do header
+  // Authorization — isso é trivialmente falsificável (um atacante só
+  // precisa omitir o header para pular a checagem de admin). A invocação
+  // do cron é validada por um segredo compartilhado explícito, enviado em
+  // um header dedicado que não colide com Authorization.
   const authHeader = req.headers.get('Authorization') ?? ''
-  const isCronInvocation = !authHeader
+  const cronSecret = req.headers.get('x-cron-secret') ?? ''
+  const expectedCronSecret = Deno.env.get('CRON_SECRET') ?? ''
+  const isCronInvocation = expectedCronSecret.length > 0 && cronSecret === expectedCronSecret
 
   if (!isCronInvocation) {
+    if (!authHeader) {
+      return response({ erro: 'Não autorizado.' }, 401)
+    }
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const anonKey    = Deno.env.get('SUPABASE_ANON_KEY')!
 
@@ -127,13 +138,18 @@ serve(async (req: Request) => {
     const alunosValidos = alunos.filter((a: AlunoComPlano) => Number(a.planos?.preco) > 0)
 
     // 3. Verifica duplicatas: mensalidades já geradas neste mês para este estúdio
-    const { data: jaGeradas } = await supabase
-      .from('mensalidades')
-      .select('aluno_id')
-      .eq('estudio_id', estudioId)   // ← isolamento
-      .gte('data_vencimento', `${ano}-${mesStr}-01`)
-      .lte('data_vencimento', `${ano}-${mesStr}-31`)
+    // FIX: antes comparava strings 'YYYY-MM-DD' com .gte/.lte e um "-31"
+    // fixo — funciona por sorte na comparação lexicográfica, mas é frágil
+    // (silenciosamente errado se o formato/tipo da coluna mudar). Agora
+    // delega a checagem de mês a uma RPC que usa date_trunc no Postgres.
+    const { data: jaGeradas, error: errJaGeradas } = await supabase
+      .rpc('alunos_com_mensalidade_no_mes', {
+        p_estudio_id: estudioId,
+        p_data_referencia: data_vencimento, // já é '${ano}-${mesStr}-10', mesmo mês de referência
+      })
       .returns<MensalidadeExistente[]>()
+
+    if (errJaGeradas) throw errJaGeradas
 
     const comMensalidade = new Set((jaGeradas || []).map((m: MensalidadeExistente) => m.aluno_id))
 

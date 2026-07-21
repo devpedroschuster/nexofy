@@ -76,7 +76,7 @@ export const financeiroService = {
       let proximaData;
       if (ultimaDataStr) {
         const d = new Date(ultimaDataStr + 'T12:00:00');
-        d.setDate(d.getDate() + 30);
+d.setMonth(d.getMonth() + 1);
         proximaData = d.toISOString().split('T')[0];
       } else {
         proximaData = `${ano}-${String(mesNumero).padStart(2, '0')}-10`;
@@ -183,7 +183,17 @@ export const financeiroService = {
       .eq('estudio_id', estudioId);
     if (error) throw error;
 
-    const resultado = await gerarRepassesDaMensalidade(id, estudioId);
-    return { ok: true, resultado };
+try {
+      // FIX (sprint RLS): mesmo tratamento de adicionarPagamentoManual —
+      // a mensalidade já foi marcada como 'pago' acima; se a geração do
+      // repasse falhar (edge function fora do ar, config ausente etc.),
+      // isso não pode derrubar a confirmação inteira nem esconder do
+      // usuário que o repasse ficou pendente.
+      const resultado = await gerarRepassesDaMensalidade(id, estudioId);
+      return { ok: true, resultado };
+    } catch (repasseError) {
+      console.warn('[financeiroService.confirmarPagamento] Repasse não gerado automaticamente.', repasseError);
+      return { ok: true, _avisoRepasse: 'Pagamento confirmado, mas repasse não gerado automaticamente. Verifique manualmente.' };
+    }
   },
 };
