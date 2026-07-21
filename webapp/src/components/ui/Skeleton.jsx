@@ -12,10 +12,7 @@ import { cn } from '../../lib/cn';
 export function Skeleton({ className, ...rest }) {
   return (
     <div
-      className={cn(
-        'animate-pulse rounded-lg bg-muted',
-        className
-      )}
+      className={cn('animate-pulse rounded-lg bg-muted', className)}
       aria-hidden="true"
       {...rest}
     />
@@ -29,10 +26,7 @@ export function SkeletonText({ lines = 3, className }) {
       {Array.from({ length: lines }).map((_, i) => (
         <Skeleton
           key={i}
-          className={cn(
-            'h-4',
-            i === lines - 1 ? 'w-3/4' : 'w-full' // última linha mais curta
-          )}
+          className={cn('h-4', i === lines - 1 ? 'w-3/4' : 'w-full')}
         />
       ))}
     </div>
@@ -61,6 +55,22 @@ export function SkeletonCard({ className }) {
   );
 }
 
+/* ── Row Skeleton (NOVO) ───────────────────────────────────────────────────── */
+export function SkeletonRow({ className }) {
+  return (
+    <div
+      className={cn('flex items-center gap-4 p-4', className)}
+      aria-hidden="true"
+    >
+      <Skeleton className="h-12 w-12 rounded-full shrink-0" />
+      <div className="flex-1 space-y-2">
+        <Skeleton className="h-4 w-1/2" />
+        <Skeleton className="h-3 w-1/3" />
+      </div>
+    </div>
+  );
+}
+
 /* ── Avatar Skeleton ────────────────────────────────────────────────────────── */
 export function SkeletonAvatar({ size = 'md', className }) {
   const sizes = {
@@ -74,5 +84,11 @@ export function SkeletonAvatar({ size = 'md', className }) {
     />
   );
 }
+
+/* ── Compound component: anexa as variantes ao Skeleton base ───────────────── */
+Skeleton.Text = SkeletonText;
+Skeleton.Card = SkeletonCard;
+Skeleton.Row = SkeletonRow;
+Skeleton.Avatar = SkeletonAvatar;
 
 export default Skeleton;

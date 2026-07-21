@@ -114,7 +114,7 @@ export default function Landing() {
   const WHATSAPP_URL  = whatsappNum
     ? `https://wa.me/${whatsappNum}?text=Olá!%20Vi%20o%20site%20e%20quero%20saber%20mais.`
     : '#';
-  const INSTAGRAM_URL = estudio?.instagram_url ?? '#';
+  const INSTAGRAM = estudio?.instagram ?? '#';
   const MAPS_URL      = estudio?.maps_url      ?? '#';
   const MAPS_EMBED    = estudio?.maps_embed_url ?? '';
 

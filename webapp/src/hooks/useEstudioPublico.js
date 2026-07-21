@@ -25,7 +25,7 @@ export function useEstudioPublico() {
 
       const { data, error } = await supabase
         .from('estudios')
-        .select('id, nome, slug, whatsapp, instagram_url, maps_url, maps_embed_url')
+        .select('id, nome, slug, whatsapp, instagram, maps_url')
         .eq('slug', slug)
         .maybeSingle(); // retorna null sem lançar erro quando não encontra
 

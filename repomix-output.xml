@@ -44,6 +44,8 @@ supabase/
   functions/
     criar-estudio/
       index.ts
+    criar-meu-estudio/
+      index.ts
     gerar-mensalidades/
       config.toml
       deno.json
@@ -172,6 +174,8 @@ webapp/
       Alunos.jsx
       Aniversariantes.jsx
       AreaAluno.jsx
+      Cadastro.jsx
+      CadastroEstudio.jsx
       Comissoes.jsx
       ConfiguracoesEstudio.jsx
       ConfiguracoesFeriados.jsx
@@ -198,6 +202,7 @@ webapp/
       agendamentoService.js
       agendaService.js
       alunosService.js
+      cadastroService.js
       comissoesService.js
       configuracoesRepasseService.js
       dashboardService.js
@@ -243,6 +248,167 @@ README.md
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="supabase/functions/criar-meu-estudio/index.ts">
+// supabase/functions/criar-meu-estudio/index.ts
+//
+// Onboarding self-service de um novo estúdio no sistema Nexofy.
+//
+// Diferença em relação a `criar-estudio` (fluxo admin/super_admin):
+//   - Não exige role super_admin — qualquer usuário autenticado e com
+//     e-mail confirmado pode chamar, DESDE QUE ainda não seja membro de
+//     nenhum estúdio.
+//   - Não cria auth user nem gera link de recovery — o caller já existe
+//     e já definiu sua própria senha no signUp.
+//   - p_admin_id é sempre o próprio caller (nunca um terceiro).
+//
+// Escritas em estudios / profiles / estudio_membros / configuracoes_repasse
+// continuam acontecendo dentro da mesma transação Postgres
+// (criar_estudio_transacional) — qualquer falha faz rollback automático.
+//
+// Body: { nome, slug, whatsapp?, instagram? }
+
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+function resp(body: object, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+// Slug: apenas letras minúsculas, dígitos e hífens, 3–50 caracteres.
+const SLUG_RE = /^[a-z0-9-]{3,50}$/;
+
+serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+  // Cliente admin (service role) — ignora RLS, usado só para a escrita transacional.
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  // ── 1. AUTENTICAÇÃO ────────────────────────────────────────────────────────
+  const authHeader = req.headers.get('Authorization') ?? '';
+  if (!authHeader.startsWith('Bearer ')) {
+    return resp({ error: 'Cabeçalho Authorization ausente ou inválido.' }, 401);
+  }
+
+  const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+    global: { headers: { Authorization: authHeader } },
+  });
+
+  const { data: { user: caller }, error: authErr } = await userClient.auth.getUser();
+  if (authErr || !caller) {
+    return resp({ error: 'Token inválido ou expirado.' }, 401);
+  }
+
+  // E-mail precisa estar confirmado — é a garantia mínima de que não é bot.
+  if (!caller.email_confirmed_at && !caller.confirmed_at) {
+    return resp({ error: 'Confirme seu e-mail antes de criar um estúdio.' }, 403);
+  }
+
+  if (!caller.email) {
+    return resp({ error: 'Usuário sem e-mail associado.' }, 400);
+  }
+
+  // ── 2. IMPEDE MÚLTIPLOS ESTÚDIOS PELO MESMO USUÁRIO ────────────────────────
+  // Política atual: 1 conta → 1 estúdio. Se no futuro Nexofy quiser permitir
+  // multi-estúdio por dono, este bloco (e a checagem em useAuth/App.jsx) é o
+  // ponto a revisar.
+  const { data: membroExistente, error: membroErr } = await admin
+    .from('estudio_membros')
+    .select('estudio_id')
+    .eq('user_id', caller.id)
+    .maybeSingle();
+
+  if (membroErr) {
+    console.error('[criar-meu-estudio] Erro ao verificar vínculo existente:', membroErr);
+    return resp({ error: 'Erro ao verificar sua conta.' }, 500);
+  }
+
+  if (membroExistente) {
+    return resp({ error: 'Sua conta já está vinculada a um estúdio.' }, 409);
+  }
+
+  // ── 3. VALIDAÇÃO DO PAYLOAD ─────────────────────────────────────────────────
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return resp({ error: 'Payload inválido. Envie um JSON válido.' }, 400);
+  }
+
+  const { nome, slug, whatsapp, instagram } = body as {
+    nome?: string;
+    slug?: string;
+    whatsapp?: string;
+    instagram?: string;
+  };
+
+  if (!nome?.trim()) return resp({ error: 'Campo obrigatório ausente: nome.' }, 400);
+  if (!slug?.trim()) return resp({ error: 'Campo obrigatório ausente: slug.' }, 400);
+
+  const slugNorm = slug.trim().toLowerCase();
+
+  if (!SLUG_RE.test(slugNorm)) {
+    return resp({
+      error: 'Slug inválido. Use apenas letras minúsculas, números e hífens (3–50 caracteres).',
+    }, 400);
+  }
+
+  // ── 4. UNICIDADE DO SLUG ─────────────────────────────────────────────────────
+  const { data: slugExistente } = await admin
+    .from('estudios')
+    .select('id')
+    .eq('slug', slugNorm)
+    .maybeSingle();
+
+  if (slugExistente) {
+    return resp({ error: `O slug "${slugNorm}" já está em uso. Escolha outro.` }, 409);
+  }
+
+  // ── 5. ESCRITAS NO BANCO — TRANSAÇÃO ATÔMICA VIA RPC ─────────────────────────
+  // Mesma RPC do fluxo admin. p_admin_id é o próprio caller — não há criação
+  // nem reuso de auth user aqui, ele já existe e já tem senha própria.
+  const adminNome = (caller.user_metadata?.nome as string | undefined)?.trim() || caller.email;
+
+  const { data: rpcData, error: rpcErr } = await admin.rpc('criar_estudio_transacional', {
+    p_nome:        nome.trim(),
+    p_slug:        slugNorm,
+    p_whatsapp:    whatsapp?.trim() ?? null,
+    p_instagram:   instagram?.trim() ?? null,
+    p_admin_id:    caller.id,
+    p_admin_nome:  adminNome,
+    p_admin_email: caller.email,
+  });
+
+  if (rpcErr) {
+    console.error('[criar-meu-estudio] Erro na RPC criar_estudio_transacional:', rpcErr.message);
+    return resp({ error: rpcErr.message }, 500);
+  }
+
+  // rpc() com RETURNS TABLE retorna um array; pegamos a primeira (e única) linha
+  const resultado = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+
+  // ── SUCESSO ────────────────────────────────────────────────────────────────
+  return resp({
+    sucesso: true,
+    estudio: {
+      id:   resultado.estudio_id,
+      nome: resultado.estudio_nome,
+      slug: resultado.estudio_slug,
+    },
+  }, 201);
+});
+</file>
 
 <file path="supabase/functions/gerar-mensalidades/deno.json">
 {
@@ -2391,7 +2557,7 @@ export function useEstudioPublico() {
 
       const { data, error } = await supabase
         .from('estudios')
-        .select('id, nome, slug, whatsapp, instagram_url, maps_url, maps_embed_url')
+        .select('id, nome, slug, whatsapp, instagram, maps_url')
         .eq('slug', slug)
         .maybeSingle(); // retorna null sem lançar erro quando não encontra
 
@@ -4818,6 +4984,401 @@ export default function SuperAdminNovoEstudio() {
 }
 </file>
 
+<file path="webapp/src/pages/Cadastro.jsx">
+// src/pages/Cadastro.jsx
+// ─── Midnight Indigo · Cadastro (self-service, passo 1) ──────────────────────
+//
+// Cria a conta do responsável pelo estúdio via supabase.auth.signUp().
+// Não toca em `estudios` / `estudio_membros` — isso só acontece no passo 2,
+// em /cadastro/estudio, depois que o e-mail é confirmado.
+//
+// Por quê 2 passos: liga a criação do estúdio a um e-mail já verificado,
+// evita estúdios "fantasma" de bots, e reaproveita o fluxo de confirmação
+// nativo do Supabase Auth sem código extra de envio de e-mail.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Mail, Lock, User, ArrowRight, Sparkles, MailCheck } from 'lucide-react';
+
+import { supabase } from '../lib/supabase';
+import { showToast } from '../components/shared/Toast';
+import { REGEX, LIMITES } from '../lib/constants';
+import Input from '../components/ui/Input';
+import Button from '../components/ui/Button';
+
+export default function Cadastro() {
+  const [nome, setNome]     = useState('');
+  const [email, setEmail]   = useState('');
+  const [senha, setSenha]   = useState('');
+  const [loading, setLoading] = useState(false);
+  const [enviado, setEnviado] = useState(false);
+
+  const navigate = useNavigate();
+
+  function validar() {
+    if (!nome.trim()) {
+      showToast.error('Digite seu nome completo.');
+      return false;
+    }
+    if (!REGEX.EMAIL.test(email.trim())) {
+      showToast.error('Digite um e-mail válido.');
+      return false;
+    }
+    if (senha.length < LIMITES.SENHA_MIN) {
+      showToast.error(`A senha deve ter no mínimo ${LIMITES.SENHA_MIN} caracteres.`);
+      return false;
+    }
+    return true;
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (loading || !validar()) return;
+
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password: senha,
+        options: {
+          data: { nome: nome.trim() },
+          emailRedirectTo: `${window.location.origin}/cadastro/estudio`,
+        },
+      });
+
+      if (error) throw error;
+
+      // Supabase retorna um user "fantasma" (sem identities) quando o e-mail
+      // já existe e está confirmado — não lança erro, pra evitar enumeração.
+      if (data.user && data.user.identities && data.user.identities.length === 0) {
+        showToast.error('Este e-mail já está cadastrado. Tente entrar.');
+        setLoading(false);
+        return;
+      }
+
+      // Se a confirmação de e-mail estiver desligada no projeto, o Supabase
+      // já retorna uma sessão ativa — nesse caso pula direto pro passo 2.
+      if (data.session) {
+        navigate('/cadastro/estudio');
+        return;
+      }
+
+      setEnviado(true);
+    } catch (err) {
+      if (err.message?.toLowerCase().includes('already registered')) {
+        showToast.error('Este e-mail já está cadastrado. Tente entrar.');
+      } else {
+        showToast.error('Não foi possível criar sua conta. Tente novamente.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="relative min-h-screen bg-background flex items-center justify-center p-4 overflow-hidden">
+      <div
+        className="pointer-events-none absolute inset-0 opacity-40"
+        style={{ background: 'var(--gradient-hero)' }}
+        aria-hidden="true"
+      />
+
+      <div className="relative z-10 w-full max-w-sm animate-fade-in">
+        <div className="bg-card border border-border rounded-2xl shadow-card p-8 space-y-7">
+
+          <div className="text-center space-y-3">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-primary shadow-elegant">
+              <Sparkles size={24} className="text-primary-foreground" strokeWidth={2} />
+            </div>
+            <div>
+              <h1 className="text-2xl font-display font-semibold text-foreground tracking-tight">
+                Criar sua conta
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                O primeiro passo para colocar seu estúdio no Nexofy.
+              </p>
+            </div>
+          </div>
+
+          {enviado ? (
+            <div className="space-y-5">
+              <div className="flex gap-3 rounded-xl bg-success-soft border border-success/20 p-4">
+                <MailCheck size={18} className="text-success shrink-0 mt-0.5" />
+                <p className="text-sm text-success font-medium leading-relaxed">
+                  Enviamos um link de confirmação para <strong>{email.trim()}</strong>.
+                  Abra seu e-mail para continuar o cadastro do seu estúdio.
+                </p>
+              </div>
+              <p className="text-center text-xs text-muted-foreground">
+                Não recebeu? Verifique a caixa de spam ou tente novamente em alguns minutos.
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+              <div className="space-y-3">
+                <Input
+                  type="text"
+                  required
+                  autoFocus
+                  autoComplete="name"
+                  placeholder="Seu nome completo"
+                  aria-label="Nome completo"
+                  leftIcon={<User size={16} />}
+                  value={nome}
+                  onChange={(e) => setNome(e.target.value)}
+                />
+
+                <Input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  placeholder="seu@email.com"
+                  aria-label="E-mail"
+                  leftIcon={<Mail size={16} />}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+
+                <Input
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  placeholder={`Crie uma senha (mín. ${LIMITES.SENHA_MIN} caracteres)`}
+                  aria-label="Senha"
+                  leftIcon={<Lock size={16} />}
+                  value={senha}
+                  onChange={(e) => setSenha(e.target.value)}
+                />
+              </div>
+
+              <Button
+                type="submit"
+                variant="premium"
+                size="lg"
+                fullWidth
+                loading={loading}
+                rightIcon={<ArrowRight size={18} />}
+              >
+                Continuar
+              </Button>
+            </form>
+          )}
+
+          <div className="text-center">
+            <a
+              href="/login"
+              className="text-sm font-medium text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-colors"
+            >
+              Já tem uma conta? Entrar
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="webapp/src/pages/CadastroEstudio.jsx">
+// src/pages/CadastroEstudio.jsx
+// ─── Midnight Indigo · Cadastro (self-service, passo 2) ──────────────────────
+//
+// Roda depois que o usuário confirmou o e-mail (sessão já ativa).
+// Coleta os dados do estúdio e chama a Edge Function `criar-meu-estudio`.
+//
+// Guard de acesso fica em App.jsx: exige sessão válida; se o usuário já
+// tiver um estudio_membros, redireciona pra rota do perfil dele.
+//
+// Sucesso → recarrega a página em /dashboard (reload completo, não navigate)
+// porque useAuth cacheia o perfil já resolvido por usuário — um navigate
+// simples não dispararia a releitura de estudio_membros.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import React, { useState, useId } from 'react';
+import { Building2, Link2, Phone, Instagram, CheckCircle, XCircle } from 'lucide-react';
+
+import { cadastroService } from '../services/cadastroService';
+import { showToast } from '../components/shared/Toast';
+import Input, { Label } from '../components/ui/Input';
+import Button from '../components/ui/Button';
+
+const SLUG_RE = /^[a-z0-9-]{3,50}$/;
+
+function slugificar(texto) {
+  return texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 50);
+}
+
+export default function CadastroEstudio() {
+  const uid = useId();
+  const [form, setForm] = useState({ nome: '', slug: '', whatsapp: '', instagram: '' });
+  const [slugManual, setSlugManual] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const slugValido = SLUG_RE.test(form.slug);
+  const slugTocado  = form.slug.length > 0;
+
+  function set(campo, valor) {
+    setForm((f) => ({ ...f, [campo]: valor }));
+  }
+
+  function handleNomeChange(e) {
+    const nome = e.target.value;
+    set('nome', nome);
+    if (!slugManual) set('slug', slugificar(nome));
+  }
+
+  function handleSlugChange(e) {
+    setSlugManual(true);
+    set('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (loading) return;
+
+    if (!form.nome.trim()) {
+      showToast.error('Digite o nome do seu estúdio.');
+      return;
+    }
+    if (!slugValido) {
+      showToast.error('Slug inválido. Use letras minúsculas, números e hífens (3–50 chars).');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await cadastroService.criarMeuEstudio({
+        nome: form.nome,
+        slug: form.slug,
+        whatsapp: form.whatsapp,
+        instagram: form.instagram,
+      });
+
+      showToast.success('Estúdio criado! Preparando seu painel...');
+      // Reload completo — useAuth precisa reler estudio_membros do zero.
+      window.location.href = '/dashboard';
+    } catch (err) {
+      showToast.error(err.message || 'Erro ao criar estúdio.');
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="relative min-h-screen bg-background flex items-center justify-center p-4 overflow-hidden">
+      <div
+        className="pointer-events-none absolute inset-0 opacity-40"
+        style={{ background: 'var(--gradient-hero)' }}
+        aria-hidden="true"
+      />
+
+      <div className="relative z-10 w-full max-w-md animate-fade-in">
+        <div className="bg-card border border-border rounded-2xl shadow-card p-8 space-y-7">
+
+          <div className="text-center space-y-3">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-primary shadow-elegant">
+              <Building2 size={24} className="text-primary-foreground" strokeWidth={2} />
+            </div>
+            <div>
+              <h1 className="text-2xl font-display font-semibold text-foreground tracking-tight">
+                Agora, seu estúdio
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Só mais alguns dados e seu painel já fica pronto.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            <div>
+              <Label htmlFor={`${uid}-nome`} required>Nome do estúdio</Label>
+              <Input
+                id={`${uid}-nome`}
+                leftIcon={<Building2 size={16} />}
+                placeholder="Ex: Espaço Movimento"
+                value={form.nome}
+                onChange={handleNomeChange}
+                required
+                disabled={loading}
+                autoFocus
+              />
+            </div>
+
+            <div>
+              <Label htmlFor={`${uid}-slug`} required>Slug (URL única)</Label>
+              <Input
+                id={`${uid}-slug`}
+                leftIcon={<Link2 size={16} />}
+                rightIcon={
+                  slugTocado
+                    ? slugValido
+                      ? <CheckCircle size={16} className="text-success" />
+                      : <XCircle size={16} className="text-destructive" />
+                    : null
+                }
+                placeholder="espaco-movimento"
+                value={form.slug}
+                onChange={handleSlugChange}
+                required
+                disabled={loading}
+                aria-describedby={`${uid}-slug-hint`}
+              />
+              <p id={`${uid}-slug-hint`} className="mt-1 text-[11px] text-muted-foreground">
+                Apenas letras minúsculas, números e hífens · 3–50 caracteres
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor={`${uid}-whats`}>WhatsApp</Label>
+                <Input
+                  id={`${uid}-whats`}
+                  leftIcon={<Phone size={16} />}
+                  placeholder="51 9 9999-0000"
+                  value={form.whatsapp}
+                  onChange={(e) => set('whatsapp', e.target.value)}
+                  disabled={loading}
+                />
+              </div>
+              <div>
+                <Label htmlFor={`${uid}-insta`}>Instagram</Label>
+                <Input
+                  id={`${uid}-insta`}
+                  leftIcon={<Instagram size={16} />}
+                  placeholder="@estudio"
+                  value={form.instagram}
+                  onChange={(e) => set('instagram', e.target.value)}
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            <Button
+              type="submit"
+              variant="premium"
+              size="lg"
+              fullWidth
+              loading={loading}
+              leftIcon={<Building2 size={16} />}
+            >
+              {loading ? 'Criando...' : 'Criar meu estúdio'}
+            </Button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
 <file path="webapp/src/pages/ConfiguracoesEstudio.jsx">
 // webapp/src/pages/ConfiguracoesEstudio.jsx
 import React, { useState, useEffect, useRef } from 'react';
@@ -5863,7 +6424,7 @@ export default function Dashboard() {
 
           {/* Pagamentos em atraso */}
           {loadingInadim ? (
-            <Skeleton.Card />
+            <Skeleton className="h-48 w-full rounded-2xl" />
           ) : listaInadimplentes.length > 0 ? (
             <SecaoAviso
               tipo="danger"
@@ -5912,7 +6473,7 @@ export default function Dashboard() {
 
           {/* Planos vencendo em 7 dias */}
           {loadingVencendo ? (
-            <Skeleton.Card />
+            <Skeleton className="h-48 w-full rounded-2xl" />
           ) : alunosPlanosVencendo.length > 0 ? (
             <SecaoAviso
               tipo="warning"
@@ -7266,7 +7827,7 @@ export default function Landing() {
   const WHATSAPP_URL  = whatsappNum
     ? `https://wa.me/${whatsappNum}?text=Olá!%20Vi%20o%20site%20e%20quero%20saber%20mais.`
     : '#';
-  const INSTAGRAM_URL = estudio?.instagram_url ?? '#';
+  const INSTAGRAM = estudio?.instagram ?? '#';
   const MAPS_URL      = estudio?.maps_url      ?? '#';
   const MAPS_EMBED    = estudio?.maps_embed_url ?? '';
 
@@ -10072,6 +10633,66 @@ export default function Professores() {
 }
 </file>
 
+<file path="webapp/src/services/cadastroService.js">
+// webapp/src/services/cadastroService.js
+//
+// Serviço do fluxo de cadastro self-service (novo cliente Nexofy).
+// Diferente do superAdminService.criarEstudio(), aqui quem chama é o
+// próprio usuário recém-autenticado — não um super_admin.
+//
+// A Edge Function `criar-meu-estudio` reaproveita a mesma RPC transacional
+// `criar_estudio_transacional` usada no fluxo admin, então a garantia de
+// atomicidade (estudios + profiles + estudio_membros + configuracoes_repasse
+// em uma única transação) é a mesma.
+
+import { supabase } from '../lib/supabase';
+
+/**
+ * Verifica se um slug está disponível.
+ * Usa a mesma tabela/policy pública que useEstudioPublico já consulta,
+ * então funciona tanto autenticado quanto não.
+ */
+async function slugDisponivel(slug) {
+  const slugNorm = slug.trim().toLowerCase();
+  if (!slugNorm) return null;
+
+  const { data, error } = await supabase
+    .from('estudios')
+    .select('id')
+    .eq('slug', slugNorm)
+    .maybeSingle();
+
+  if (error) throw error;
+  return !data;
+}
+
+/**
+ * Chama a Edge Function `criar-meu-estudio`.
+ * Requer sessão autenticada (a function usa o JWT do caller).
+ * Retorna { estudio: { id, nome, slug } }
+ */
+async function criarMeuEstudio({ nome, slug, whatsapp, instagram }) {
+  const { data, error } = await supabase.functions.invoke('criar-meu-estudio', {
+    body: {
+      nome: nome.trim(),
+      slug: slug.trim(),
+      whatsapp: whatsapp?.trim() || undefined,
+      instagram: instagram?.trim() || undefined,
+    },
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+
+  return data;
+}
+
+export const cadastroService = {
+  slugDisponivel,
+  criarMeuEstudio,
+};
+</file>
+
 <file path="webapp/src/services/configuracoesRepasseService.js">
 import { supabase } from '../lib/supabase';
 
@@ -11733,10 +12354,7 @@ import { cn } from '../../lib/cn';
 export function Skeleton({ className, ...rest }) {
   return (
     <div
-      className={cn(
-        'animate-pulse rounded-lg bg-muted',
-        className
-      )}
+      className={cn('animate-pulse rounded-lg bg-muted', className)}
       aria-hidden="true"
       {...rest}
     />
@@ -11750,10 +12368,7 @@ export function SkeletonText({ lines = 3, className }) {
       {Array.from({ length: lines }).map((_, i) => (
         <Skeleton
           key={i}
-          className={cn(
-            'h-4',
-            i === lines - 1 ? 'w-3/4' : 'w-full' // última linha mais curta
-          )}
+          className={cn('h-4', i === lines - 1 ? 'w-3/4' : 'w-full')}
         />
       ))}
     </div>
@@ -11782,6 +12397,22 @@ export function SkeletonCard({ className }) {
   );
 }
 
+/* ── Row Skeleton (NOVO) ───────────────────────────────────────────────────── */
+export function SkeletonRow({ className }) {
+  return (
+    <div
+      className={cn('flex items-center gap-4 p-4', className)}
+      aria-hidden="true"
+    >
+      <Skeleton className="h-12 w-12 rounded-full shrink-0" />
+      <div className="flex-1 space-y-2">
+        <Skeleton className="h-4 w-1/2" />
+        <Skeleton className="h-3 w-1/3" />
+      </div>
+    </div>
+  );
+}
+
 /* ── Avatar Skeleton ────────────────────────────────────────────────────────── */
 export function SkeletonAvatar({ size = 'md', className }) {
   const sizes = {
@@ -11795,6 +12426,12 @@ export function SkeletonAvatar({ size = 'md', className }) {
     />
   );
 }
+
+/* ── Compound component: anexa as variantes ao Skeleton base ───────────────── */
+Skeleton.Text = SkeletonText;
+Skeleton.Card = SkeletonCard;
+Skeleton.Row = SkeletonRow;
+Skeleton.Avatar = SkeletonAvatar;
 
 export default Skeleton;
 </file>
@@ -15741,6 +16378,7 @@ import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import Skeleton from '../components/ui/Skeleton';
+import { SkeletonCard } from '../components/ui/Skeleton';
 import Surface from '../components/ui/Surface';
 
 const MESES = [
@@ -15934,7 +16572,7 @@ export default function Aniversariantes() {
           <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-muted/30">
             {loading ? (
               <div className="space-y-3">
-                {[1, 2, 3, 4].map(i => <Skeleton.Row key={i} className="bg-card rounded-3xl" />)}
+                {[1, 2, 3, 4].map(i => <SkeletonCard key={i} className="bg-card rounded-3xl" />)}
               </div>
             ) : aniversariantesFiltrados.length === 0 ? (
               <div className="h-full flex items-center justify-center">
@@ -20238,245 +20876,6 @@ export async function listarRepassesProfessor(professorId, mesAno) {
 }
 </file>
 
-<file path="webapp/src/App.jsx">
-// webapp/src/App.jsx
-import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import { RefreshCw, Menu } from 'lucide-react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-
-import { useAuth } from './hooks/useAuth';
-import { useSuperAdmin } from './hooks/useSuperAdmin';
-import { useEstudio } from './hooks/useEstudio';
-import { rotaPorPerfil } from './lib/navigation';
-import { ThemeProvider } from './providers/ThemeProvider';
-import { ToastProvider } from './components/shared/Toast';
-import ErrorBoundary from './components/shared/ErrorBoundary';
-import Sidebar from './components/Sidebar';
-import { PWABanners } from './components/PWABanners';
-import PaginaNaoEncontrada from './components/PaginaNaoEncontrada';
-
-// Impersonation
-import { ImpersonationProvider } from './contexts/ImpersonationContext';
-import BannerImpersonation from './pages/SuperAdmin/components/BannerImpersonation';
-
-// Pages
-import Login from './pages/Login';
-import RedefinirSenha from './pages/RedefinirSenha';
-import Dashboard from './pages/Dashboard';
-import Alunos from './pages/Alunos';
-import NovoAluno from './pages/NovoAluno';
-import PerfilAluno from './pages/PerfilAluno';
-import Leads from './pages/Leads';
-import Professores from './pages/Professores';
-import Agenda from './pages/Agenda/Agenda';
-import Financeiro from './pages/Financeiro';
-import Despesas from './pages/Despesas';
-import Planos from './pages/Planos';
-import Modalidades from './pages/Modalidades';
-import Presenca from './pages/Presenca';
-import Comissoes from './pages/Comissoes';
-import Aniversariantes from './pages/Aniversariantes';
-import Landing from './pages/Landing';
-import AreaAluno from './pages/AreaAluno';
-import ConfiguracoesFeriados from './pages/ConfiguracoesFeriados';
-import Notificacoes from './pages/Notificacoes';
-import ConfiguracoesRepasse from './pages/ConfiguracoesRepasse';
-import ProfessorAlunos    from './pages/Professor/ProfessorAlunos';
-import ProfessorComissoes from './pages/Professor/ProfessorComissoes';
-import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
-import ConfiguracoesEstudio from './pages/ConfiguracoesEstudio';
-
-// Super Admin
-import SuperAdminLayout      from './pages/SuperAdmin';
-import SuperAdminDashboard   from './pages/SuperAdmin/pages/SuperAdminDashboard';
-import SuperAdminEstudios    from './pages/SuperAdmin/pages/SuperAdminEstudios';
-import SuperAdminNovoEstudio from './pages/SuperAdmin/pages/SuperAdminNovoEstudio';
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { retry: 1, refetchOnWindowFocus: false },
-  },
-});
-
-function Spinner() {
-  return (
-    <div className="h-screen w-screen flex items-center justify-center bg-background">
-      <RefreshCw className="animate-spin text-primary" size={48} />
-    </div>
-  );
-}
-
-// Layout com sidebar (admin + professor)
-// Quando em modo impersonation, o super_admin acessa estas rotas com o
-// override ativo — o BannerImpersonation no topo avisa sobre isso.
-const LayoutComSidebar = ({ perfil, nomeUsuario, estudioId }) => {
-  const { data: estudio } = useEstudio(estudioId);
-  const nomeEstudio = estudio?.nome ?? 'Estudio';
-  const [menuAberto, setMenuAberto] = useState(false);
-
-  return (
-    <div className="flex h-screen bg-background transition-colors duration-300 overflow-hidden w-full">
-      {/* Banner de impersonation fica no topo de tudo (fixed, z-[200]) */}
-      <BannerImpersonation />
-
-      <Sidebar
-        perfil={perfil}
-        nomeUsuario={nomeUsuario}
-        nomeEstudio={nomeEstudio}
-        estudioId={estudioId}
-        menuAberto={menuAberto}
-        setMenuAberto={setMenuAberto}
-      />
-
-      <div className="flex-1 flex flex-col h-screen overflow-hidden w-full max-w-full">
-        <div className="md:hidden flex items-center justify-between bg-card border-b border-border p-4 shrink-0 z-10 shadow-sm transition-colors duration-300">
-          <div>
-            <h2 className="text-xl font-black text-primary tracking-tight leading-none">{nomeEstudio}</h2>
-            {perfil === 'professor' && (
-              <p className="text-[11px] font-bold text-muted-foreground mt-0.5">Area do Professor</p>
-            )}
-          </div>
-          <button
-            onClick={() => setMenuAberto(true)}
-            className="p-2 text-muted-foreground bg-muted rounded-xl hover:bg-subtle transition-colors"
-          >
-            <Menu size={24} />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto w-full custom-scrollbar">
-          <Outlet context={{ perfil }} />
-        </div>
-      </div>
-
-      <PWABanners />
-    </div>
-  );
-};
-
-// Guard generico (admin / professor / aluno)
-const RotaPrivada = ({ sessao, perfil, loading, allowedRoles }) => {
-  if (loading) return <Spinner />;
-  if (!sessao || perfil === null) return <Navigate to="/login" replace />;
-  if (allowedRoles && !allowedRoles.includes(perfil)) {
-    return <Navigate to={rotaPorPerfil(perfil)} replace />;
-  }
-  return <Outlet />;
-};
-
-// Guard exclusivo de super_admin
-// Autocontido: chama useSuperAdmin() internamente, sem receber perfil via props.
-function RotaSuperAdmin() {
-  const { isSuperAdmin, loading, autenticado } = useSuperAdmin();
-  if (loading)       return <Spinner />;
-  if (!autenticado)  return <Navigate to="/login" replace />;
-  if (!isSuperAdmin) return <Navigate to={rotaPorPerfil('admin')} replace />;
-  return <Outlet />;
-}
-
-export default function App() {
-  const { sessao, perfil, loading, nomeUsuario, estudioId } = useAuth();
-
-  if (loading) return <Spinner />;
-
-  return (
-    <QueryClientProvider client={queryClient}>
-      <ErrorBoundary>
-        <ThemeProvider>
-          {/*
-            ImpersonationProvider envolve o BrowserRouter para que
-            useImpersonation() funcione em qualquer componente da arvore,
-            incluindo o BannerImpersonation montado dentro do LayoutComSidebar.
-          */}
-          <ImpersonationProvider>
-            <BrowserRouter>
-              <ToastProvider />
-              <Routes>
-
-                {/* Publicas */}
-                <Route path="/" element={
-                  !sessao ? <Landing /> : <Navigate to={rotaPorPerfil(perfil)} replace />
-                } />
-                <Route path="/login" element={
-                  !sessao ? <Login /> : <Navigate to={rotaPorPerfil(perfil)} replace />
-                } />
-                <Route path="/redefinir-senha" element={<RedefinirSenha />} />
-
-                {/* Super Admin — guard proprio, layout proprio, sem Sidebar de estudio */}
-                <Route element={<RotaSuperAdmin />}>
-                  <Route path="/super" element={<SuperAdminLayout />}>
-                    <Route index                element={<SuperAdminDashboard />} />
-                    <Route path="estudios"      element={<SuperAdminEstudios />} />
-                    <Route path="estudios/novo" element={<SuperAdminNovoEstudio />} />
-                  </Route>
-                </Route>
-
-                {/* Aluno */}
-                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['aluno']} />}>
-                  <Route path="/area-aluno" element={<AreaAluno />} />
-                </Route>
-
-                {/*
-                  Admin + Professor
-                  Nota: quando super_admin usa impersonation, perfil ainda e 'super_admin'.
-                  O acesso ao dashboard e feito via navigate('/dashboard') no handleAcessar,
-                  mas o RLS do servidor ja enxerga o estudio_id correto pelo override.
-                  O guard allowedRoles nao bloqueia porque RotaPrivada recebe perfil='super_admin'
-                  que nao esta na lista — para resolver isso, o super_admin em modo impersonation
-                  acessa estas rotas como 'admin' efetivo. Duas opcoes:
-                    A) Adicionar 'super_admin' nos allowedRoles de admin (abaixo, mais simples)
-                    B) Criar um layout de impersonation separado (mais isolado)
-                  Usamos a opcao A, que e a padrao para ferramentas de suporte.
-                */}
-                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'professor', 'super_admin']} />}>
-                  <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
-                    <Route path="/agenda"              element={<Agenda />} />
-                    <Route path="/professor/alunos"    element={<ProfessorAlunos />} />
-                    <Route path="/professor/comissoes" element={<ProfessorComissoes />} />
-                  </Route>
-                </Route>
-
-                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'super_admin']} />}>
-                  <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
-                    <Route path="/dashboard"             element={<Dashboard />} />
-                    <Route path="/leads"                 element={<Leads />} />
-                    <Route path="/alunos"                element={<Alunos />} />
-                    <Route path="/alunos/novo"           element={<NovoAluno />} />
-                    <Route path="/alunos/:id"            element={<PerfilAluno />} />
-                    <Route path="/professores"           element={<Professores />} />
-                    <Route path="/financeiro"            element={<Financeiro />} />
-                    <Route path="/despesas"              element={<Despesas />} />
-                    <Route path="/resultado-financeiro"  element={<ResultadoFinanceiro />} />
-                    <Route path="/planos"                element={<Planos />} />
-                    <Route path="/modalidades"           element={<Modalidades />} />
-                    <Route path="/presenca"              element={<Presenca />} />
-                    <Route path="/comissoes"             element={<Comissoes />} />
-                    <Route path="/aniversariantes"       element={<Aniversariantes />} />
-                    <Route path="/configuracoes/feriados"element={<ConfiguracoesFeriados />} />
-                    <Route path="/notificacoes"          element={<Notificacoes />} />
-                    <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
-                    <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
-                  </Route>
-                </Route>
-
-                {/* 404 */}
-                <Route path="*" element={
-                  <PaginaNaoEncontrada destino={sessao ? rotaPorPerfil(perfil) : '/'} />
-                } />
-
-              </Routes>
-            </BrowserRouter>
-          </ImpersonationProvider>
-        </ThemeProvider>
-      </ErrorBoundary>
-      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
-    </QueryClientProvider>
-  );
-}
-</file>
-
 <file path="webapp/supabase/config.toml">
 # For detailed configuration reference documentation, visit:
 # https://supabase.com/docs/guides/local-development/cli/config
@@ -23192,370 +23591,6 @@ export default function Comissoes() {
 }
 </file>
 
-<file path="webapp/src/pages/Login.jsx">
-// src/pages/Login.jsx
-// ─── Midnight Indigo · Login ──────────────────────────────────────────────────
-//
-// Multi-tenant: o nome do estúdio vem do contexto do subdomínio/slug via
-// useEstudioPublico (já existe no projeto). Fallback para nome genérico.
-//
-// Design: card centralizado, dark mode nativo, componentes do design system.
-// Zero hardcodes de cor — 100% tokens CSS.
-//
-// Fluxo:
-//   1. Login normal → redireciona por perfil
-//   2. primeiro_acesso → /redefinir-senha com state
-//   3. Recuperar senha → modal inline → reset email via Supabase
-// ─────────────────────────────────────────────────────────────────────────────
-
-import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
-import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, ArrowRight, KeyRound, X, Info } from 'lucide-react';
-
-import { rotaPorPerfil } from '../lib/navigation';
-import { showToast } from '../components/shared/Toast';
-import { REGEX } from '../lib/constants';
-import Input from '../components/ui/Input';
-import Button from '../components/ui/Button';
-import { cn } from '../lib/cn';
-
-/* ── Componente principal ───────────────────────────────────────────────────── */
-export default function Login() {
-  const [email, setEmail]   = useState('');
-  const [senha, setSenha]   = useState('');
-  const [loading, setLoading] = useState(false);
-  const [modalAberto, setModalAberto] = useState(false);
-
-  const navigate = useNavigate();
-
-  /* ── Captura sessão de magic link (professor novo) ──────────────────────── */
-/* ── Captura sessão de magic link (professor novo) ──────────────────────── */
-useEffect(() => {
-  const { data: { subscription } } = supabase.auth.onAuthStateChange(
-    async (event, session) => {
-      // Só interessa o SIGNED_IN vindo de magic link (OTP).
-      // Login com senha já é tratado inteiramente no handleLogin.
-      if (event !== 'SIGNED_IN' || !session) return;
-      if (session.user.app_metadata?.provider !== 'email') return;
-      if (!session.user.confirmed_at) return; // ainda não era magic link confirmado
-
-      // Distingue magic link de signInWithPassword:
-      // magic link popula `last_sign_in_at` via OTP e não tem `amr` com 'password'
-      const amr = session.user.amr ?? session.amr;
-      const veioDeSenha = Array.isArray(amr) && amr.some(m => m.method === 'password');
-      if (veioDeSenha) return;
-
-      const { data: profData } = await supabase
-        .from('professores')
-        .select('primeiro_acesso, nome')
-        .eq('auth_id', session.user.id)
-        .maybeSingle();
-
-      if (profData?.primeiro_acesso) {
-        navigate('/redefinir-senha', {
-          state: { primeiroAcesso: true, nome: (profData.nome || '').split(' ')[0] },
-        });
-      }
-    }
-  );
-
-  return () => subscription.unsubscribe();
-}, []);
-
-  /* ── Login ──────────────────────────────────────────────────────────────── */
-  async function handleLogin(e) {
-    e.preventDefault();
-    if (loading) return;
-    setLoading(true);
-
-    try {
-      const { data: authData, error } = await supabase.auth.signInWithPassword({
-        email:    email.trim(),
-        password: senha,
-      });
-
-      if (error) throw error;
-
-      // 1. Verificar primeiro_acesso em alunos
-      const { data: alunoData } = await supabase
-        .from('alunos')
-        .select('primeiro_acesso, nome_completo, role')
-        .eq('auth_id', authData.user.id)
-        .maybeSingle();
-
-      if (alunoData?.primeiro_acesso) {
-        navigate('/redefinir-senha', {
-          state: { primeiroAcesso: true, nome: (alunoData.nome_completo || '').split(' ')[0] },
-        });
-        return;
-      }
-
-      // 2. Verificar primeiro_acesso em professores
-      if (!alunoData) {
-        const { data: profData } = await supabase
-          .from('professores')
-          .select('primeiro_acesso, nome')
-          .eq('auth_id', authData.user.id)
-          .maybeSingle();
-
-        if (profData?.primeiro_acesso) {
-          navigate('/redefinir-senha', {
-            state: { primeiroAcesso: true, nome: (profData.nome || '').split(' ')[0] },
-          });
-          return;
-        }
-
-        if (profData) {
-          const nome = (profData.nome || '').split(' ')[0];
-          showToast.success(nome ? `Bem-vindo de volta, ${nome}!` : 'Login realizado!');
-          navigate('/agenda');
-          return;
-        }
-      }
-
-      // 3. Admin ou aluno normal
-      if (alunoData) {
-        const nome = (alunoData.nome_completo || '').split(' ')[0];
-        showToast.success(nome ? `Bem-vindo de volta, ${nome}!` : 'Login realizado!');
-        navigate(rotaPorPerfil(alunoData.role === 'admin' ? 'admin' : 'aluno'));
-        return;
-      }
-
-      // Fallback
-      showToast.success('Login realizado com sucesso!');
-      navigate('/');
-
-    } catch (err) {
-      if (err.code === 'invalid_credentials' || err.message?.includes('Invalid login')) {
-        showToast.error('E-mail ou senha incorretos.');
-      } else if (err.code === 'email_not_confirmed') {
-        showToast.error('Confirme seu e-mail antes de acessar.');
-      } else if (err.message?.includes('expired') || err.message?.includes('invalid')) {
-        showToast.error('Link expirado. Solicite um novo link de recuperação.');
-      } else {
-        showToast.error('Erro ao conectar. Tente novamente.');
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    /* Fundo com gradiente hero sutil — usa tokens, funciona em light e dark */
-    <div className="relative min-h-screen bg-background flex items-center justify-center p-4 overflow-hidden">
-
-      {/* Aura de fundo — decorativa, baseada em tokens */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-40"
-        style={{ background: 'var(--gradient-hero)' }}
-        aria-hidden="true"
-      />
-
-      {/* Card principal */}
-      <div className="relative z-10 w-full max-w-sm animate-fade-in">
-        <div className="bg-card border border-border rounded-2xl shadow-card p-8 space-y-7">
-
-          {/* ── Cabeçalho ────────────────────────────────────────────────── */}
-          <div className="text-center space-y-3">
-            {/* Logo mark */}
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-primary shadow-elegant">
-              <KeyRound size={24} className="text-primary-foreground" strokeWidth={2} />
-            </div>
-
-            <div>
-              <h1 className="text-2xl font-display font-semibold text-foreground tracking-tight">
-                Entrar na plataforma
-              </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Bem-vindo de volta. Acesse sua conta.
-              </p>
-            </div>
-          </div>
-
-          {/* ── Formulário ───────────────────────────────────────────────── */}
-          <form onSubmit={handleLogin} className="space-y-4" noValidate>
-            <div className="space-y-3">
-              <Input
-                type="email"
-                required
-                autoFocus
-                autoComplete="email"
-                placeholder="seu@email.com"
-                aria-label="E-mail"
-                leftIcon={<Mail size={16} />}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-
-              <Input
-                type="password"
-                required
-                autoComplete="current-password"
-                placeholder="Sua senha"
-                aria-label="Senha"
-                leftIcon={<Lock size={16} />}
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-              />
-            </div>
-
-            <Button
-              type="submit"
-              variant="premium"
-              size="lg"
-              fullWidth
-              loading={loading}
-              rightIcon={<ArrowRight size={18} />}
-            >
-              Entrar
-            </Button>
-          </form>
-
-          {/* ── Link recuperação ─────────────────────────────────────────── */}
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={() => setModalAberto(true)}
-              className={cn(
-                'text-sm font-medium text-muted-foreground',
-                'hover:text-foreground underline-offset-4 hover:underline',
-                'transition-colors outline-none',
-                'focus-visible:ring-2 focus-visible:ring-ring rounded',
-              )}
-            >
-              Esqueceu a senha?
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Modal Recuperar Senha ─────────────────────────────────────────── */}
-      {modalAberto && (
-        <ModalRecuperarSenha onClose={() => setModalAberto(false)} />
-      )}
-    </div>
-  );
-}
-
-/* ── Modal de Recuperação ────────────────────────────────────────────────────── */
-function ModalRecuperarSenha({ onClose }) {
-  const [emailRecup, setEmailRecup]   = useState('');
-  const [loading, setLoading]         = useState(false);
-  const [enviado, setEnviado]         = useState(false);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-
-    const email = emailRecup.trim();
-    if (!REGEX.EMAIL.test(email)) {
-      showToast.error('Digite um e-mail válido.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/redefinir-senha`,
-      });
-      if (error) throw error;
-      setEnviado(true);
-    } catch (err) {
-      showToast.error('Não foi possível enviar o link. Tente novamente.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    /* Overlay */
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Recuperar acesso"
-    >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-background/80 backdrop-blur-sm"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      {/* Painel */}
-      <div className="relative z-10 w-full max-w-sm animate-scale-in">
-        <div className="bg-card border border-border rounded-2xl shadow-elegant p-7 space-y-6">
-
-          {/* Header */}
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-display font-semibold text-foreground">
-                Recuperar acesso
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Enviaremos um link seguro para o seu e-mail.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Fechar"
-              className={cn(
-                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                'text-muted-foreground hover:text-foreground hover:bg-muted',
-                'transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              )}
-            >
-              <X size={16} />
-            </button>
-          </div>
-
-          {enviado ? (
-            /* Estado de sucesso */
-            <div className="space-y-4">
-              <div className="flex gap-3 rounded-xl bg-success-soft border border-success/20 p-4">
-                <Info size={18} className="text-success shrink-0 mt-0.5" />
-                <p className="text-sm text-success font-medium leading-relaxed">
-                  Link enviado para <strong>{emailRecup.trim()}</strong>. Verifique também a caixa de spam.
-                </p>
-              </div>
-              <Button variant="outline" fullWidth onClick={onClose}>
-                Fechar
-              </Button>
-            </div>
-          ) : (
-            /* Formulário */
-            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-              <Input
-                type="email"
-                required
-                autoFocus
-                autoComplete="email"
-                placeholder="seu@email.com"
-                aria-label="E-mail para recuperação"
-                leftIcon={<Mail size={16} />}
-                value={emailRecup}
-                onChange={(e) => setEmailRecup(e.target.value)}
-              />
-
-              <Button
-                type="submit"
-                variant="default"
-                fullWidth
-                loading={loading}
-                disabled={!emailRecup.trim()}
-              >
-                Enviar link de acesso
-              </Button>
-            </form>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-</file>
-
 <file path="webapp/src/pages/PerfilAluno.jsx">
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -26127,6 +26162,280 @@ export function gerarEventosFeriados(feriados) {
 }
 </file>
 
+<file path="webapp/src/App.jsx">
+// webapp/src/App.jsx
+import React, { useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { RefreshCw, Menu } from 'lucide-react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+
+import { useAuth } from './hooks/useAuth';
+import { useSuperAdmin } from './hooks/useSuperAdmin';
+import { useEstudio } from './hooks/useEstudio';
+import { rotaPorPerfil } from './lib/navigation';
+import { ThemeProvider } from './providers/ThemeProvider';
+import { ToastProvider } from './components/shared/Toast';
+import ErrorBoundary from './components/shared/ErrorBoundary';
+import Sidebar from './components/Sidebar';
+import { PWABanners } from './components/PWABanners';
+import PaginaNaoEncontrada from './components/PaginaNaoEncontrada';
+
+// Impersonation
+import { ImpersonationProvider } from './contexts/ImpersonationContext';
+import BannerImpersonation from './pages/SuperAdmin/components/BannerImpersonation';
+
+// Pages
+import Login from './pages/Login';
+import Cadastro from './pages/Cadastro';
+import CadastroEstudio from './pages/CadastroEstudio';
+import RedefinirSenha from './pages/RedefinirSenha';
+import Dashboard from './pages/Dashboard';
+import Alunos from './pages/Alunos';
+import NovoAluno from './pages/NovoAluno';
+import PerfilAluno from './pages/PerfilAluno';
+import Leads from './pages/Leads';
+import Professores from './pages/Professores';
+import Agenda from './pages/Agenda/Agenda';
+import Financeiro from './pages/Financeiro';
+import Despesas from './pages/Despesas';
+import Planos from './pages/Planos';
+import Modalidades from './pages/Modalidades';
+import Presenca from './pages/Presenca';
+import Comissoes from './pages/Comissoes';
+import Aniversariantes from './pages/Aniversariantes';
+import Landing from './pages/Landing';
+import AreaAluno from './pages/AreaAluno';
+import ConfiguracoesFeriados from './pages/ConfiguracoesFeriados';
+import Notificacoes from './pages/Notificacoes';
+import ConfiguracoesRepasse from './pages/ConfiguracoesRepasse';
+import ProfessorAlunos    from './pages/Professor/ProfessorAlunos';
+import ProfessorComissoes from './pages/Professor/ProfessorComissoes';
+import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
+import ConfiguracoesEstudio from './pages/ConfiguracoesEstudio';
+
+// Super Admin
+import SuperAdminLayout      from './pages/SuperAdmin';
+import SuperAdminDashboard   from './pages/SuperAdmin/pages/SuperAdminDashboard';
+import SuperAdminEstudios    from './pages/SuperAdmin/pages/SuperAdminEstudios';
+import SuperAdminNovoEstudio from './pages/SuperAdmin/pages/SuperAdminNovoEstudio';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, refetchOnWindowFocus: false },
+  },
+});
+
+function Spinner() {
+  return (
+    <div className="h-screen w-screen flex items-center justify-center bg-background">
+      <RefreshCw className="animate-spin text-primary" size={48} />
+    </div>
+  );
+}
+
+// Destino pós-autenticação, considerando o caso "logado mas ainda sem
+// estudio_membros" (usuário confirmou e-mail mas não terminou o onboarding).
+// Sem esse caso à parte, perfil === null cai no fallback de rotaPorPerfil
+// ('/login'), e como a rota /login redireciona sessão ativa de volta pra
+// rotaPorPerfil(perfil), o resultado é um loop de redirect em /login.
+function destinoPosAuth(sessao, perfil) {
+  if (!sessao) return '/login';
+  if (perfil === null) return '/cadastro/estudio';
+  return rotaPorPerfil(perfil);
+}
+
+// Layout com sidebar (admin + professor)
+// Quando em modo impersonation, o super_admin acessa estas rotas com o
+// override ativo — o BannerImpersonation no topo avisa sobre isso.
+const LayoutComSidebar = ({ perfil, nomeUsuario, estudioId }) => {
+  const { data: estudio } = useEstudio(estudioId);
+  const nomeEstudio = estudio?.nome ?? 'Estudio';
+  const [menuAberto, setMenuAberto] = useState(false);
+
+  return (
+    <div className="flex h-screen bg-background transition-colors duration-300 overflow-hidden w-full">
+      {/* Banner de impersonation fica no topo de tudo (fixed, z-[200]) */}
+      <BannerImpersonation />
+
+      <Sidebar
+        perfil={perfil}
+        nomeUsuario={nomeUsuario}
+        nomeEstudio={nomeEstudio}
+        estudioId={estudioId}
+        menuAberto={menuAberto}
+        setMenuAberto={setMenuAberto}
+      />
+
+      <div className="flex-1 flex flex-col h-screen overflow-hidden w-full max-w-full">
+        <div className="md:hidden flex items-center justify-between bg-card border-b border-border p-4 shrink-0 z-10 shadow-sm transition-colors duration-300">
+          <div>
+            <h2 className="text-xl font-black text-primary tracking-tight leading-none">{nomeEstudio}</h2>
+            {perfil === 'professor' && (
+              <p className="text-[11px] font-bold text-muted-foreground mt-0.5">Area do Professor</p>
+            )}
+          </div>
+          <button
+            onClick={() => setMenuAberto(true)}
+            className="p-2 text-muted-foreground bg-muted rounded-xl hover:bg-subtle transition-colors"
+          >
+            <Menu size={24} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto w-full custom-scrollbar">
+          <Outlet context={{ perfil }} />
+        </div>
+      </div>
+
+      <PWABanners />
+    </div>
+  );
+};
+
+// Guard generico (admin / professor / aluno)
+// Sessão ativa sem perfil (ainda sem estudio_membros) manda pro onboarding,
+// não pra tela de login — o usuário já está autenticado, só falta o
+// segundo passo do cadastro.
+const RotaPrivada = ({ sessao, perfil, loading, allowedRoles }) => {
+  if (loading) return <Spinner />;
+  if (!sessao) return <Navigate to="/login" replace />;
+  if (perfil === null) return <Navigate to="/cadastro/estudio" replace />;
+  if (allowedRoles && !allowedRoles.includes(perfil)) {
+    return <Navigate to={rotaPorPerfil(perfil)} replace />;
+  }
+  return <Outlet />;
+};
+
+// Guard exclusivo de super_admin
+// Autocontido: chama useSuperAdmin() internamente, sem receber perfil via props.
+function RotaSuperAdmin() {
+  const { isSuperAdmin, loading, autenticado } = useSuperAdmin();
+  if (loading)       return <Spinner />;
+  if (!autenticado)  return <Navigate to="/login" replace />;
+  if (!isSuperAdmin) return <Navigate to={rotaPorPerfil('admin')} replace />;
+  return <Outlet />;
+}
+
+// Guard do passo 2 do cadastro self-service (/cadastro/estudio).
+// Exige sessão ativa; se o usuário já tiver estudio_membros, não deixa
+// re-entrar no wizard — manda direto pra rota do perfil dele.
+const RotaCadastroEstudio = ({ sessao, perfil, loading }) => {
+  if (loading) return <Spinner />;
+  if (!sessao) return <Navigate to="/login" replace />;
+  if (perfil !== null) return <Navigate to={rotaPorPerfil(perfil)} replace />;
+  return <Outlet />;
+};
+
+export default function App() {
+  const { sessao, perfil, loading, nomeUsuario, estudioId } = useAuth();
+
+  if (loading) return <Spinner />;
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ErrorBoundary>
+        <ThemeProvider>
+          {/*
+            ImpersonationProvider envolve o BrowserRouter para que
+            useImpersonation() funcione em qualquer componente da arvore,
+            incluindo o BannerImpersonation montado dentro do LayoutComSidebar.
+          */}
+          <ImpersonationProvider>
+            <BrowserRouter>
+              <ToastProvider />
+              <Routes>
+
+                {/* Publicas */}
+                <Route path="/" element={
+                  !sessao ? <Landing /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+                } />
+                <Route path="/login" element={
+                  !sessao ? <Login /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+                } />
+                <Route path="/cadastro" element={
+                  !sessao ? <Cadastro /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+                } />
+                <Route path="/redefinir-senha" element={<RedefinirSenha />} />
+
+                {/* Cadastro self-service — passo 2 (dados do estúdio) */}
+                <Route element={<RotaCadastroEstudio sessao={sessao} perfil={perfil} loading={loading} />}>
+                  <Route path="/cadastro/estudio" element={<CadastroEstudio />} />
+                </Route>
+
+                {/* Super Admin — guard proprio, layout proprio, sem Sidebar de estudio */}
+                <Route element={<RotaSuperAdmin />}>
+                  <Route path="/super" element={<SuperAdminLayout />}>
+                    <Route index                element={<SuperAdminDashboard />} />
+                    <Route path="estudios"      element={<SuperAdminEstudios />} />
+                    <Route path="estudios/novo" element={<SuperAdminNovoEstudio />} />
+                  </Route>
+                </Route>
+
+                {/* Aluno */}
+                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['aluno']} />}>
+                  <Route path="/area-aluno" element={<AreaAluno />} />
+                </Route>
+
+                {/*
+                  Admin + Professor
+                  Nota: quando super_admin usa impersonation, perfil ainda e 'super_admin'.
+                  O acesso ao dashboard e feito via navigate('/dashboard') no handleAcessar,
+                  mas o RLS do servidor ja enxerga o estudio_id correto pelo override.
+                  O guard allowedRoles nao bloqueia porque RotaPrivada recebe perfil='super_admin'
+                  que nao esta na lista — para resolver isso, o super_admin em modo impersonation
+                  acessa estas rotas como 'admin' efetivo. Duas opcoes:
+                    A) Adicionar 'super_admin' nos allowedRoles de admin (abaixo, mais simples)
+                    B) Criar um layout de impersonation separado (mais isolado)
+                  Usamos a opcao A, que e a padrao para ferramentas de suporte.
+                */}
+                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'professor', 'super_admin']} />}>
+                  <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
+                    <Route path="/agenda"              element={<Agenda />} />
+                    <Route path="/professor/alunos"    element={<ProfessorAlunos />} />
+                    <Route path="/professor/comissoes" element={<ProfessorComissoes />} />
+                  </Route>
+                </Route>
+
+                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'super_admin']} />}>
+                  <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
+                    <Route path="/dashboard"             element={<Dashboard />} />
+                    <Route path="/leads"                 element={<Leads />} />
+                    <Route path="/alunos"                element={<Alunos />} />
+                    <Route path="/alunos/novo"           element={<NovoAluno />} />
+                    <Route path="/alunos/:id"            element={<PerfilAluno />} />
+                    <Route path="/professores"           element={<Professores />} />
+                    <Route path="/financeiro"            element={<Financeiro />} />
+                    <Route path="/despesas"              element={<Despesas />} />
+                    <Route path="/resultado-financeiro"  element={<ResultadoFinanceiro />} />
+                    <Route path="/planos"                element={<Planos />} />
+                    <Route path="/modalidades"           element={<Modalidades />} />
+                    <Route path="/presenca"              element={<Presenca />} />
+                    <Route path="/comissoes"             element={<Comissoes />} />
+                    <Route path="/aniversariantes"       element={<Aniversariantes />} />
+                    <Route path="/configuracoes/feriados"element={<ConfiguracoesFeriados />} />
+                    <Route path="/notificacoes"          element={<Notificacoes />} />
+                    <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
+                    <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
+                  </Route>
+                </Route>
+
+                {/* 404 */}
+                <Route path="*" element={
+                  <PaginaNaoEncontrada destino={destinoPosAuth(sessao, perfil)} />
+                } />
+
+              </Routes>
+            </BrowserRouter>
+          </ImpersonationProvider>
+        </ThemeProvider>
+      </ErrorBoundary>
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+    </QueryClientProvider>
+  );
+}
+</file>
+
 <file path="webapp/src/index.css">
 @import "tailwindcss";
 @config "../tailwind.config.js";
@@ -26790,6 +27099,385 @@ export default {
   CORES_GRAFICOS_TOKENS,
   PALETA_CORES,
 };
+</file>
+
+<file path="webapp/src/pages/Login.jsx">
+// src/pages/Login.jsx
+// ─── Midnight Indigo · Login ──────────────────────────────────────────────────
+//
+// Multi-tenant: o nome do estúdio vem do contexto do subdomínio/slug via
+// useEstudioPublico (já existe no projeto). Fallback para nome genérico.
+//
+// Design: card centralizado, dark mode nativo, componentes do design system.
+// Zero hardcodes de cor — 100% tokens CSS.
+//
+// Fluxo:
+//   1. Login normal → redireciona por perfil
+//   2. primeiro_acesso → /redefinir-senha com state
+//   3. Recuperar senha → modal inline → reset email via Supabase
+// ─────────────────────────────────────────────────────────────────────────────
+
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
+import { useNavigate } from 'react-router-dom';
+import { Mail, Lock, ArrowRight, KeyRound, X, Info } from 'lucide-react';
+
+import { rotaPorPerfil } from '../lib/navigation';
+import { showToast } from '../components/shared/Toast';
+import { REGEX } from '../lib/constants';
+import Input from '../components/ui/Input';
+import Button from '../components/ui/Button';
+import { cn } from '../lib/cn';
+
+/* ── Componente principal ───────────────────────────────────────────────────── */
+export default function Login() {
+  const [email, setEmail]   = useState('');
+  const [senha, setSenha]   = useState('');
+  const [loading, setLoading] = useState(false);
+  const [modalAberto, setModalAberto] = useState(false);
+
+  const navigate = useNavigate();
+
+  /* ── Captura sessão de magic link (professor novo) ──────────────────────── */
+/* ── Captura sessão de magic link (professor novo) ──────────────────────── */
+useEffect(() => {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    async (event, session) => {
+      // Só interessa o SIGNED_IN vindo de magic link (OTP).
+      // Login com senha já é tratado inteiramente no handleLogin.
+      if (event !== 'SIGNED_IN' || !session) return;
+      if (session.user.app_metadata?.provider !== 'email') return;
+      if (!session.user.confirmed_at) return; // ainda não era magic link confirmado
+
+      // Distingue magic link de signInWithPassword:
+      // magic link popula `last_sign_in_at` via OTP e não tem `amr` com 'password'
+      const amr = session.user.amr ?? session.amr;
+      const veioDeSenha = Array.isArray(amr) && amr.some(m => m.method === 'password');
+      if (veioDeSenha) return;
+
+      const { data: profData } = await supabase
+        .from('professores')
+        .select('primeiro_acesso, nome')
+        .eq('auth_id', session.user.id)
+        .maybeSingle();
+
+      if (profData?.primeiro_acesso) {
+        navigate('/redefinir-senha', {
+          state: { primeiroAcesso: true, nome: (profData.nome || '').split(' ')[0] },
+        });
+      }
+    }
+  );
+
+  return () => subscription.unsubscribe();
+}, []);
+
+  /* ── Login ──────────────────────────────────────────────────────────────── */
+  async function handleLogin(e) {
+    e.preventDefault();
+    if (loading) return;
+    setLoading(true);
+
+    try {
+      const { data: authData, error } = await supabase.auth.signInWithPassword({
+        email:    email.trim(),
+        password: senha,
+      });
+
+      if (error) throw error;
+
+      // 1. Verificar primeiro_acesso em alunos
+      const { data: alunoData } = await supabase
+        .from('alunos')
+        .select('primeiro_acesso, nome_completo, role')
+        .eq('auth_id', authData.user.id)
+        .maybeSingle();
+
+      if (alunoData?.primeiro_acesso) {
+        navigate('/redefinir-senha', {
+          state: { primeiroAcesso: true, nome: (alunoData.nome_completo || '').split(' ')[0] },
+        });
+        return;
+      }
+
+      // 2. Verificar primeiro_acesso em professores
+      if (!alunoData) {
+        const { data: profData } = await supabase
+          .from('professores')
+          .select('primeiro_acesso, nome')
+          .eq('auth_id', authData.user.id)
+          .maybeSingle();
+
+        if (profData?.primeiro_acesso) {
+          navigate('/redefinir-senha', {
+            state: { primeiroAcesso: true, nome: (profData.nome || '').split(' ')[0] },
+          });
+          return;
+        }
+
+        if (profData) {
+          const nome = (profData.nome || '').split(' ')[0];
+          showToast.success(nome ? `Bem-vindo de volta, ${nome}!` : 'Login realizado!');
+          navigate('/agenda');
+          return;
+        }
+      }
+
+      // 3. Admin ou aluno normal
+      if (alunoData) {
+        const nome = (alunoData.nome_completo || '').split(' ')[0];
+        showToast.success(nome ? `Bem-vindo de volta, ${nome}!` : 'Login realizado!');
+        navigate(rotaPorPerfil(alunoData.role === 'admin' ? 'admin' : 'aluno'));
+        return;
+      }
+
+      // Fallback
+      showToast.success('Login realizado com sucesso!');
+      navigate('/');
+
+    } catch (err) {
+      if (err.code === 'invalid_credentials' || err.message?.includes('Invalid login')) {
+        showToast.error('E-mail ou senha incorretos.');
+      } else if (err.code === 'email_not_confirmed') {
+        showToast.error('Confirme seu e-mail antes de acessar.');
+      } else if (err.message?.includes('expired') || err.message?.includes('invalid')) {
+        showToast.error('Link expirado. Solicite um novo link de recuperação.');
+      } else {
+        showToast.error('Erro ao conectar. Tente novamente.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    /* Fundo com gradiente hero sutil — usa tokens, funciona em light e dark */
+    <div className="relative min-h-screen bg-background flex items-center justify-center p-4 overflow-hidden">
+
+      {/* Aura de fundo — decorativa, baseada em tokens */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-40"
+        style={{ background: 'var(--gradient-hero)' }}
+        aria-hidden="true"
+      />
+
+      {/* Card principal */}
+      <div className="relative z-10 w-full max-w-sm animate-fade-in">
+        <div className="bg-card border border-border rounded-2xl shadow-card p-8 space-y-7">
+
+          {/* ── Cabeçalho ────────────────────────────────────────────────── */}
+          <div className="text-center space-y-3">
+            {/* Logo mark */}
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-primary shadow-elegant">
+              <KeyRound size={24} className="text-primary-foreground" strokeWidth={2} />
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-display font-semibold text-foreground tracking-tight">
+                Entrar na plataforma
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Bem-vindo de volta. Acesse sua conta.
+              </p>
+            </div>
+          </div>
+
+          {/* ── Formulário ───────────────────────────────────────────────── */}
+          <form onSubmit={handleLogin} className="space-y-4" noValidate>
+            <div className="space-y-3">
+              <Input
+                type="email"
+                required
+                autoFocus
+                autoComplete="email"
+                placeholder="seu@email.com"
+                aria-label="E-mail"
+                leftIcon={<Mail size={16} />}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+
+              <Input
+                type="password"
+                required
+                autoComplete="current-password"
+                placeholder="Sua senha"
+                aria-label="Senha"
+                leftIcon={<Lock size={16} />}
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+              />
+            </div>
+
+            <Button
+              type="submit"
+              variant="premium"
+              size="lg"
+              fullWidth
+              loading={loading}
+              rightIcon={<ArrowRight size={18} />}
+            >
+              Entrar
+            </Button>
+          </form>
+
+          {/* ── Link recuperação ─────────────────────────────────────────── */}
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => setModalAberto(true)}
+              className={cn(
+                'text-sm font-medium text-muted-foreground',
+                'hover:text-foreground underline-offset-4 hover:underline',
+                'transition-colors outline-none',
+                'focus-visible:ring-2 focus-visible:ring-ring rounded',
+              )}
+            >
+              Esqueceu a senha?
+            </button>
+          </div>
+
+          {/* ── Link cadastro ────────────────────────────────────────────── */}
+          <div className="text-center border-t border-border pt-5">
+            <a
+              href="/cadastro"
+              className={cn(
+                'text-sm font-medium text-muted-foreground',
+                'hover:text-foreground underline-offset-4 hover:underline',
+                'transition-colors outline-none',
+                'focus-visible:ring-2 focus-visible:ring-ring rounded',
+              )}
+            >
+              Ainda não tem conta? Criar meu estúdio
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Modal Recuperar Senha ─────────────────────────────────────────── */}
+      {modalAberto && (
+        <ModalRecuperarSenha onClose={() => setModalAberto(false)} />
+      )}
+    </div>
+  );
+}
+
+/* ── Modal de Recuperação ────────────────────────────────────────────────────── */
+function ModalRecuperarSenha({ onClose }) {
+  const [emailRecup, setEmailRecup]   = useState('');
+  const [loading, setLoading]         = useState(false);
+  const [enviado, setEnviado]         = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+
+    const email = emailRecup.trim();
+    if (!REGEX.EMAIL.test(email)) {
+      showToast.error('Digite um e-mail válido.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/redefinir-senha`,
+      });
+      if (error) throw error;
+      setEnviado(true);
+    } catch (err) {
+      showToast.error('Não foi possível enviar o link. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    /* Overlay */
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Recuperar acesso"
+    >
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-background/80 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* Painel */}
+      <div className="relative z-10 w-full max-w-sm animate-scale-in">
+        <div className="bg-card border border-border rounded-2xl shadow-elegant p-7 space-y-6">
+
+          {/* Header */}
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-display font-semibold text-foreground">
+                Recuperar acesso
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Enviaremos um link seguro para o seu e-mail.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fechar"
+              className={cn(
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                'text-muted-foreground hover:text-foreground hover:bg-muted',
+                'transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              )}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {enviado ? (
+            /* Estado de sucesso */
+            <div className="space-y-4">
+              <div className="flex gap-3 rounded-xl bg-success-soft border border-success/20 p-4">
+                <Info size={18} className="text-success shrink-0 mt-0.5" />
+                <p className="text-sm text-success font-medium leading-relaxed">
+                  Link enviado para <strong>{emailRecup.trim()}</strong>. Verifique também a caixa de spam.
+                </p>
+              </div>
+              <Button variant="outline" fullWidth onClick={onClose}>
+                Fechar
+              </Button>
+            </div>
+          ) : (
+            /* Formulário */
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+              <Input
+                type="email"
+                required
+                autoFocus
+                autoComplete="email"
+                placeholder="seu@email.com"
+                aria-label="E-mail para recuperação"
+                leftIcon={<Mail size={16} />}
+                value={emailRecup}
+                onChange={(e) => setEmailRecup(e.target.value)}
+              />
+
+              <Button
+                type="submit"
+                variant="default"
+                fullWidth
+                loading={loading}
+                disabled={!emailRecup.trim()}
+              >
+                Enviar link de acesso
+              </Button>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 </file>
 
 <file path="webapp/src/pages/NovoAluno.jsx">

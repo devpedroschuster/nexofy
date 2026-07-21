@@ -248,7 +248,7 @@ export default function Dashboard() {
 
           {/* Pagamentos em atraso */}
           {loadingInadim ? (
-            <Skeleton.Card />
+            <Skeleton className="h-48 w-full rounded-2xl" />
           ) : listaInadimplentes.length > 0 ? (
             <SecaoAviso
               tipo="danger"
@@ -297,7 +297,7 @@ export default function Dashboard() {
 
           {/* Planos vencendo em 7 dias */}
           {loadingVencendo ? (
-            <Skeleton.Card />
+            <Skeleton className="h-48 w-full rounded-2xl" />
           ) : alunosPlanosVencendo.length > 0 ? (
             <SecaoAviso
               tipo="warning"
