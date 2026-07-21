@@ -22,6 +22,8 @@ import BannerImpersonation from './pages/SuperAdmin/components/BannerImpersonati
 
 // Pages
 import Login from './pages/Login';
+import Cadastro from './pages/Cadastro';
+import CadastroEstudio from './pages/CadastroEstudio';
 import RedefinirSenha from './pages/RedefinirSenha';
 import Dashboard from './pages/Dashboard';
 import Alunos from './pages/Alunos';
@@ -65,6 +67,17 @@ function Spinner() {
       <RefreshCw className="animate-spin text-primary" size={48} />
     </div>
   );
+}
+
+// Destino pós-autenticação, considerando o caso "logado mas ainda sem
+// estudio_membros" (usuário confirmou e-mail mas não terminou o onboarding).
+// Sem esse caso à parte, perfil === null cai no fallback de rotaPorPerfil
+// ('/login'), e como a rota /login redireciona sessão ativa de volta pra
+// rotaPorPerfil(perfil), o resultado é um loop de redirect em /login.
+function destinoPosAuth(sessao, perfil) {
+  if (!sessao) return '/login';
+  if (perfil === null) return '/cadastro/estudio';
+  return rotaPorPerfil(perfil);
 }
 
 // Layout com sidebar (admin + professor)
@@ -116,9 +129,13 @@ const LayoutComSidebar = ({ perfil, nomeUsuario, estudioId }) => {
 };
 
 // Guard generico (admin / professor / aluno)
+// Sessão ativa sem perfil (ainda sem estudio_membros) manda pro onboarding,
+// não pra tela de login — o usuário já está autenticado, só falta o
+// segundo passo do cadastro.
 const RotaPrivada = ({ sessao, perfil, loading, allowedRoles }) => {
   if (loading) return <Spinner />;
-  if (!sessao || perfil === null) return <Navigate to="/login" replace />;
+  if (!sessao) return <Navigate to="/login" replace />;
+  if (perfil === null) return <Navigate to="/cadastro/estudio" replace />;
   if (allowedRoles && !allowedRoles.includes(perfil)) {
     return <Navigate to={rotaPorPerfil(perfil)} replace />;
   }
@@ -134,6 +151,16 @@ function RotaSuperAdmin() {
   if (!isSuperAdmin) return <Navigate to={rotaPorPerfil('admin')} replace />;
   return <Outlet />;
 }
+
+// Guard do passo 2 do cadastro self-service (/cadastro/estudio).
+// Exige sessão ativa; se o usuário já tiver estudio_membros, não deixa
+// re-entrar no wizard — manda direto pra rota do perfil dele.
+const RotaCadastroEstudio = ({ sessao, perfil, loading }) => {
+  if (loading) return <Spinner />;
+  if (!sessao) return <Navigate to="/login" replace />;
+  if (perfil !== null) return <Navigate to={rotaPorPerfil(perfil)} replace />;
+  return <Outlet />;
+};
 
 export default function App() {
   const { sessao, perfil, loading, nomeUsuario, estudioId } = useAuth();
@@ -156,12 +183,20 @@ export default function App() {
 
                 {/* Publicas */}
                 <Route path="/" element={
-                  !sessao ? <Landing /> : <Navigate to={rotaPorPerfil(perfil)} replace />
+                  !sessao ? <Landing /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
                 } />
                 <Route path="/login" element={
-                  !sessao ? <Login /> : <Navigate to={rotaPorPerfil(perfil)} replace />
+                  !sessao ? <Login /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+                } />
+                <Route path="/cadastro" element={
+                  !sessao ? <Cadastro /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
                 } />
                 <Route path="/redefinir-senha" element={<RedefinirSenha />} />
+
+                {/* Cadastro self-service — passo 2 (dados do estúdio) */}
+                <Route element={<RotaCadastroEstudio sessao={sessao} perfil={perfil} loading={loading} />}>
+                  <Route path="/cadastro/estudio" element={<CadastroEstudio />} />
+                </Route>
 
                 {/* Super Admin — guard proprio, layout proprio, sem Sidebar de estudio */}
                 <Route element={<RotaSuperAdmin />}>
@@ -222,7 +257,7 @@ export default function App() {
 
                 {/* 404 */}
                 <Route path="*" element={
-                  <PaginaNaoEncontrada destino={sessao ? rotaPorPerfil(perfil) : '/'} />
+                  <PaginaNaoEncontrada destino={destinoPosAuth(sessao, perfil)} />
                 } />
 
               </Routes>

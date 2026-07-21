@@ -232,6 +232,21 @@ useEffect(() => {
               Esqueceu a senha?
             </button>
           </div>
+
+          {/* ── Link cadastro ────────────────────────────────────────────── */}
+          <div className="text-center border-t border-border pt-5">
+            <a
+              href="/cadastro"
+              className={cn(
+                'text-sm font-medium text-muted-foreground',
+                'hover:text-foreground underline-offset-4 hover:underline',
+                'transition-colors outline-none',
+                'focus-visible:ring-2 focus-visible:ring-ring rounded',
+              )}
+            >
+              Ainda não tem conta? Criar meu estúdio
+            </a>
+          </div>
         </div>
       </div>
 
