@@ -4,15 +4,19 @@ import { ptBR } from 'date-fns/locale';
 import { useQueryClient } from '@tanstack/react-query';
 import { gradeService } from '../../../services/gradeService';
 import { showToast } from '../../../components/shared/Toast';
+import { useAuth } from '../../../hooks/useAuth';
 
 export function useGradeMutations({ onSuccess }) {
   const [savingAula, setSavingAula] = useState(false);
   const queryClient = useQueryClient();
+  const { estudioId } = useAuth();
 
   const invalidarCacheAgenda = () => {
     queryClient.invalidateQueries({ queryKey: ['agenda'] });
     queryClient.invalidateQueries({ queryKey: ['feriados'] });
-    queryClient.invalidateQueries({ queryKey: ['presencas-calendario'] });
+    // BUG #6: era 'presencas-calendario' — chave inexistente.
+    // Alinhado com os prefixos reais usados em useAgendaDadosMes e useListaPresenca.
+    queryClient.invalidateQueries({ queryKey: ['presencas'] });
   };
 
   const salvarAula = async (novaAula) => {
@@ -54,7 +58,7 @@ export function useGradeMutations({ onSuccess }) {
         payload.dia_semana = diaCalculado.toLowerCase();
       }
 
-      await gradeService.salvarAula(payload);
+      await gradeService.salvarAula(payload, estudioId);
       invalidarCacheAgenda();
       showToast.success('Grade atualizada com sucesso!');
       onSuccess?.();
@@ -67,7 +71,7 @@ export function useGradeMutations({ onSuccess }) {
 
   const excluirAula = async (eventoId) => {
     try {
-      await gradeService.excluirAula(eventoId);
+      await gradeService.excluirAula(eventoId, estudioId);
       invalidarCacheAgenda();
       showToast.success('Grade removida com sucesso.');
       onSuccess?.();
@@ -85,7 +89,7 @@ export function useGradeMutations({ onSuccess }) {
   const encerrarAula = async (eventoId, dataStart) => {
     try {
       const { dataClicada } = prepararEncerramento(dataStart);
-      await gradeService.encerrarAula(eventoId, dataClicada);
+      await gradeService.encerrarAula(eventoId, dataClicada, estudioId);
       invalidarCacheAgenda();
       showToast.success('Turma encerrada a partir desta data.');
       onSuccess?.();

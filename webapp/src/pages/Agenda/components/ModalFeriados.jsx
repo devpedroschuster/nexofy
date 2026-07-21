@@ -63,7 +63,7 @@ export default function ModalFeriados({
       </div>
 
       <ModalConfirmacao 
-        isOpen={!!feriadoParaExcluir} 
+        aberto={!!feriadoParaExcluir} 
         onClose={cancelarExclusao} 
         onConfirm={confirmarExclusao} 
         titulo="Remover Bloqueio" 

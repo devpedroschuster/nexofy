@@ -14,47 +14,26 @@ const SELECT_BASE =
 
 export const leadsService = {
   // ── CRIAÇÃO ────────────────────────────────────────────────────────────
-  // Cria o lead E a linha de agendamento correspondente em `presenca`
-  // (origem='lead', status='agendado') numa única chamada — são duas
-  // tabelas que precisam nascer juntas para o visitante aparecer na chamada.
+  // Bug #1: substituído rollback manual por RPC Postgres (criar_lead_com_presenca).
+  // A versão anterior inseria em `leads`, depois em `presenca`, e tentava um
+  // DELETE manual em caso de falha — que podia falhar silenciosamente, deixando
+  // um lead órfão permanente. A RPC executa ambas as operações dentro de uma
+  // única transação: qualquer falha dispara rollback automático e completo.
   async criarLead({ nomeVisitante, telefoneVisitante, aulaId, dataVisita }, estudioId) {
-    const { data: lead, error: errLead } = await supabase
-      .from('leads')
-      .insert([{
-        estudio_id: estudioId,
-        nome_visitante: nomeVisitante,
-        telefone_visitante: telefoneVisitante || null,
-        aula_id: aulaId,
-        data_visita: dataVisita,
-        status_conversao: 'pendente',
-      }])
-      .select()
-      .single();
+    const { data, error } = await supabase.rpc('criar_lead_com_presenca', {
+      p_estudio_id:  estudioId,
+      p_nome:        nomeVisitante,
+      p_telefone:    telefoneVisitante || null,
+      p_aula_id:     aulaId,
+      p_data_visita: dataVisita,
+    });
 
-    if (errLead) throw errLead;
-
-    const { error: errPresenca } = await supabase
-      .from('presenca')
-      .insert([{
-        estudio_id: estudioId,
-        aula_id: aulaId,
-        data_aula: dataVisita,
-        origem: 'lead',
-        lead_id: lead.id,
-        status: 'agendado',
-      }]);
-
-    if (errPresenca) {
-      // Rollback manual: sem o agendamento em presenca, o lead fica órfão
-      // (não aparece na chamada). Melhor desfazer do que deixar inconsistente.
-      await supabase.from('leads').delete().eq('id', lead.id);
-      if (errPresenca.code === '23505') {
-        throw new Error('Este visitante já possui um agendamento nesta mesma turma e mesma data.');
-      }
-      throw errPresenca;
+    if (error) {
+      if (error.code === '23505')
+        throw new Error('Este visitante já possui um agendamento nesta turma e data.');
+      throw error;
     }
-
-    return lead;
+    return data;
   },
 
   async listarLeadsPendentes(estudioId) {
@@ -198,7 +177,6 @@ export const leadsService = {
       .update({
         status_conversao: 'convertido',
         aluno_convertido_id: alunoId,
-        convertido_em: new Date().toISOString(),
       })
       .eq('id', leadId)
       .eq('estudio_id', estudioId);

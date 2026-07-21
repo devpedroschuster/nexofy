@@ -1,11 +1,36 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { presencaService } from '../../../services/presencaService';
 import { useAuth } from '../../../hooks/useAuth';
 
 export function useAgendaDadosMes(currentDate) {
   const { perfil, estudioId } = useAuth();
-  const inicio = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1).toISOString().split('T')[0];
-  const fim = new Date(currentDate.getFullYear(), currentDate.getMonth() + 2, 0).toISOString().split('T')[0];
+
+  // Bug #7 fix: avisa em dev quando um valor inválido é recebido, em vez de
+  // silenciosamente usar a data atual sem nenhum sinal para o chamador.
+  const dataSegura = useMemo(() => {
+    if (currentDate instanceof Date && !isNaN(currentDate)) return currentDate;
+    if (import.meta.env.DEV) {
+      console.warn(
+        '[useAgendaDadosMes] currentDate inválido recebido:',
+        currentDate,
+        '— usando data atual como fallback.'
+      );
+    }
+    return new Date();
+  }, [currentDate]);
+
+  const inicio = useMemo(() =>
+    new Date(dataSegura.getFullYear(), dataSegura.getMonth() - 1, 1)
+      .toISOString().split('T')[0],
+    [dataSegura]
+  );
+
+  const fim = useMemo(() =>
+    new Date(dataSegura.getFullYear(), dataSegura.getMonth() + 2, 0)
+      .toISOString().split('T')[0],
+    [dataSegura]
+  );
 
   const { data, isLoading } = useQuery({
     queryKey: ['agenda', estudioId, 'dadosMes', inicio, fim],

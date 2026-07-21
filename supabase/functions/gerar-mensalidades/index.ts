@@ -30,11 +30,6 @@ serve(async (req: Request) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  )
-
   // ── ISOLAMENTO MULTI-TENANT ────────────────────────────────────────────────
   // A service role ignora RLS; todo acesso deve filtrar explicitamente por estudio_id.
   // O payload DEVE conter estudioId — chamadas sem ele são rejeitadas.
@@ -50,6 +45,55 @@ serve(async (req: Request) => {
     return response({ erro: 'estudioId é obrigatório no payload da requisição.' }, 400)
   }
   // ──────────────────────────────────────────────────────────────────────────
+
+  // ── AUTORIZAÇÃO ────────────────────────────────────────────────────────────
+  // verify_jwt = false é necessário para o cron interno (que não envia JWT).
+  // Chamadas manuais (vindas do frontend ou de ferramentas externas) DEVEM
+  // enviar um header Authorization válido e o usuário precisa ser admin do
+  // estúdio informado. Sem esse guard, qualquer sessão autenticada poderia
+  // disparar a geração de mensalidades para qualquer estúdio.
+  const authHeader = req.headers.get('Authorization') ?? ''
+  const isCronInvocation = !authHeader
+
+  if (!isCronInvocation) {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const anonKey    = Deno.env.get('SUPABASE_ANON_KEY')!
+
+    // Valida o token JWT usando o client anon — garante que o user_id
+    // pertence a uma sessão real e não foi forjado.
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    })
+    const { data: { user }, error: authError } = await userClient.auth.getUser()
+    if (authError || !user) {
+      return response({ erro: 'Não autorizado.' }, 401)
+    }
+
+    // Confirma que o usuário é admin (ou super_admin) do estúdio solicitado.
+    // Usa service-role para esta consulta porque estudio_membros pode ter
+    // RLS que bloquearia o anon client — mas o estudio_id já veio validado
+    // acima e o resultado só serve para autorizar ou negar.
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    )
+    const { data: membro } = await supabaseAdmin
+      .from('estudio_membros')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('estudio_id', estudioId)
+      .maybeSingle()
+
+    if (!membro || !['admin', 'super_admin'].includes(membro.role)) {
+      return response({ erro: 'Acesso negado.' }, 403)
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  )
 
   const hoje = new Date()
   const ano = hoje.getFullYear()

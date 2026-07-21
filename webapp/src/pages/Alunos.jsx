@@ -8,6 +8,7 @@ import { alunosService } from '../services/alunosService';
 import { useDebounce } from '../hooks/useDebounce';
 import { useAlunos, PAGE_SIZE } from '../hooks/useAlunos';
 import { useEstudio } from '../hooks/useEstudio';
+import { useAuth } from '../hooks/useAuth';
 import Surface from '../components/ui/Surface';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -65,6 +66,7 @@ function calcularStatusVencimento(dataFim) {
 export default function Alunos() {
   const navigate = useNavigate();
   const { nomeEstudio } = useEstudio();
+  const { estudioId } = useAuth();
 
   /**
    * PROBLEMA 2 — Filtros persistidos na URL.
@@ -146,14 +148,17 @@ export default function Alunos() {
     if (!alunoSelecionado) return;
     try {
       const novoStatus = !alunoSelecionado.ativo;
-      await alunosService.alterarStatus(alunoSelecionado.id, novoStatus);
+      // Bug #4: estudioId adicionado como barreira cross-tenant (defense-in-depth).
+      // alterarStatus filtrava apenas por id — um admin de outro estúdio que
+      // conhecesse o UUID do aluno poderia ativar/desativar sem autorização.
+      await alunosService.alterarStatus(alunoSelecionado.id, novoStatus, estudioId);
       showToast.success(`Aluno ${novoStatus ? 'reativado' : 'desativado'} com sucesso!`);
       modalStatus.fechar();
       refetch();
     } catch {
       showToast.error('Erro ao alterar status.');
     }
-  }, [alunoSelecionado, modalStatus, refetch]);
+  }, [alunoSelecionado, estudioId, modalStatus, refetch]);
 
   const excluirAluno = useCallback(async () => {
     if (!alunoSelecionado) return;
@@ -162,7 +167,7 @@ export default function Alunos() {
       return;
     }
     try {
-      await alunosService.excluir(alunoSelecionado.id);
+      await alunosService.excluir(alunoSelecionado.id, estudioId);
       showToast.success('Aluno excluído permanentemente!');
       modalExcluir.fechar();
       setConfirmacaoNome('');

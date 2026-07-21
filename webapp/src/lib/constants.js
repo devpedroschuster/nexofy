@@ -132,17 +132,92 @@ export const CORES_GRAFICOS_TOKENS = [
 ];
 
 // ── Paleta de cores para modalidades / tags ──────────────────────────────────
-// Definida em tokens semânticos Tailwind — funciona em light e dark.
-// Estrutura: { id, bg, text, border } → classes Tailwind completas.
+// Cada entrada possui dois grupos de campos:
+//
+//   className (bg, text, border) → classes Tailwind completas; use em
+//     componentes React puros via className={corTema.bg} etc.
+//
+//   style inline (bgCss, textCss, borderCss) → valores hex válidos para CSS;
+//     use em style={{ backgroundColor: corTema.bgCss }} quando a lib não
+//     aceita classes (ex: react-big-calendar, canvas, SVG).
+//
+// Os valores hex são fixos (light-mode). Para dark mode em style inline,
+// detecte o tema em runtime e escolha a variante adequada se necessário.
 export const PALETA_CORES = [
-  { id: 'laranja',     bg: 'bg-orange-100 dark:bg-orange-900/30',   text: 'text-orange-700 dark:text-orange-300',  border: 'border-orange-300 dark:border-orange-700' },
-  { id: 'roxo',        bg: 'bg-purple-100 dark:bg-purple-900/30',   text: 'text-purple-700 dark:text-purple-300',  border: 'border-purple-300 dark:border-purple-700' },
-  { id: 'verde',       bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-700 dark:text-emerald-300',border: 'border-emerald-300 dark:border-emerald-700'},
-  { id: 'azul',        bg: 'bg-blue-100 dark:bg-blue-900/30',       text: 'text-blue-700 dark:text-blue-300',      border: 'border-blue-300 dark:border-blue-700'     },
-  { id: 'rosa',        bg: 'bg-pink-100 dark:bg-pink-900/30',       text: 'text-pink-700 dark:text-pink-300',      border: 'border-pink-300 dark:border-pink-700'     },
-  { id: 'amarelo',     bg: 'bg-amber-100 dark:bg-amber-900/30',     text: 'text-amber-700 dark:text-amber-300',    border: 'border-amber-300 dark:border-amber-700'   },
-  { id: 'cinza',       bg: 'bg-muted',                               text: 'text-muted-foreground',                 border: 'border-border'                            },
-  { id: 'primary',     bg: 'bg-primary-soft',                        text: 'text-primary',                          border: 'border-primary/40'                        },
+  {
+    id: 'laranja',
+    // Tailwind className
+    bg:     'bg-orange-100 dark:bg-orange-900/30',
+    text:   'text-orange-700 dark:text-orange-300',
+    border: 'border-orange-300 dark:border-orange-700',
+    // CSS inline (hex)
+    bgCss:     '#fed7aa', // orange-200
+    textCss:   '#c2410c', // orange-700
+    borderCss: '#fb923c', // orange-400
+  },
+  {
+    id: 'roxo',
+    bg:     'bg-purple-100 dark:bg-purple-900/30',
+    text:   'text-purple-700 dark:text-purple-300',
+    border: 'border-purple-300 dark:border-purple-700',
+    bgCss:     '#e9d5ff', // purple-200
+    textCss:   '#7e22ce', // purple-700
+    borderCss: '#c084fc', // purple-400
+  },
+  {
+    id: 'verde',
+    bg:     'bg-emerald-100 dark:bg-emerald-900/30',
+    text:   'text-emerald-700 dark:text-emerald-300',
+    border: 'border-emerald-300 dark:border-emerald-700',
+    bgCss:     '#a7f3d0', // emerald-200
+    textCss:   '#047857', // emerald-700
+    borderCss: '#34d399', // emerald-400
+  },
+  {
+    id: 'azul',
+    bg:     'bg-blue-100 dark:bg-blue-900/30',
+    text:   'text-blue-700 dark:text-blue-300',
+    border: 'border-blue-300 dark:border-blue-700',
+    bgCss:     '#bfdbfe', // blue-200
+    textCss:   '#1d4ed8', // blue-700
+    borderCss: '#60a5fa', // blue-400
+  },
+  {
+    id: 'rosa',
+    bg:     'bg-pink-100 dark:bg-pink-900/30',
+    text:   'text-pink-700 dark:text-pink-300',
+    border: 'border-pink-300 dark:border-pink-700',
+    bgCss:     '#fbcfe8', // pink-200
+    textCss:   '#be185d', // pink-700
+    borderCss: '#f472b6', // pink-400
+  },
+  {
+    id: 'amarelo',
+    bg:     'bg-amber-100 dark:bg-amber-900/30',
+    text:   'text-amber-700 dark:text-amber-300',
+    border: 'border-amber-300 dark:border-amber-700',
+    bgCss:     '#fde68a', // amber-200
+    textCss:   '#b45309', // amber-700
+    borderCss: '#fbbf24', // amber-400
+  },
+  {
+    id: 'cinza',
+    bg:     'bg-muted',
+    text:   'text-muted-foreground',
+    border: 'border-border',
+    bgCss:     '#e2e8f0', // slate-200 (aproximação do token muted)
+    textCss:   '#64748b', // slate-500 (aproximação do token muted-foreground)
+    borderCss: '#cbd5e1', // slate-300 (aproximação do token border)
+  },
+  {
+    id: 'primary',
+    bg:     'bg-primary-soft',
+    text:   'text-primary',
+    border: 'border-primary/40',
+    bgCss:     '#dbeafe', // blue-100 (aproximação do token primary-soft)
+    textCss:   '#2563eb', // blue-600 (aproximação do token primary)
+    borderCss: '#93c5fd', // blue-300 (aproximação de primary/40)
+  },
 ];
 
 export default {

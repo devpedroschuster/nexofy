@@ -51,6 +51,9 @@ export function buildPresencasIndex(presencasCalendario) {
     const nomeExibicao = p.leads?.nome_visitante || p.alunos?.nome_completo;
     if (nomeExibicao) {
       map[key].push({
+        // BUG #11 fix: propaga o id do aluno/lead para permitir deduplicação
+        // por id em compilarAlunosAgendados.
+        id: p.aluno_id ?? p.lead_id ?? null,
         nome: nomeExibicao,
         isLead: p.origem === 'lead',
         isFixo: p.origem === 'fixo',
@@ -75,7 +78,7 @@ export function buildFaltasFixosIndex(presencasCalendario) {
 
 export function buildFixosIndex(matriculasFixas) {
   const map = {};
-  matriculasFixas.forEach(m => {
+  (matriculasFixas || []).forEach(m => {
     if (!map[m.aula_id]) map[m.aula_id] = [];
     if (m.alunos?.nome_completo) {
       map[m.aula_id].push({
@@ -102,20 +105,25 @@ function compilarAlunosAgendados(aulaId, dataStr, todosFixosDaTurma, indexes) {
     return true;
   }).map(aluno => {
     const isVencido = aluno.fim && dataStr > aluno.fim;
-    const nomeFormatado = isVencido ? `⚠️ ${aluno.nome}` : aluno.nome;
     return {
-      nome: nomeFormatado,
-      isLead: false
+      id: aluno.id,   // BUG #11 fix: propaga id para deduplicação correta
+      nome: aluno.nome,
+      isLead: false,
+      isVencido: !!isVencido,
     };
   });
 
   const alunosAvulsos = (presencasMap[`${aulaId}-${dataStr}`] || []).filter(a => !a.isFixo);
   const listaCompleta = [...fixosPresentesHoje, ...alunosAvulsos];
-  const nomesVistos = new Set();
 
+  // BUG #11 fix: deduplicação por id em vez de nome — evita descartar alunos
+  // com nomes idênticos (ex: dois "João Silva" na mesma turma).
+  // Leads sem cadastro (id null) usam fallback para nome como chave.
+  const idsVistos = new Set();
   return listaCompleta.filter(item => {
-    if (nomesVistos.has(item.nome)) return false;
-    nomesVistos.add(item.nome);
+    const chave = item.id != null ? item.id : `nome:${item.nome}`;
+    if (idsVistos.has(chave)) return false;
+    idsVistos.add(chave);
     return true;
   });
 }
@@ -127,6 +135,13 @@ export function expandirRecorrencia(aula, inicioVisivel, fimVisivel, feriados, i
   const diaAlvo = DIAS_MAPA[diaNormalizado];
 
   if (diaAlvo === undefined) return [];
+
+  // Bug #12: horário ausente ou mal formatado (null, "08h00", etc.) geraria
+  // NaN → Invalid Date → react-big-calendar trava.
+  if (!aula.horario || !/^\d{2}:\d{2}/.test(aula.horario)) {
+    console.warn('[calendarioParser] horario inválido na aula', aula.id, aula.horario);
+    return [];
+  }
 
   const [hora, minuto] = aula.horario.split(':').map(Number);
   const duracaoMin = aula.duracao_minutos ?? 60;
@@ -162,6 +177,12 @@ export function expandirRecorrencia(aula, inicioVisivel, fimVisivel, feriados, i
 
 export function expandirEventoUnico(aula, feriados, indexes) {
   if (isFeriado(aula.data_especifica, feriados)) return [];
+
+  // Bug #12 (mesmo padrão): horário ausente ou mal formatado → Invalid Date.
+  if (!aula.horario || !/^\d{2}:\d{2}/.test(aula.horario)) {
+    console.warn('[calendarioParser] horario inválido na aula', aula.id, aula.horario);
+    return [];
+  }
 
   const [ano, mes, dia] = aula.data_especifica.split('-');
   const [hora, minuto] = aula.horario.split(':').map(Number);

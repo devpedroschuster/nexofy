@@ -39,6 +39,15 @@ function MensagemSemRepasse({ tipoAula }) {
   );
 }
 
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
  * RepasseAlunoCard
  *
@@ -82,7 +91,7 @@ export default function RepasseAlunoCard({ aluno, mensalidade, resultado, pagame
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8" />
-        <title>Comprovante de Pagamento – ${nomeEstudio}</title>
+        <title>Comprovante de Pagamento – ${esc(nomeEstudio)}</title>
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
           body {
@@ -110,22 +119,22 @@ export default function RepasseAlunoCard({ aluno, mensalidade, resultado, pagame
       </head>
       <body>
         <div class="recibo">
-          <div class="logo">${nomeEstudio}</div>
+          <div class="logo">${esc(nomeEstudio)}</div>
           <div class="titulo">Comprovante de Pagamento</div>
           <div class="icone-ok">✅</div>
           <div class="valor-destaque">${formatarMoeda(valorPago)}</div>
           <table>
-            <tr><td>Aluno</td><td>${nomeAluno}</td></tr>
-            ${planoNome ? `<tr><td>Plano</td><td>${planoNome}</td></tr>` : ''}
-            ${tipoAula ? `<tr><td>Tipo de Aula</td><td>${TIPO_AULA_LABELS[tipoAula] || tipoAula}</td></tr>` : ''}
-            <tr><td>Forma de Pagamento</td><td>${FORMA_LABELS[formaPagamento] || formaPagamento || '—'}</td></tr>
+            <tr><td>Aluno</td><td>${esc(nomeAluno)}</td></tr>
+            ${planoNome ? `<tr><td>Plano</td><td>${esc(planoNome)}</td></tr>` : ''}
+            ${tipoAula ? `<tr><td>Tipo de Aula</td><td>${esc(TIPO_AULA_LABELS[tipoAula] || tipoAula)}</td></tr>` : ''}
+            <tr><td>Forma de Pagamento</td><td>${esc(FORMA_LABELS[formaPagamento] || formaPagamento || '—')}</td></tr>
             <tr><td>Data / Hora</td><td>${dataFormatada}</td></tr>
           </table>
           <div class="secao-titulo">Repasses a Professores</div>
           ${resultado.itens?.length > 0
             ? resultado.itens.map(it => `
                 <div class="repasse-item">
-                  <span>${it.professor_nome || 'Professor'}${it.modalidade ? ` (${it.modalidade})` : ''}</span>
+                  <span>${esc(it.professor_nome) || 'Professor'}${esc(it.modalidade) ? ` (${esc(it.modalidade)})` : ''}</span>
                   <span>${formatarMoeda(it.valor)}</span>
                 </div>
               `).join('')
@@ -140,9 +149,9 @@ export default function RepasseAlunoCard({ aluno, mensalidade, resultado, pagame
             <span>${formatarMoeda(resultado.retencao_casa)}</span>
           </div>
           ${resultado.avisos?.length > 0 ? `
-            <div class="aviso">${resultado.avisos.map(a => `⚠ ${a}`).join('<br/>')}</div>
+            <div class="aviso">${resultado.avisos.map(a => `⚠ ${esc(a)}`).join('<br/>')}</div>
           ` : ''}
-          <div class="rodape">Gerado em ${dataFormatada} · ${nomeEstudio}</div>
+          <div class="rodape">Gerado em ${dataFormatada} · ${esc(nomeEstudio)}</div>
         </div>
       </body>
       </html>

@@ -81,7 +81,7 @@ const CustomEventCard = ({ event }) => {
         <div className="font-extrabold text-[11px] leading-tight drop-shadow-sm truncate tracking-tight">
           {event.title}
         </div>
-        <span 
+        <span
           className={`flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-md shadow-sm shrink-0 ${
             isLotado ? 'bg-destructive text-destructive-foreground' : 'bg-background/60 text-foreground/80'
           }`}
@@ -92,9 +92,9 @@ const CustomEventCard = ({ event }) => {
       </div>
 
       <div className="w-full h-1 bg-black/10 rounded-full mb-1.5 shrink-0 overflow-hidden">
-        <div 
-          className={`h-full rounded-full transition-all duration-500 ${isLotado ? 'bg-destructive' : 'bg-white/80'}`} 
-          style={{ width: `${porcentagem}%` }} 
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${isLotado ? 'bg-destructive' : 'bg-white/80'}`}
+          style={{ width: `${porcentagem}%` }}
         />
       </div>
 
@@ -103,10 +103,11 @@ const CustomEventCard = ({ event }) => {
           {event.alunosAgendados.slice(0, 2).map((item, idx) => {
             const nome = typeof item === 'string' ? item : item.nome;
             const isLead = typeof item === 'object' && item.isLead;
-            
+            const isVencido = typeof item === 'object' && item.isVencido;
+
             return (
-              <div 
-                key={idx} 
+              <div
+                key={idx}
                 className={`text-[10px] leading-tight flex items-center gap-1.5 font-medium overflow-hidden shrink-0 ${
                   isLead ? 'opacity-100' : 'opacity-90'
                 }`}
@@ -116,7 +117,13 @@ const CustomEventCard = ({ event }) => {
                     LEAD
                   </span>
                 ) : (
-                  <div className="w-1 h-1 rounded-full bg-current opacity-50 shrink-0"></div>
+                  isVencido ? (
+                    <span className="text-[7px] leading-[1] font-black bg-orange-400/90 text-orange-950 px-1 py-0.5 rounded-[3px] shrink-0">
+                      VENC.
+                    </span>
+                  ) : (
+                    <div className="w-1 h-1 rounded-full bg-current opacity-50 shrink-0"></div>
+                  )
                 )}
                 <span className={`truncate min-w-0 ${isLead ? 'font-bold underline decoration-amber-400/40' : ''}`} title={nome}>
                   {nome}
@@ -128,11 +135,11 @@ const CustomEventCard = ({ event }) => {
           {event.alunosAgendados.length > 2 && (() => {
             const resto = event.alunosAgendados.slice(2);
             const leadsResto = resto.filter(a => typeof a === 'object' && a.isLead).length;
-            
+
             return (
               <div className="text-[9px] font-bold opacity-75 mt-0.5 shrink-0 truncate">
-                + {resto.length} {leadsResto > 0 
-                  ? `(${leadsResto} lead${leadsResto > 1 ? 's' : ''})` 
+                + {resto.length} {leadsResto > 0
+                  ? `(${leadsResto} lead${leadsResto > 1 ? 's' : ''})`
                   : 'aluno(s)'}
               </div>
             );
@@ -153,9 +160,9 @@ function eventPropGetter(event) {
   return {
     className: `!rounded-xl transition-all duration-200 border border-white/10 ${isLotado ? 'opacity-85 grayscale-[15%]' : ''}`,
     style: {
-      backgroundColor: corTema.bg,
-      color: corTema.text,
-      borderLeft: `5px solid ${corTema.border}`,
+      backgroundColor: corTema.bgCss,              // ✅ hex válido para CSS inline
+      color: corTema.textCss,                       // ✅ hex válido para CSS inline
+      borderLeft: `5px solid ${corTema.borderCss}`, // ✅ hex válido para CSS inline
       boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
       cursor: 'pointer',
       overflow: 'hidden',
@@ -175,53 +182,48 @@ export default function CalendarioGrade({
 }) {
   return (
     <div className="h-full style-calendar-wrapper">
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `
-          .rbc-calendar { font-family: inherit; }
-          .rbc-header {
-            padding: 16px 0;
-            font-weight: 800;
-            color: hsl(var(--muted-foreground));
-            text-transform: capitalize;
-            font-size: 13px;
-            border-bottom: 1px solid hsl(var(--border) / 0.5) !important;
-          }
-          .rbc-header + .rbc-header { border-left: 1px dashed hsl(var(--border) / 0.3); }
-          .rbc-today { background-color: hsl(var(--primary-soft) / 0.3); }
-          .rbc-time-view {
-            border-radius: calc(var(--radius) + 12px);
-            border: 1px solid hsl(var(--border) / 0.5);
-            background-color: hsl(var(--card));
-          }
-          .rbc-timeslot-group {
-            border-color: hsl(var(--border) / 0.3);
-            min-height: 85px; 
-          }
-          .rbc-time-slot { border-color: hsl(var(--border) / 0.2); }
-          .rbc-time-gutter .rbc-timeslot-group {
-            font-size: 11px;
-            font-weight: 700;
-            color: hsl(var(--muted-foreground));
-            padding-right: 8px;
-          }
-          .rbc-month-view {
-            border: 1px solid hsl(var(--border) / 0.5);
-            border-radius: calc(var(--radius) + 12px);
-            overflow: hidden;
-            background-color: hsl(var(--card));
-          }
-          .rbc-off-range-bg { background-color: hsl(var(--muted) / 0.3); }
-          .rbc-date-cell { color: hsl(var(--foreground)); font-weight: 800; padding: 8px; font-size: 12px; }
-          .rbc-event-content { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-          .rbc-toolbar { display: none; }
-          @media (max-width: 768px) {
-            .rbc-month-view { min-width: 600px; }
-            .style-calendar-wrapper { overflow-x: auto; padding-bottom: 20px; }
-          }
-        `,
-        }}
-      />
+      <style>{`
+        .rbc-calendar { font-family: inherit; }
+        .rbc-header {
+          padding: 16px 0;
+          font-weight: 800;
+          color: hsl(var(--muted-foreground));
+          text-transform: capitalize;
+          font-size: 13px;
+          border-bottom: 1px solid hsl(var(--border) / 0.5) !important;
+        }
+        .rbc-header + .rbc-header { border-left: 1px dashed hsl(var(--border) / 0.3); }
+        .rbc-today { background-color: hsl(var(--primary-soft) / 0.3); }
+        .rbc-time-view {
+          border-radius: calc(var(--radius) + 12px);
+          border: 1px solid hsl(var(--border) / 0.5);
+          background-color: hsl(var(--card));
+        }
+        .rbc-timeslot-group {
+          border-color: hsl(var(--border) / 0.3);
+          min-height: 85px; 
+        }
+        .rbc-time-slot { border-color: hsl(var(--border) / 0.2); }
+        .rbc-time-gutter .rbc-timeslot-group {
+          font-size: 11px;
+          font-weight: 700;
+          color: hsl(var(--muted-foreground));
+          padding-right: 8px;
+        }
+        .rbc-month-view {
+          border: 1px solid hsl(var(--border) / 0.5);
+          border-radius: calc(var(--radius) + 12px);
+          overflow: hidden;
+          background-color: hsl(var(--card));
+        }
+        .rbc-off-range-bg { background-color: hsl(var(--muted) / 0.3); }
+        .rbc-date-cell { color: hsl(var(--foreground)); font-weight: 800; padding: 8px; font-size: 12px; }
+        .rbc-event-content { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+        @media (max-width: 768px) {
+          .rbc-month-view { min-width: 600px; }
+          .style-calendar-wrapper { overflow-x: auto; padding-bottom: 20px; }
+        }
+      `}</style>
       <Calendar
         localizer={localizer}
         formats={formatosCalendario}

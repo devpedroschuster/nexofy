@@ -34,6 +34,7 @@ export function useNotificacoes() {
       const { data, error } = await supabase
         .from('alunos')
         .select('id, nome_completo, telefone, data_nascimento, data_fim_plano, planos(nome)')
+        .eq('estudio_id', estudioId) // Bug #9 fix: filtro de tenant obrigatório
         .eq('ativo', true);
 
       if (error) throw error;

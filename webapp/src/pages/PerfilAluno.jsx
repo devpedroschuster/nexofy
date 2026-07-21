@@ -10,6 +10,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { alunosService } from '../services/alunosService';
 import { useEstudio } from '../hooks/useEstudio';
+import { useAuth } from '../hooks/useAuth';
 import { TableSkeleton } from '../components/shared/Loading';
 import { showToast } from '../components/shared/Toast';
 import ModalRenovarPlano from '../components/ModalRenovarPlano';
@@ -142,7 +143,7 @@ function ModalEditarCadastro({ aluno, alunoId, queryClient, onClose }) {
         complemento:        form.complemento.trim()        || null,
         bairro:             form.bairro.trim()             || null,
         cidade:             form.cidade.trim()             || null,
-      });
+      }, estudioId);
       queryClient.invalidateQueries(['aluno', alunoId]);
       showToast.success('Cadastro atualizado com sucesso!');
       onClose();
@@ -498,7 +499,7 @@ function AbaAnamnese({ aluno, alunoId, queryClient, observacoesMedicas, setObser
     if (salvandoLink) return;
     setSalvandoLink(true);
     try {
-      await alunosService.atualizar(alunoId, { link_anamnese: novoLink.trim() || null });
+      await alunosService.atualizar(alunoId, { link_anamnese: novoLink.trim() || null }, estudioId);
       queryClient.invalidateQueries(['aluno', alunoId]);
       showToast.success('Link da anamnese atualizado!');
       setEditandoLink(false);
@@ -513,7 +514,7 @@ function AbaAnamnese({ aluno, alunoId, queryClient, observacoesMedicas, setObser
     if (salvandoMedico) return;
     setSalvandoMedico(true);
     try {
-      await alunosService.atualizar(alunoId, { observacoes_medicas: observacoesMedicas });
+      await alunosService.atualizar(alunoId, { observacoes_medicas: observacoesMedicas }, estudioId);
       showToast.success('Resumo médico salvo com sucesso!');
     } catch (err) {
       console.error('[PerfilAluno] Erro ao salvar observações médicas:', err);
@@ -665,7 +666,7 @@ function AbaModalidades({ aluno, alunoId, queryClient }) {
     try {
       await alunosService.atualizar(alunoId, {
         modalidades_selecionadas: modalidadesSelecionadas,
-      });
+      }, estudioId);
       queryClient.invalidateQueries(['aluno', alunoId]);
       showToast.success('Modalidades atualizadas com sucesso!');
     } catch (err) {
@@ -1064,6 +1065,7 @@ export default function PerfilAluno() {
     enabled: !!aluno,
   });
   const { data: estudio } = useEstudio();
+  const { estudioId } = useAuth();
 const nomeEstudio = estudio?.nome;
 
   React.useEffect(() => {

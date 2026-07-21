@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Dumbbell, Music, Palette, RefreshCw, Type, Clock } from 'lucide-react';
+import { Palette, RefreshCw, Type, Clock } from 'lucide-react';
 import { DIAS_SEMANA, PALETA_CORES } from '../../../lib/constants';
+import { IconeEspaco } from '../../../lib/iconesEspaco';
 import Button from '../../../components/ui/Button';
 import Input from '../../../components/ui/Input';
 
@@ -16,7 +17,7 @@ const OPCOES_DURACAO = [
 const PRESETS = OPCOES_DURACAO.filter(o => o.value !== 'custom').map(o => o.value);
 
 export default function ModalNovaAula({
-  novaAula, setNovaAula, modalidades, professores, savingAula, salvarAula
+  novaAula, setNovaAula, modalidades, professores, espacos = [], savingAula, salvarAula
 }) {
   const handleModalidadeChange = (e) => {
     const id = e.target.value;
@@ -149,27 +150,26 @@ export default function ModalNovaAula({
       {/* ESPAÇO */}
       <div>
         <label className="text-xs font-black text-muted-foreground uppercase mb-2 block">Espaço</label>
-        <div className="grid grid-cols-2 gap-3">
-          <label className={`flex items-center justify-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${
-            novaAula.espaco === 'funcional'
-              ? 'bg-warning-soft text-warning border-warning/20 shadow-sm'
-              : 'border-border text-muted-foreground hover:bg-subtle'
-          }`}>
-            <input type="radio" name="espaco" value="funcional" className="sr-only"
-              checked={novaAula.espaco === 'funcional'}
-              onChange={e => setNovaAula({ ...novaAula, espaco: e.target.value })} />
-            <Dumbbell size={18} /> <span className="font-bold text-sm">Funcional</span>
-          </label>
-          <label className={`flex items-center justify-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${
-            novaAula.espaco === 'danca'
-              ? 'bg-purple-soft text-purple border-purple/20 shadow-sm'
-              : 'border-border text-muted-foreground hover:bg-subtle'
-          }`}>
-            <input type="radio" name="espaco" value="danca" className="sr-only"
-              checked={novaAula.espaco === 'danca'}
-              onChange={e => setNovaAula({ ...novaAula, espaco: e.target.value })} />
-            <Music size={18} /> <span className="font-bold text-sm">Dança</span>
-          </label>
+        <div className="flex flex-wrap gap-3">
+          {espacos.map((espaco) => {
+            const cor = PALETA_CORES.find(c => c.id === espaco.cor) || PALETA_CORES[0];
+            const selecionado = novaAula.espaco === espaco.slug;
+            return (
+              <label
+                key={espaco.id}
+                className={`flex items-center justify-center gap-2 p-3 rounded-xl border cursor-pointer transition-all min-w-[140px] ${
+                  selecionado
+                    ? `${cor.bg} ${cor.text} ${cor.border} shadow-sm`
+                    : 'border-border text-muted-foreground hover:bg-subtle'
+                }`}
+              >
+                <input type="radio" name="espaco" value={espaco.slug} className="sr-only"
+                  checked={selecionado}
+                  onChange={e => setNovaAula({ ...novaAula, espaco: e.target.value })} />
+                <IconeEspaco nome={espaco.icone} size={18} /> <span className="font-bold text-sm">{espaco.nome}</span>
+              </label>
+            );
+          })}
         </div>
       </div>
 

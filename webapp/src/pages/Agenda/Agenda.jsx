@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
 import { Plus, Ban, UserCheck } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -29,7 +28,9 @@ import ModalListaPresenca from './components/ModalListaPresenca';
 import ModalFeriados from './components/ModalFeriados';
 import ModalAcoesEvento from './components/ModalAcoesEvento';
 import EmptyState from '../../components/ui/EmptyState';
-import { Dumbbell, Music, CalendarX } from 'lucide-react';
+import { CalendarX } from 'lucide-react';
+import { useEspacos } from './hooks/useEspacos';
+import { IconeEspaco } from '../../lib/iconesEspaco';
 import { useMemo } from 'react';
 
 const INITIAL_FORM_STATE = {
@@ -49,7 +50,9 @@ const INITIAL_FORM_STATE = {
 };
 
 export default function Agenda() {
-  const { perfil, professorId: professorIdLogado } = useOutletContext();
+  // Bug #13: perfil e professorId agora vêm de useAgendaPage — remove a chamada
+  // duplicada a useOutletContext que existia aqui.
+  const { perfil, professorId: professorIdLogado, ...pageState } = useAgendaPage();
   const { estudioId } = useAuth();
   const isAdmin = perfil === 'admin';
 
@@ -59,6 +62,7 @@ export default function Agenda() {
   const [dataLista, setDataLista] = useState(new Date().toISOString().split('T')[0]);
 
   const { aulas, feriados, loading, isError, refetch } = useAgenda();
+  const { data: espacos = [] } = useEspacos(estudioId);
 
   const { data: listaAlunos = [] } = useQuery({
     queryKey: ['alunos', estudioId, 'ativos-agendamento'],
@@ -67,59 +71,65 @@ export default function Agenda() {
     staleTime: 1000 * 60 * 5,
   });
 
-  // A1: professor não precisa da lista de professores, modalidades nem matrículas fixas
+  // Bug #1: passa estudioId e inclui na queryKey para cache isolado por estúdio
   const { data: professores = [] } = useQuery({
-    queryKey: ['professores'],
-    queryFn: () => gradeService.listarProfessores(),
+    queryKey: ['professores', estudioId],
+    queryFn: () => gradeService.listarProfessores(estudioId),
     staleTime: 1000 * 60 * 5,
-    enabled: isAdmin,
+    enabled: isAdmin && !!estudioId,
   });
 
+  // Bug #1: passa estudioId e inclui na queryKey para cache isolado por estúdio
   const { data: modalidades = [] } = useQuery({
-    queryKey: ['modalidades'],
-    queryFn: () => gradeService.listarModalidades(),
+    queryKey: ['modalidades', estudioId],
+    queryFn: () => gradeService.listarModalidades(estudioId),
     staleTime: 1000 * 60 * 5,
-    enabled: isAdmin,
+    enabled: isAdmin && !!estudioId,
   });
+
+  // Bug #8 fix: memoizar idsAulas evita novo array a cada render e permite
+  // incluí-lo na queryKey, garantindo re-execução automática quando as aulas
+  // mudarem (sem depender de invalidateQueries manual).
+  const idsAulas = useMemo(
+    () => (aulas || []).map(a => a.id),
+    [aulas]
+  );
 
   const { data: matriculasFixas = [] } = useQuery({
-  queryKey: ['matriculas-fixas', isAdmin ? 'admin' : professorIdLogado],
-  queryFn: () => {
-    if (isAdmin) return gradeService.listarMatriculasFixas();
-    // Para professor: filtra só pelas aulas que ele leciona
-    const idsAulas = (aulas || []).map(a => a.id);
-    if (idsAulas.length === 0) return [];
-    return gradeService.listarMatriculasFixas(idsAulas);
-  },
-  staleTime: 1000 * 60 * 5,
-  enabled: isAdmin ? true : (aulas || []).length > 0, // ← aguarda aulas carregarem
-});
+    // Bug #11: estudioId incluído na key — isola o cache por tenant.
+    // Bug #1: admin e professor usam o mesmo caminho (filtra via aulasIds),
+    //         eliminando o vazamento cross-studio do caminho admin anterior.
+    // Bug #8 fix: idsAulas incluído na key para invalidação automática.
+    queryKey: ['matriculas-fixas', estudioId, idsAulas],
+    queryFn: () => {
+      if (idsAulas.length === 0) return [];
+      return gradeService.listarMatriculasFixas(idsAulas);
+    },
+    staleTime: 1000 * 60 * 5,
+    enabled: idsAulas.length > 0, // aguarda aulas (filtradas por estudioId) carregarem
+  });
 
   const dadosIniciais = { professores, modalidades, matriculasFixas };
 
-  const pageState = useAgendaPage();
+  const espacosDisponiveis = useMemo(() => {
+    if (isAdmin || !aulas?.length) return undefined;
+    const set = new Set(aulas.map(a => a.espaco || espacos[0]?.slug));
+    return set;
+  }, [isAdmin, aulas, espacos]);
 
-const espacosDisponiveis = useMemo(() => {
-  if (isAdmin || !aulas?.length) return undefined;
-  const set = new Set(aulas.map(a => a.espaco || 'funcional'));
-  return set;
-}, [isAdmin, aulas]);
+  const emptyStateEspaco = useMemo(() => {
+    if (pageState.filtroEspaco === 'todos') return null;
+    const espaco = espacos.find(e => e.slug === pageState.filtroEspaco);
+    const label = espaco?.nome ?? pageState.filtroEspaco;
 
-const emptyStateEspaco = useMemo(() => {
-  if (pageState.filtroEspaco === 'todos') return null;
-
-  const labels = { funcional: 'Funcional', danca: 'Dança' };
-  const icons  = { funcional: <Dumbbell size={28} />, danca: <Music size={28} /> };
-  const label  = labels[pageState.filtroEspaco] ?? pageState.filtroEspaco;
-
-  return {
-    icon:        icons[pageState.filtroEspaco] ?? <CalendarX size={28} />,
-    title:       `Sem aulas de ${label}`,
-    description: isAdmin
-      ? `Nenhuma aula de ${label} cadastrada para este período.`
-      : `Você não tem aulas de ${label} cadastradas neste período.`,
-  };
-}, [pageState.filtroEspaco, isAdmin]);
+    return {
+      icon: espaco ? <IconeEspaco nome={espaco.icone} size={28} /> : <CalendarX size={28} />,
+      title: `Sem aulas de ${label}`,
+      description: isAdmin
+        ? `Nenhuma aula de ${label} cadastrada para este período.`
+        : `Você não tem aulas de ${label} cadastradas neste período.`,
+    };
+  }, [pageState.filtroEspaco, isAdmin, espacos]);
 
   const dadosMes = useAgendaDadosMes(pageState.currentDate);
 
@@ -128,7 +138,7 @@ const emptyStateEspaco = useMemo(() => {
     acoesEvento: useModal(), feriados: useModal(), excluir: useModal(), encerrar: useModal(),
   };
 
-  const hookAgendamento = useAgendamento(() => modais.agendamento.fechar(), feriados);
+  const hookAgendamento = useAgendamento(() => modais.agendamento.fechar(), feriados, estudioId);
   const hookLista = useListaPresenca(aulaParaLista, dataLista, modais.lista.isOpen);
   const hookFeriados = useFeriados(refetch);
   const eventosCalendario = useEventosCalendario({ aulas, feriados, ...dadosMes, matriculasFixas: dadosIniciais.matriculasFixas, ...pageState });
@@ -203,78 +213,80 @@ const emptyStateEspaco = useMemo(() => {
   {...pageState} 
   professores={dadosIniciais.professores} 
   isAdmin={isAdmin}
+  espacos={espacos}
   espacosDisponiveis={espacosDisponiveis}
 />
 
       <div className="bg-card p-6 rounded-[32px] border border-border shadow-sm" style={{ height: '750px' }}>
-  {isError ? (
-    <div className="h-full flex items-center justify-center">
-      <EmptyState
-        icon={<CalendarX size={28} />}
-        title="Erro ao carregar agenda"
-        description="Não foi possível buscar as aulas. Verifique sua conexão e tente novamente."
-        action={
-          <button
-            onClick={refetch}
-            className="text-sm font-bold text-primary hover:underline"
-          >
-            Tentar novamente
-          </button>
-        }
-      />
-    </div>
-  ) : loading ? (
-    <TableSkeleton />
-  ) : eventosCalendario.filter(e => !e.isFeriado).length === 0 && emptyStateEspaco ? (
-    // Filtro de espaço ativo mas sem eventos — EmptyState contextual
-    <div className="h-full flex items-center justify-center">
-      <EmptyState
-        icon={emptyStateEspaco.icon}
-        title={emptyStateEspaco.title}
-        description={emptyStateEspaco.description}
-        action={
-          <button
-            onClick={() => pageState.setFiltroEspaco('todos')}
-            className="text-sm font-bold text-primary hover:underline"
-          >
-            Ver todos os espaços
-          </button>
-        }
-      />
-    </div>
-  ) : (
-    <CalendarioGrade
-      eventos={eventosCalendario}
-      currentDate={pageState.currentDate}
-      setCurrentDate={pageState.setCurrentDate}
-      currentView={pageState.currentView}
-      setCurrentView={pageState.setCurrentView}
-      handleSelectSlot={handleSelectSlot}
-      isAdmin={isAdmin}
-      handleSelectEvent={(ev) => {
-        ev.isFeriado
-          ? showToast.error(`Dia bloqueado: ${ev.dadosOriginais.descricao}`)
-          : (setEventoSelecionado(ev), modais.acoesEvento.abrir());
-      }}
-    />
-  )}
-</div>
+        {isError ? (
+          <div className="h-full flex items-center justify-center">
+            <EmptyState
+              icon={<CalendarX size={28} />}
+              title="Erro ao carregar agenda"
+              description="Não foi possível buscar as aulas. Verifique sua conexão e tente novamente."
+              action={
+                <button
+                  onClick={refetch}
+                  className="text-sm font-bold text-primary hover:underline"
+                >
+                  Tentar novamente
+                </button>
+              }
+            />
+          </div>
+        ) : loading ? (
+          <TableSkeleton />
+        ) : eventosCalendario.filter(e => !e.isFeriado).length === 0 && emptyStateEspaco ? (
+          // Filtro de espaço ativo mas sem eventos — EmptyState contextual
+          <div className="h-full flex items-center justify-center">
+            <EmptyState
+              icon={emptyStateEspaco.icon}
+              title={emptyStateEspaco.title}
+              description={emptyStateEspaco.description}
+              action={
+                <button
+                  onClick={() => pageState.setFiltroEspaco('todos')}
+                  className="text-sm font-bold text-primary hover:underline"
+                >
+                  Ver todos os espaços
+                </button>
+              }
+            />
+          </div>
+        ) : (
+          <CalendarioGrade
+            eventos={eventosCalendario}
+            currentDate={pageState.currentDate}
+            setCurrentDate={pageState.setCurrentDate}
+            currentView={pageState.currentView}
+            setCurrentView={pageState.setCurrentView}
+            handleSelectSlot={handleSelectSlot}
+            isAdmin={isAdmin}
+            handleSelectEvent={(ev) => {
+              ev.isFeriado
+                ? showToast.error(`Dia bloqueado: ${ev.dadosOriginais.descricao}`)
+                : (setEventoSelecionado(ev), modais.acoesEvento.abrir());
+            }}
+          />
+        )}
+      </div>
 
       <Modal isOpen={modais.agendamento.isOpen} onClose={modais.agendamento.fechar} titulo="Agendamento">
         <ModalAgendamento {...hookAgendamento} aulas={aulas} listaAlunos={listaAlunos} />
       </Modal>
       <Modal isOpen={modais.novaAula.isOpen} onClose={modais.novaAula.fechar} titulo={novaAula.id ? 'Editar Atividade' : 'Nova Aula'}>
         <ModalNovaAula
-          novaAula={novaAula}
-          setNovaAula={setNovaAula}
-          modalidades={dadosIniciais.modalidades}
-          professores={dadosIniciais.professores}
-          savingAula={mutations.savingAula}
-          salvarAula={(e) => {
-            e.preventDefault();
-            mutations.salvarAula(novaAula);
-          }}
-        />
+  novaAula={novaAula}
+  setNovaAula={setNovaAula}
+  modalidades={dadosIniciais.modalidades}
+  professores={dadosIniciais.professores}
+  espacos={espacos}
+  savingAula={mutations.savingAula}
+  salvarAula={(e) => {
+    e.preventDefault();
+    mutations.salvarAula(novaAula);
+  }}
+/>
       </Modal>
       <Modal isOpen={modais.lista.isOpen} onClose={modais.lista.fechar} titulo="Chamada">
         <ModalListaPresenca {...hookLista} aulaParaLista={aulaParaLista} dataLista={dataLista} setDataLista={setDataLista} isAdmin={isAdmin} />
@@ -287,10 +299,10 @@ const emptyStateEspaco = useMemo(() => {
 
       <Modal isOpen={modais.acoesEvento.isOpen} onClose={modais.acoesEvento.fechar} titulo="Detalhes da Aula">
         <ModalAcoesEvento
-          evento={eventoSelecionado}
-          isAdmin={isAdmin}
-          professorIdLogado={professorIdLogado}
-          onAgendar={(ev) => {
+  evento={eventoSelecionado}
+  isAdmin={isAdmin}
+  espacos={espacos}
+  onAgendar={(ev) => {
             modais.acoesEvento.fechar();
             hookAgendamento.setAgendamentoForm({
               tipo: 'cadastrado',
@@ -298,6 +310,8 @@ const emptyStateEspaco = useMemo(() => {
               nome_visitante: '',
               aula_id: ev.dadosOriginais.id,
               data_aula: format(ev.start, 'yyyy-MM-dd'),
+              _nomeAluno: '',
+              _nomeAtividade: ev.dadosOriginais.atividade || '',
             });
             modais.agendamento.abrir();
           }}
@@ -332,10 +346,14 @@ const emptyStateEspaco = useMemo(() => {
         />
       </Modal>
 
+      {/* Bug #8: guards contra eventoSelecionado null nos onConfirm */}
       <ModalConfirmacao
         isOpen={modais.excluir.isOpen}
         onClose={modais.excluir.fechar}
-        onConfirm={() => mutations.excluirAula(eventoSelecionado.dadosOriginais.id)}
+        onConfirm={() => {
+          if (!eventoSelecionado) return;
+          mutations.excluirAula(eventoSelecionado.dadosOriginais.id);
+        }}
         titulo="Excluir Grade Permanentemente"
         mensagem="Atenção: Ao confirmar, todas as aulas e presenças desta grade serão apagadas. Esta ação NÃO pode ser desfeita."
         tipo="danger"
@@ -343,7 +361,10 @@ const emptyStateEspaco = useMemo(() => {
       <ModalConfirmacao
         isOpen={modais.encerrar.isOpen}
         onClose={modais.encerrar.fechar}
-        onConfirm={() => mutations.encerrarAula(eventoSelecionado.dadosOriginais.id, eventoSelecionado.start)}
+        onConfirm={() => {
+          if (!eventoSelecionado) return;
+          mutations.encerrarAula(eventoSelecionado.dadosOriginais.id, eventoSelecionado.start);
+        }}
         titulo="Encerrar Turma"
         mensagem={`O histórico será mantido, mas esta turma não aparecerá mais a partir de ${
           eventoSelecionado ? format(eventoSelecionado.start, 'dd/MM/yyyy') : ''

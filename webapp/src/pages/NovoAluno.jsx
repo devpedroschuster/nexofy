@@ -14,6 +14,7 @@ import { alunosService } from '../services/alunosService';
 import { alunoSchema } from '../lib/validation';
 import { supabase } from '../lib/supabase';
 import { useEstudio } from '../hooks/useEstudio';
+import { useAuth } from '../hooks/useAuth';
 import { showToast } from '../components/shared/Toast';
 import Modal from '../components/shared/Modal';
 
@@ -150,6 +151,7 @@ export default function NovoAluno() {
   const leadParaConversao = location.state?.leadParaConversao || null;
 
   const { data: estudio } = useEstudio();
+  const { estudioId } = useAuth();
 const nomeEstudio = estudio?.nome;
 
   const [abaAtiva,                setAbaAtiva]                = useState('dados');
@@ -483,7 +485,7 @@ const nomeEstudio = estudio?.nome;
       if (alunoParaEditar) {
         await alunosService.atualizar(alunoParaEditar.id, {
           ...payloadBase, nome_completo: data.nome_completo,
-        });
+        }, estudioId);
         showToast.success('Cadastro atualizado com sucesso!');
         await queryClient.invalidateQueries({ queryKey: ['alunos'] });
         navigate('/alunos');

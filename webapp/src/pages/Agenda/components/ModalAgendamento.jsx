@@ -32,16 +32,27 @@ export default function ModalAgendamento({
     <>
       <form onSubmit={(e) => handleAgendarAluno(e)} className="space-y-4 pt-2">
         <div className="flex bg-muted p-1 rounded-2xl mb-4 border border-border">
+          {/* Bug #6 fix: ao trocar para 'cadastrado', limpa campos de visitante */}
           <button
             type="button"
-            onClick={() => setAgendamentoForm({ ...agendamentoForm, tipo: 'cadastrado' })}
+            onClick={() => setAgendamentoForm({
+              ...agendamentoForm,
+              tipo: 'cadastrado',
+              nome_visitante: '',
+            })}
             className={`flex-1 py-3 rounded-xl text-xs font-black uppercase transition-all ${agendamentoForm.tipo === 'cadastrado' ? 'bg-card shadow-sm text-info' : 'text-muted-foreground hover:text-foreground'}`}
           >
             Aluno da Casa
           </button>
+          {/* Bug #6 fix: ao trocar para 'visitante', limpa aluno_id e _nomeAluno */}
           <button
             type="button"
-            onClick={() => setAgendamentoForm({ ...agendamentoForm, tipo: 'visitante' })}
+            onClick={() => setAgendamentoForm({
+              ...agendamentoForm,
+              tipo: 'visitante',
+              aluno_id: '',
+              _nomeAluno: '',
+            })}
             className={`flex-1 py-3 rounded-xl text-xs font-black uppercase transition-all ${agendamentoForm.tipo === 'visitante' ? 'bg-card shadow-sm text-warning' : 'text-muted-foreground hover:text-foreground'}`}
           >
             Aula Experimental

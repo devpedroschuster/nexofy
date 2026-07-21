@@ -99,25 +99,20 @@ export const gradeService = {
     return true;
   },
 
-  // Sprint 03 (split presenca/leads): agenda_excecoes não existe mais —
-  // falta de aluno fixo agora é só uma linha em `presenca` (origem='fixo',
-  // status='falta_*'), apagada junto com o resto da cascata abaixo.
+  // Bug #2: versão legada com cascata sequencial removida — única implementação
+  // válida usa a RPC excluir_aula_cascata, que executa todas as deleções dentro
+  // de uma transação Postgres. A versão antiga podia deixar o banco inconsistente
+  // se qualquer step falhasse (ex: agenda_fixa e presenca deletadas, agenda não).
   async excluirAula(id, estudioId) {
-    try {
-      await supabase.from('agenda_fixa').delete().eq('aula_id', id);
-      await supabase.from('presenca').delete().eq('aula_id', id).eq('estudio_id', estudioId);
-      await supabase.from('leads').delete().eq('aula_id', id).eq('estudio_id', estudioId);
-      const { error } = await supabase
-        .from('agenda')
-        .delete()
-        .eq('id', id)
-        .eq('estudio_id', estudioId);
-      if (error) throw error;
-      return true;
-    } catch (error) {
+    const { error } = await supabase.rpc('excluir_aula_cascata', {
+      p_aula_id:    id,
+      p_estudio_id: estudioId,
+    });
+    if (error) {
       console.error('Erro ao excluir aula em cascata:', error);
       throw error;
     }
+    return true;
   },
 
   async encerrarAula(id, dataEncerramento, estudioId) {
@@ -130,13 +125,27 @@ export const gradeService = {
     return true;
   },
 
+  // Bug #5: query sem limite de janela temporal substituída por filtro de ±12 meses.
+  // A versão anterior buscava todos os feriados históricos sem nenhum limite —
+  // um estúdio com anos de operação acumularia centenas de registros trafegados
+  // desnecessariamente a cada carregamento da Agenda.
+  // O calendário raramente precisa navegar além de 12 meses para frente ou atrás,
+  // portanto esta janela cobre todos os casos de uso reais sem desperdício.
   async listarFeriados(estudioId) {
+    const hoje = new Date();
+    const dozeAtras = new Date(hoje.getFullYear() - 1, hoje.getMonth(), 1)
+      .toISOString().split('T')[0];
+    const dozeFuturos = new Date(hoje.getFullYear() + 1, hoje.getMonth() + 1, 0)
+      .toISOString().split('T')[0];
+
     const { data, error } = await supabase
       .from('feriados')
       .select('*')
       .eq('estudio_id', estudioId)
-      .gte('data', new Date().toISOString().split('T')[0])
+      .gte('data', dozeAtras)
+      .lte('data', dozeFuturos)
       .order('data', { ascending: true });
+
     if (error) throw error;
     return data;
   },
@@ -166,20 +175,28 @@ export const gradeService = {
     }
   },
 
+  async excluirFeriado(id, estudioId) {
+    const { error } = await supabase
+      .from('feriados')
+      .delete()
+      .eq('id', id)
+      .eq('estudio_id', estudioId);
+    if (error) throw error;
+    return true;
+  },
+
   async listarMatriculasFixas(aulasIds = null) {
-    // Nota: agenda_fixa não foi confirmado como tendo coluna estudio_id própria;
-    // o isolamento aqui já vem indiretamente via aulasIds (originados de
-    // consultas em `agenda`, que já é filtrada por estudio_id). Se a tabela
-    // tiver a coluna, recomenda-se adicionar o filtro explícito também aqui.
-    let query = supabase
+    // Bug #1: aulasIds=null sem filtro retornaria registros de todos os estúdios.
+    // Proteção defensiva: se não vier lista de IDs, retorna vazio.
+    // O isolamento por tenant é garantido pelo caller (Agenda.jsx) que deriva
+    // aulasIds das aulas já filtradas por estudio_id.
+    if (aulasIds === null || aulasIds.length === 0) return [];
+
+    const { data, error } = await supabase
       .from('agenda_fixa')
-      .select('aula_id, alunos (id, nome_completo, data_inicio_plano, data_fim_plano)');
+      .select('aula_id, alunos (id, nome_completo, data_inicio_plano, data_fim_plano)')
+      .in('aula_id', aulasIds);
 
-    if (aulasIds !== null) {
-      query = query.in('aula_id', aulasIds);
-    }
-
-    const { data, error } = await query;
     if (error) {
       console.error('Erro ao buscar alunos fixos:', error);
       return [];

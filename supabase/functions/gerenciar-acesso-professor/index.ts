@@ -83,10 +83,9 @@ serve(async (req: Request) => {
       const emailNormalizado = email.trim().toLowerCase();
 
       // Verifica se já existe um auth user com esse email
-      const { data: { users }, error: listErr } = await admin.auth.admin.listUsers({ perPage: 1000 });
-      if (listErr) throw listErr;
-
-      const existente = users.find((u) => u.email === emailNormalizado);
+      const { data: { user: existente }, error: getUserErr } =
+   await admin.auth.admin.getUserByEmail(emailNormalizado);
+ if (getUserErr && getUserErr.status !== 404) throw getUserErr;
 
       let novoAuthId: string;
       let reutilizado = false;
@@ -190,9 +189,9 @@ serve(async (req: Request) => {
       }
 
       const emailNormalizado = email.trim().toLowerCase();
-      const { data: { users }, error: listErr2 } = await admin.auth.admin.listUsers({ perPage: 1000 });
-      if (listErr2) throw listErr2;
-      const existente = users.find((u) => u.email === emailNormalizado);
+      const { data: { user: existente }, error: getUserErr2 } =
+   await admin.auth.admin.getUserByEmail(emailNormalizado);
+ if (getUserErr2 && getUserErr2.status !== 404) throw getUserErr2;
 
       let novoAuthId: string;
       let reutilizado = false;

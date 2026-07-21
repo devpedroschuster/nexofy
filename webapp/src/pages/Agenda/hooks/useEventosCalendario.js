@@ -8,9 +8,15 @@ import {
 export function useEventosCalendario({ aulas, feriados, presencasCalendario, matriculasFixas, filtroProf, filtroEspaco, currentDate, currentView }) {
 
   const indexes = useMemo(() => {
+    // Bug #6: guard corrigido de && para ||. Com &&, bastava apenas um dos dois
+    // ser undefined para o guard falhar e buildFixosIndex(undefined) ser chamado.
+    // Com ||, retornamos mapas vazios enquanto qualquer query ainda carrega.
+    if (presencasCalendario === undefined || matriculasFixas === undefined) {
+      return { presencasMap: {}, fixasMap: {}, faltasFixosMap: {} };
+    }
     return {
-      presencasMap: buildPresencasIndex(presencasCalendario || []),
-      fixasMap: buildFixosIndex(matriculasFixas || []),
+      presencasMap:   buildPresencasIndex(presencasCalendario || []),
+      fixasMap:       buildFixosIndex(matriculasFixas || []),
       faltasFixosMap: buildFaltasFixosIndex(presencasCalendario || [])
     };
   }, [presencasCalendario, matriculasFixas]);

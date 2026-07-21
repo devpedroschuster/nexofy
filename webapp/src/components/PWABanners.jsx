@@ -1,12 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Share } from 'lucide-react';
 
 function useIsIOS() {
-  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const isStandalone =
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.navigator.standalone === true;
-  return isIOS && !isStandalone;
+  const [isIOS, setIsIOS] = useState(false);
+
+   useEffect(() => {
+     const ua = navigator.userAgent;
+     const iosDevice = /iphone|ipad|ipod/i.test(ua);
+     const standalone =
+       window.matchMedia('(display-mode: standalone)').matches ||
+       window.navigator.standalone === true;
+     setIsIOS(iosDevice && !standalone);
+   }, []);
+
+   return isIOS;
 }
 
 export function PWABanners() {

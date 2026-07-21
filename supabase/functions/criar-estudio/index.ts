@@ -123,12 +123,11 @@ serve(async (req: Request) => {
   // PL/pgSQL.
   //
   // Se falhar aqui, nenhuma escrita no banco ainda ocorreu → sem efeito colateral.
-  const { data: { users: listaAuth }, error: listErr } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  if (listErr) {
-    return resp({ error: `Falha ao consultar usuários: ${listErr.message}` }, 500);
-  }
-
-  const authExistente = listaAuth.find((u) => u.email === emailNorm);
+  const { data: { user: authExistente }, error: getUserErr } =
+   await admin.auth.admin.getUserByEmail(emailNorm);
+ if (getUserErr && getUserErr.status !== 404) {
+   return resp({ error: `Falha ao consultar usuário: ${getUserErr.message}` }, 500);
+ }
   let adminAuthId: string;
 
   if (authExistente) {

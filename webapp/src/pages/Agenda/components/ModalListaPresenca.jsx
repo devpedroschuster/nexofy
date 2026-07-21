@@ -11,10 +11,14 @@ const ROTULO_STATUS = {
 
 const EH_FALTA = (status) => status === 'falta_justificada' || status === 'falta_nao_avisada';
 
+// BUG #7 fix: removido `refreshKey` da desestruturação — useListaPresenca
+// não exporta mais esse estado bruto; o hook expõe `triggerRefresh` (função)
+// para quem precisar disparar reload manualmente.
 export default function ModalListaPresenca({
-  aulaParaLista, dataLista, setDataLista, listaPresenca, loadingLista,
+  aulaParaLista, dataLista, setDataLista, listaPresenca, loadingLista, erroLista,
   handleRegistrarFalta, handleDesfazerFalta,
-  alunoParaRemover, solicitarRemocao, confirmarRemocao, cancelarRemocao, refreshKey,
+  alunoParaRemover, solicitarRemocao, confirmarRemocao, cancelarRemocao,
+  triggerRefresh,
   isAdmin,
 }) {
   if (!aulaParaLista) return null;
@@ -38,16 +42,35 @@ export default function ModalListaPresenca({
         </div>
         {loadingLista ? (
           <div className="flex justify-center p-6"><RefreshCw className="animate-spin text-muted-foreground" size={24} /></div>
+          ) : erroLista ? (
+          <div className="text-sm text-destructive bg-destructive-soft p-3 rounded-xl">
+            {erroLista}
+          </div>
         ) : listaPresenca.length === 0 ? (
           <div className="text-center p-6 bg-muted/50 rounded-xl border border-dashed border-border">
             <p className="text-sm text-muted-foreground font-medium">Ninguém matriculado ou agendado ainda.</p>
           </div>
         ) : (
           <ul className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-            {listaPresenca.map(aluno => {
+            {listaPresenca.map((aluno, idx) => {
+              // Bug #10 fix: key estável em ordem de preferência.
+              // id_relacao é sempre preenchido pelo presencaService:
+              //   - fixos sem registro do dia → f.id (UUID da agenda_fixa)
+              //   - fixos com registro do dia → id da linha presenca
+              //   - avulsos/leads → id da linha presenca
+              // O fallback com idx é apenas defesa contra dados inesperados.
+              const itemKey = aluno.id_relacao
+                ?? aluno.aluno_id
+                ?? aluno.lead_id
+                ?? `fallback-${aluno.tipo}-${idx}`;
+
+              if (import.meta.env.DEV && String(itemKey).startsWith('fallback-')) {
+                console.warn('[ModalListaPresenca] Item sem ID estável:', aluno);
+              }
+
               const emFalta = EH_FALTA(aluno.status);
               return (
-                <li key={`${aluno.tipo}-${aluno.aluno_id || aluno.lead_id || aluno.nome}`} className={`p-3 border rounded-xl flex justify-between items-center transition-all ${emFalta ? 'bg-destructive-soft border-destructive/30 opacity-70' : 'bg-card border-border shadow-sm'}`}>
+                <li key={itemKey} className={`p-3 border rounded-xl flex justify-between items-center transition-all ${emFalta ? 'bg-destructive-soft border-destructive/30 opacity-70' : 'bg-card border-border shadow-sm'}`}>
                   <div>
                     <span className={`font-bold text-sm ${emFalta ? 'text-destructive line-through' : 'text-foreground'}`}>
                       {aluno.nome}

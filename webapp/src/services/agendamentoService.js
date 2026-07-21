@@ -29,7 +29,11 @@ export const agendamentoService = {
     } catch (error) {
       console.error("Erro estrutural ao verificar disponibilidade:", error);
 
+      // BUG #10: flag isErroTecnico distingue falha de rede/banco de uma
+      // regra de negócio real (turma cheia, plano incompatível).
+      // useAgendamento usa essa flag para exibir toast e não bloquear o agendamento.
       return {
+        isErroTecnico: true,
         podeAgendarLivremente: false,
         avisoCritico: "Não foi possível verificar as vagas no momento. Verifique sua conexão.",
         capacidadeMax: 0,

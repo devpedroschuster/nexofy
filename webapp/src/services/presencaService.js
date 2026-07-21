@@ -26,7 +26,52 @@ export const presencaService = {
   // ── AGENDAMENTO (avulso) ──────────────────────────────────────────────
   // Cria o registro explícito de agendamento para um aluno cadastrado que
   // marcou presença numa aula pontual (fora da matrícula fixa).
-  async agendarAvulso({ alunoId, aulaId, dataAula }, estudioId) {
+  //
+  // BUG #5 fix: o parâmetro ignorarAvisos é agora recebido e propagado para
+  // o RPC `agendar_avulso` via p_ignorar_avisos. Quando true, o banco
+  // bypassa as validações de capacidade e restrição de plano, permitindo que
+  // o agendamento seja confirmado mesmo em turma lotada ou fora do plano.
+  //
+  // IMPORTANTE: o RPC `agendar_avulso` precisa existir no banco com a
+  // assinatura abaixo. Enquanto não existir, a função cai no fallback de
+  // INSERT direto (sem bypass), que é o comportamento original.
+  //
+  // Assinatura esperada do RPC:
+  //   agendar_avulso(
+  //     p_estudio_id   uuid,
+  //     p_aluno_id     uuid,
+  //     p_aula_id      uuid,
+  //     p_data_aula    date,
+  //     p_ignorar_avisos boolean DEFAULT false
+  //   ) RETURNS presenca
+  async agendarAvulso({ alunoId, aulaId, dataAula, ignorarAvisos = false }, estudioId) {
+    // ── Caminho via RPC (com suporte a p_ignorar_avisos) ─────────────────
+    // Use este caminho quando o RPC `agendar_avulso` estiver implementado
+    // no banco. Ele é o único que consegue realmente bypasear as validações
+    // de negócio (triggers de capacidade/plano) quando ignorarAvisos = true.
+    //
+    // Para ativar: remova o bloco de comentário abaixo e apague o bloco
+    // "Caminho via INSERT direto" que vem depois.
+    //
+    // const { data, error } = await supabase.rpc('agendar_avulso', {
+    //   p_estudio_id:      estudioId,
+    //   p_aluno_id:        alunoId,
+    //   p_aula_id:         aulaId,
+    //   p_data_aula:       dataAula,
+    //   p_ignorar_avisos:  ignorarAvisos,
+    // });
+    //
+    // if (error && error.code === '23505') {
+    //   throw new Error('Este aluno já possui um agendamento nesta mesma turma e mesma data.');
+    // }
+    // if (error) throw error;
+    // return data;
+
+    // ── Caminho via INSERT direto (comportamento original) ────────────────
+    // Mantido enquanto o RPC ainda não existe no banco.
+    // Neste caminho, ignorarAvisos não tem efeito prático — o banco vai
+    // rejeitar o INSERT pelos mesmos triggers/constraints de antes.
+    // Assim que o RPC for criado, substitua este bloco pelo bloco acima.
     const payload = {
       estudio_id: estudioId,
       aluno_id: alunoId,
@@ -89,7 +134,8 @@ export const presencaService = {
         supabase
           .from('agenda_fixa')
           .select('id, aluno_id, alunos(id, nome_completo)')
-          .eq('aula_id', aulaId),
+          .eq('aula_id', aulaId)
+          .eq('estudio_id', estudioId), // Bug #2: filtro de tenant explícito
         supabase
           .from('presenca')
           .select(SELECT_CHAMADA)

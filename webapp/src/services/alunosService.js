@@ -68,12 +68,13 @@ export const alunosService = {
     }
   },
 
-  async atualizar(id, dados) {
+  async atualizar(id, dados, estudioId) {
     try {
       const { data, error } = await supabase
         .from('alunos')
         .update(dados)
         .eq('id', id)
+        .eq('estudio_id', estudioId) // Bug #4: impede UPDATE cross-tenant
         .select()
         .single();
 
@@ -85,12 +86,13 @@ export const alunosService = {
     }
   },
 
-  async excluir(id) {
+  async excluir(id, estudioId) {
     try {
       const { error } = await supabase
         .from('alunos')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('estudio_id', estudioId); // Bug #4: impede DELETE cross-tenant
 
       if (error) throw error;
       return true;
@@ -100,12 +102,18 @@ export const alunosService = {
     }
   },
 
-  async alterarStatus(id, novoStatus) {
+  // Bug #4: estudioId adicionado como parâmetro e aplicado como filtro no UPDATE.
+  // A versão anterior filtrava apenas por id — sem o filtro de tenant, um admin
+  // de outro estúdio que conhecesse o UUID poderia desativar/reativar o aluno.
+  // O padrão segue o já aplicado em `atualizar` e `excluir` (defense-in-depth
+  // além do RLS).
+  async alterarStatus(id, novoStatus, estudioId) {
     try {
       const { error } = await supabase
         .from('alunos')
         .update({ ativo: novoStatus })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('estudio_id', estudioId); // barreira cross-tenant
 
       if (error) throw error;
       return true;
