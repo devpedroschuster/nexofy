@@ -2,7 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
-import ErrorBoundary from './ErrorBoundary.jsx' // componente a ser criado
+import ErrorBoundary from './components/shared/ErrorBoundary.jsx' // componente a ser criado
 
 if (import.meta.env.DEV) {
   console.log('[main.jsx] v2 carregado ✅')
