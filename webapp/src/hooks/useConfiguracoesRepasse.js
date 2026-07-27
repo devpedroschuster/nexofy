@@ -9,7 +9,7 @@ export function useConfiguracoesRepasse() {
 
   return useQuery({
     queryKey: key,
-    queryFn: configuracoesRepasseService.obter,
+    queryFn: () => configuracoesRepasseService.obter(estudioId),
     enabled: !!estudioId,
     staleTime: 5 * 60 * 1000,
   });
@@ -21,11 +21,14 @@ export function useSalvarConfiguracoesRepasse() {
   const key = ['config-repasse', estudioId];
 
   return useMutation({
-    mutationFn: configuracoesRepasseService.salvar,
+    mutationFn: (payload) => configuracoesRepasseService.salvar(payload, estudioId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key });
       toast.success('Configurações de repasse atualizadas.');
     },
-    onError: (e) => toast.error(e.message || 'Erro ao salvar configurações.'),
+    onError: (e) => {
+      console.error('[useSalvarConfiguracoesRepasse] erro ao salvar', e);
+      toast.error('Erro ao salvar configurações. Tente novamente.');
+    },
   });
 }

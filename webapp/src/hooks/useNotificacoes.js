@@ -7,25 +7,48 @@ import { storageKey } from '../utils/storage';
 
 const slug = import.meta.env.VITE_APP_SLUG ?? 'app';
 
+// FIX (Bug #2): a chave de localStorage agora inclui o estudioId, evitando
+// que "notificações resolvidas" de um estúdio vazem/colidam com outro
+// (o isolamento por subdomínio em produção era acidental, não garantido).
+function chaveResolvidas(estudioId) {
+  return storageKey(slug, `notificacoes_resolvidas:${estudioId ?? 'sem-estudio'}`);
+}
+
 export function useNotificacoes() {
   const { estudioId } = useAuth();
   const [resolvidas, setResolvidas] = useState([]);
 
+  // FIX (Bug #3): agora depende de estudioId, recarregando o estado local
+  // sempre que o contexto de estúdio mudar.
   useEffect(() => {
-    const salvas = localStorage.getItem(storageKey(slug, 'notificacoes_resolvidas'));
-    if (salvas) setResolvidas(JSON.parse(salvas));
-  }, []);
+    if (!estudioId) return;
 
+    try {
+      const salvas = localStorage.getItem(chaveResolvidas(estudioId));
+      setResolvidas(salvas ? JSON.parse(salvas) : []);
+    } catch {
+      // FIX (edge case): JSON corrompido não deve derrubar a tela —
+      // apenas reseta o estado local de "resolvidas".
+      setResolvidas([]);
+    }
+  }, [estudioId]);
+
+  // FIX (Bug #1): forma funcional do setState evita perder atualizações
+  // quando duas resoluções acontecem em sequência rápida.
   const marcarComoResolvida = (idUnico) => {
-    const novas = [...resolvidas, idUnico];
-    setResolvidas(novas);
-    localStorage.setItem(storageKey(slug, 'notificacoes_resolvidas'), JSON.stringify(novas));
+    setResolvidas(prev => {
+      const novas = [...prev, idUnico];
+      localStorage.setItem(chaveResolvidas(estudioId), JSON.stringify(novas));
+      return novas;
+    });
   };
 
   const desfazerResolvida = (idUnico) => {
-    const novas = resolvidas.filter(id => id !== idUnico);
-    setResolvidas(novas);
-    localStorage.setItem(storageKey(slug, 'notificacoes_resolvidas'), JSON.stringify(novas));
+    setResolvidas(prev => {
+      const novas = prev.filter(id => id !== idUnico);
+      localStorage.setItem(chaveResolvidas(estudioId), JSON.stringify(novas));
+      return novas;
+    });
   };
 
   const query = useQuery({
@@ -34,7 +57,7 @@ export function useNotificacoes() {
       const { data, error } = await supabase
         .from('alunos')
         .select('id, nome_completo, telefone, data_nascimento, data_fim_plano, planos(nome)')
-        .eq('estudio_id', estudioId) // Bug #9 fix: filtro de tenant obrigatório
+        .eq('estudio_id', estudioId) // filtro de tenant obrigatório
         .eq('ativo', true);
 
       if (error) throw error;
@@ -47,7 +70,7 @@ export function useNotificacoes() {
         if (aluno.data_fim_plano) {
           const dataFim = startOfDay(new Date(aluno.data_fim_plano + 'T12:00:00'));
           const diasFaltando = Math.ceil((dataFim - hoje) / (1000 * 60 * 60 * 24));
-          
+
           if (diasFaltando <= 7 && diasFaltando >= -60) {
             notificacoes.push({
               idUnico: `venc-${aluno.id}-${aluno.data_fim_plano}`,
@@ -60,13 +83,23 @@ export function useNotificacoes() {
         }
 
         if (aluno.data_nascimento) {
-          const [anoNasc, mesNasc, diaNasc] = aluno.data_nascimento.split('-');
-          let niverEsteAno = startOfDay(new Date(anoAtual, mesNasc - 1, diaNasc));
+          const [, mesNasc, diaNasc] = aluno.data_nascimento.split('-');
+
+          // FIX (edge case): aniversariantes de 29/02 em anos não bissextos
+          // caíam em 01/03 por overflow do Date. Ajustamos para 28/02 nesse caso.
+          const diaAjustado = Number(mesNasc) === 2 && Number(diaNasc) === 29 && !ehBissexto(anoAtual)
+            ? 28
+            : Number(diaNasc);
+
+          let niverEsteAno = startOfDay(new Date(anoAtual, mesNasc - 1, diaAjustado));
           let diasFaltandoNiver = Math.ceil((niverEsteAno - hoje) / (1000 * 60 * 60 * 24));
 
           if (diasFaltandoNiver < -20) {
-             niverEsteAno = startOfDay(new Date(anoAtual + 1, mesNasc - 1, diaNasc));
-             diasFaltandoNiver = Math.ceil((niverEsteAno - hoje) / (1000 * 60 * 60 * 24));
+            const diaAjustadoProx = Number(mesNasc) === 2 && Number(diaNasc) === 29 && !ehBissexto(anoAtual + 1)
+              ? 28
+              : Number(diaNasc);
+            niverEsteAno = startOfDay(new Date(anoAtual + 1, mesNasc - 1, diaAjustadoProx));
+            diasFaltandoNiver = Math.ceil((niverEsteAno - hoje) / (1000 * 60 * 60 * 24));
           }
 
           if (diasFaltandoNiver <= 7) {
@@ -84,11 +117,24 @@ export function useNotificacoes() {
       return notificacoes.sort((a, b) => a.diasFaltando - b.diasFaltando);
     },
     enabled: !!estudioId,
+    staleTime: 1000 * 60 * 5, // notificações não mudam minuto a minuto
   });
 
   const todasAsNotificacoes = query.data || [];
   const ativas = todasAsNotificacoes.filter(n => !resolvidas.includes(n.idUnico));
   const concluidas = todasAsNotificacoes.filter(n => resolvidas.includes(n.idUnico));
 
-  return { ativas, concluidas, loading: query.isLoading, marcarComoResolvida, desfazerResolvida };
+  return {
+    ativas,
+    concluidas,
+    loading: query.isLoading,
+    // FIX (edge case): expõe o estado de erro em vez de mascará-lo como "sem notificações".
+    error: query.isError ? query.error : null,
+    marcarComoResolvida,
+    desfazerResolvida,
+  };
+}
+
+function ehBissexto(ano) {
+  return (ano % 4 === 0 && ano % 100 !== 0) || ano % 400 === 0;
 }

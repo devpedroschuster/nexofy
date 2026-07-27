@@ -2,18 +2,29 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin } from 'lucide-react';
 
+const DURACAO_SEGUNDOS = 2;
+
 export default function PaginaNaoEncontrada({ destino = '/' }) {
   const navigate = useNavigate();
-  const [contador, setContador] = useState(2);
+  const [contador, setContador] = useState(DURACAO_SEGUNDOS);
+
+  // Segurança: garante que `destino` é um caminho interno relativo,
+  // evitando open-redirect caso o valor venha de fonte não confiável.
+  const destinoSeguro = destino.startsWith('/') && !destino.startsWith('//') ? destino : '/';
 
   useEffect(() => {
-    if (contador <= 0) {
-      navigate(destino, { replace: true });
-      return;
-    }
-    const timer = setTimeout(() => setContador((c) => c - 1), 1000);
+    if (contador <= 0) return;
+
+    const timer = setTimeout(() => {
+      if (contador === 1) {
+        navigate(destinoSeguro, { replace: true });
+      } else {
+        setContador((c) => c - 1);
+      }
+    }, 1000);
+
     return () => clearTimeout(timer);
-  }, [contador, navigate, destino]);
+  }, [contador, navigate, destinoSeguro]);
 
   return (
     <div className="h-screen w-screen flex flex-col items-center justify-center gap-6 bg-background px-6 text-center">

@@ -10,7 +10,7 @@ export function useLeadsPendentes() {
   return useQuery<Lead[]>({
     queryKey: ['leads', estudioId, 'pendentes'],
     queryFn: async () => {
-      const data = await leadsService.listarLeadsPendentes();
+      const data = await leadsService.listarLeadsPendentes(estudioId);
       return data as unknown as Lead[];
     },
     enabled: !!estudioId,
@@ -22,16 +22,15 @@ export function useLeadsPendentes() {
  * Leads pendentes filtrados por mês/ano específico (data da aula experimental).
  * `mes` é 0-indexado (0 = Janeiro, 11 = Dezembro).
  */
-export function useLeadsPendentesPorMes(ano: number, mes: number) {
+export function useLeadsPendentesPorMes(ano: number, mes: number, enabled = true) {
   const { estudioId } = useAuth();
-
   return useQuery<Lead[]>({
     queryKey: ['leads', estudioId, 'pendentes', 'mes', ano, mes],
     queryFn: async () => {
-      const data = await leadsService.listarLeadsPendentesPorMes({ ano, mes });
+      const data = await leadsService.listarLeadsPendentesPorMes({ ano, mes, estudioId });
       return data as unknown as Lead[];
     },
-    enabled: !!estudioId,
+    enabled: !!estudioId && enabled, // FIX
     staleTime: 1000 * 30,
   });
 }
@@ -42,7 +41,7 @@ export function useHistoricoLeads() {
   return useInfiniteQuery<Lead[], Error, InfiniteData<Lead[]>, (string | null)[], number>({
     queryKey: ['leads', estudioId, 'historico'],
     queryFn: async ({ pageParam = 0 }) => {
-      const data = await leadsService.listarHistoricoLeads({ pageParam, limit: 30 });
+      const data = await leadsService.listarHistoricoLeads({ pageParam, limit: 30, estudioId });
       return data as unknown as Lead[];
     },
     enabled: !!estudioId,
@@ -64,7 +63,7 @@ export function useHistoricoLeadsPorMes(ano: number, mes: number) {
   return useQuery<Lead[]>({
     queryKey: ['leads', estudioId, 'historico', 'mes', ano, mes],
     queryFn: async () => {
-      const data = await leadsService.listarHistoricoLeadsPorMes({ ano, mes });
+      const data = await leadsService.listarHistoricoLeadsPorMes({ ano, mes, estudioId });
       return data as unknown as Lead[];
     },
     enabled: !!estudioId,
@@ -72,9 +71,12 @@ export function useHistoricoLeadsPorMes(ano: number, mes: number) {
   });
 }
 
+// FIX (Bug #3): o campo real retornado pelo service é `data_visita`,
+// não `data_checkin`. O mismatch fazia `new Date(...)` gerar Invalid Date
+// e quebrava o agrupamento mensal (chave "NaN-NaN").
 interface ResumoLead {
   id: string;
-  data_checkin: string;
+  data_visita: string;
   status_conversao: 'pendente' | 'convertido' | 'perdido';
 }
 
@@ -94,7 +96,9 @@ function agruparPorMes(data: ResumoLead[]): ResumoMensal[] {
   const mapa = new Map<string, ResumoMensal>();
 
   for (const lead of data) {
-    const d = new Date(lead.data_checkin);
+    const d = new Date(lead.data_visita);
+    if (Number.isNaN(d.getTime())) continue; // guarda contra dados malformados
+
     const ano = d.getFullYear();
     const mes = d.getMonth();
     const chave = `${ano}-${String(mes).padStart(2, '0')}`;
@@ -123,11 +127,9 @@ function agruparPorMes(data: ResumoLead[]): ResumoMensal[] {
   const resultado = Array.from(mapa.values()).map(item => ({
     ...item,
     taxa: item.total > 0 ? item.convertidos / item.total : null,
-    // Capitaliza a primeira letra do label (ex: "junho 2026" → "Junho 2026")
     label: item.label.charAt(0).toUpperCase() + item.label.slice(1),
   }));
 
-  // Mais recente primeiro
   resultado.sort((a, b) => b.chave.localeCompare(a.chave));
 
   return resultado;
@@ -144,7 +146,10 @@ export function useResumoMensalLeads() {
   return useQuery<ResumoMensal[]>({
     queryKey: ['leads', estudioId, 'resumo-mensal'],
     queryFn: async () => {
-      const data = await leadsService.listarResumoLeads() as unknown as ResumoLead[];
+      // FIX (Bug #4): faltava passar estudioId — sem ele o filtro
+      // `.eq('estudio_id', estudioId)` no service vira `estudio_id = 'undefined'`,
+      // resultando em resumo vazio (ou, na ausência de RLS, risco de leitura indevida).
+      const data = await leadsService.listarResumoLeads(estudioId) as unknown as ResumoLead[];
       return agruparPorMes(data);
     },
     enabled: !!estudioId,
@@ -163,7 +168,8 @@ export function useResumoMensalLeadsPendentes() {
   return useQuery<ResumoMensal[]>({
     queryKey: ['leads', estudioId, 'resumo-mensal-pendentes'],
     queryFn: async () => {
-      const data = await leadsService.listarResumoLeadsPendentes() as unknown as ResumoLead[];
+      // FIX (Bug #4): idem acima.
+      const data = await leadsService.listarResumoLeadsPendentes(estudioId) as unknown as ResumoLead[];
       return agruparPorMes(data);
     },
     enabled: !!estudioId,
@@ -177,7 +183,11 @@ export function useAtualizarStatusLead() {
 
   return useMutation({
     mutationFn: async ({ id, status }: { id: string, status: 'convertido' | 'perdido' | 'pendente' }) => {
-      return await leadsService.atualizarStatusLead(id, status);
+      // FIX (Bug #1): estudioId nunca era enviado ao service, então o
+      // UPDATE não batia com nenhuma linha (0 rows afetadas, sem erro) —
+      // falha silenciosa. Agora validamos e passamos o 3º argumento.
+      if (!estudioId) throw new Error('Estúdio não identificado. Recarregue a página.');
+      return await leadsService.atualizarStatusLead(id, status, estudioId);
     },
     onMutate: async ({ id, status }) => {
       await queryClient.cancelQueries({ queryKey: ['leads', estudioId] });
@@ -194,7 +204,6 @@ export function useAtualizarStatusLead() {
       const previousHistorico = queryClient.getQueryData<InfiniteData<Lead[]>>(['leads', estudioId, 'historico']);
       if (previousHistorico) {
         queryClient.setQueryData<InfiniteData<Lead[]>>(['leads', estudioId, 'historico'], (oldData: InfiniteData<Lead[]> | undefined) => {
-
           if (!oldData) return oldData;
           return {
             ...oldData,
@@ -221,7 +230,8 @@ export function useAtualizarStatusLead() {
 /**
  * Salva a observação livre da administração sobre o lead.
  * Atualiza o cache otimisticamente nas listas de pendentes e histórico
- * (incluindo páginas paginadas e filtradas por mês).
+ * (incluindo páginas paginadas e filtradas por mês), com rollback em caso
+ * de erro (padrão consistente com useAtualizarStatusLead).
  */
 export function useAtualizarObservacaoLead() {
   const queryClient = useQueryClient();
@@ -229,19 +239,25 @@ export function useAtualizarObservacaoLead() {
 
   return useMutation({
     mutationFn: async ({ id, observacao }: { id: string, observacao: string }) => {
-      return await leadsService.atualizarObservacaoLead(id, observacao);
+      // FIX (Bug #2): mesmo problema do Bug #1 — estudioId não era enviado.
+      if (!estudioId) throw new Error('Estúdio não identificado. Recarregue a página.');
+      return await leadsService.atualizarObservacaoLead(id, observacao, estudioId);
     },
     onMutate: async ({ id, observacao }) => {
       await queryClient.cancelQueries({ queryKey: ['leads', estudioId] });
 
+      // FIX (edge case #2): agora capturamos snapshots para permitir rollback
+      // real em onError, em vez de depender só de um invalidateQueries tardio.
+      const previousPendentes = queryClient.getQueryData<Lead[]>(['leads', estudioId, 'pendentes']);
+      const previousHistoricoMes = queryClient.getQueriesData<Lead[]>({ queryKey: ['leads', estudioId, 'historico', 'mes'] });
+      const previousHistoricoInfinite = queryClient.getQueriesData<InfiniteData<Lead[]>>({ queryKey: ['leads', estudioId, 'historico'], exact: false });
+
       const atualizarLista = (old?: Lead[]) =>
         old?.map(l => l.id === id ? { ...l, observacao_lead: observacao } : l);
 
-      // Listas simples (pendentes, pendentes por mês, histórico por mês)
       queryClient.setQueriesData<Lead[]>({ queryKey: ['leads', estudioId, 'pendentes'] }, (old) => atualizarLista(old) ?? old);
       queryClient.setQueriesData<Lead[]>({ queryKey: ['leads', estudioId, 'historico', 'mes'] }, (old) => atualizarLista(old) ?? old);
 
-      // Histórico paginado (infinite query)
       queryClient.setQueriesData<InfiniteData<Lead[]>>({ queryKey: ['leads', estudioId, 'historico'], exact: false }, (oldData) => {
         if (!oldData || !('pages' in oldData)) return oldData;
         return {
@@ -251,13 +267,26 @@ export function useAtualizarObservacaoLead() {
           ),
         };
       });
+
+      return { previousPendentes, previousHistoricoMes, previousHistoricoInfinite };
     },
-    onError: () => {
+    onError: (err, variables, context) => {
+      if (context?.previousPendentes) {
+        queryClient.setQueryData<Lead[]>(['leads', estudioId, 'pendentes'], context.previousPendentes);
+      }
+      context?.previousHistoricoMes?.forEach(([key, data]) => {
+        queryClient.setQueryData(key, data);
+      });
+      context?.previousHistoricoInfinite?.forEach(([key, data]) => {
+        queryClient.setQueryData(key, data);
+      });
       showToast.error("Erro ao salvar observação. Tente novamente.");
-      queryClient.invalidateQueries({ queryKey: ['leads', estudioId] });
     },
     onSuccess: () => {
       showToast.success("Observação salva.");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads', estudioId] });
     },
   });
 }

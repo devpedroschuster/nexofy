@@ -16,6 +16,7 @@ import Badge from '../../components/ui/Badge';
 import Skeleton from '../../components/ui/Skeleton';
 import EmptyState from '../../components/ui/EmptyState';
 import Button from '../../components/ui/Button';
+import { formatarMoeda, formatarData } from '../../lib/utils';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -36,16 +37,6 @@ function navegarMes(mesAno, delta) {
 function mesAnoAtual() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function formatarMoeda(v) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v ?? 0);
-}
-
-function formatarData(iso) {
-  if (!iso) return '—';
-  const [ano, mes, dia] = iso.split('-');
-  return `${dia}/${mes}/${ano}`;
 }
 
 function statusBadge(status) {

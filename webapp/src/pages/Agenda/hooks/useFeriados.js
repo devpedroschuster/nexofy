@@ -10,39 +10,69 @@ export function useFeriados(refetch) {
   const [feriadoParaExcluir, setFeriadoParaExcluir] = useState(null);
 
   async function salvarFeriado(e) {
-  e.preventDefault();
-  if (savingFeriado) return;
-  setSavingFeriado(true);
-  try {
-    await gradeService.cadastrarFeriado({ ...novoFeriado, bloqueia_agenda: true }, estudioId);
-    showToast.success("Bloqueio adicionado na agenda!");
-    setNovoFeriado({ data: '', descricao: '', bloqueia_agenda: true });
-    refetch();
-  } catch (err) {
-    showToast.error("Erro ao salvar bloqueio.");
-  } finally {
-    setSavingFeriado(false);
+    e.preventDefault();
+    if (savingFeriado) return;
+
+    // Guard defensivo: sem estudioId (ex: sessão ainda resolvendo no primeiro
+    // render), não tenta gravar — evita insert com estudio_id undefined.
+    if (!estudioId) {
+      showToast.error("Sessão ainda carregando, tente novamente em instantes.");
+      return;
+    }
+
+    // Validação no próprio hook: os <Input required min={hoje}> do form já
+    // cobrem o fluxo normal, mas quem fala com o banco (e dispara a limpeza
+    // de presenca/leads abaixo) é este hook — não deve confiar só na UI.
+    const dataLimpa = novoFeriado.data?.trim();
+    const descricaoLimpa = novoFeriado.descricao?.trim();
+    if (!dataLimpa || !descricaoLimpa) {
+      showToast.error("Informe data e motivo do bloqueio.");
+      return;
+    }
+
+    setSavingFeriado(true);
+    try {
+      await gradeService.cadastrarFeriado(
+        { ...novoFeriado, data: dataLimpa, descricao: descricaoLimpa, bloqueia_agenda: true },
+        estudioId
+      );
+      // Aviso honesto: cadastrarFeriado(bloqueia_agenda=true) também apaga
+      // presenca/leads existentes nessa data — o usuário precisa saber disso,
+      // não só que "um bloqueio foi adicionado".
+      showToast.success("Bloqueio adicionado! Agendamentos existentes nessa data foram removidos.");
+      setNovoFeriado({ data: '', descricao: '', bloqueia_agenda: true });
+      refetch();
+    } catch (err) {
+      console.error('[useFeriados] erro ao salvar feriado', err);
+      showToast.error("Erro ao salvar bloqueio.");
+    } finally {
+      setSavingFeriado(false);
+    }
   }
-}
 
   const solicitarExclusao = (id) => setFeriadoParaExcluir(id);
   const cancelarExclusao = () => setFeriadoParaExcluir(null);
 
   async function confirmarExclusao() {
-    if (!feriadoParaExcluir) return;
+    if (feriadoParaExcluir === null) return;
+    if (!estudioId) {
+      showToast.error("Sessão ainda carregando, tente novamente em instantes.");
+      return;
+    }
     try {
       await gradeService.excluirFeriado(feriadoParaExcluir, estudioId);
       showToast.success("Bloqueio removido.");
       refetch();
     } catch (err) {
+      console.error('[useFeriados] erro ao excluir feriado', err);
       showToast.error("Erro ao remover bloqueio.");
     } finally {
       setFeriadoParaExcluir(null);
     }
   }
 
-  return { 
-    novoFeriado, setNovoFeriado, savingFeriado, salvarFeriado, 
-    feriadoParaExcluir, solicitarExclusao, confirmarExclusao, cancelarExclusao 
+  return {
+    novoFeriado, setNovoFeriado, savingFeriado, salvarFeriado,
+    feriadoParaExcluir, solicitarExclusao, confirmarExclusao, cancelarExclusao
   };
 }

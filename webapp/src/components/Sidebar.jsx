@@ -22,7 +22,7 @@ import { cn } from '../lib/cn';
 
 /* ── Helpers ────────────────────────────────────────────────────────────────── */
 function resolverPerfil(perfil) {
-  if (!perfil) return 'admin';
+  if (!perfil) return null;
   if (typeof perfil === 'string') return perfil.toLowerCase().trim();
   return String(perfil.role ?? perfil.tipo ?? 'admin').toLowerCase().trim();
 }
@@ -64,24 +64,31 @@ const MENU_PROFESSOR = [
   { name: 'Meus Alunos',  path: '/professor/alunos', icon: Users    },
 ];
 
+const PERFIS_COM_MENU_ADMIN = ['admin', 'super_admin'];
+
 /* ── Componente ─────────────────────────────────────────────────────────────── */
 function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }) {
   const location = useLocation();
-  const navigate  = useNavigate();
+  const navigate = useNavigate();
 
-  const isProfessor = resolverPerfil(perfil) === 'professor';
-  const itensMenu   = isProfessor ? MENU_PROFESSOR : MENU_ADMIN;
+  const perfilResolvido = resolverPerfil(perfil);
+  const isProfessor = perfilResolvido === 'professor';
+  const isAdmin = PERFIS_COM_MENU_ADMIN.includes(perfilResolvido);
+
   const { canInstall, install } = usePWA();
+
+  const itensMenu = isProfessor ? MENU_PROFESSOR : isAdmin ? MENU_ADMIN : [];
 
   async function handleLogout() {
     try {
       await supabase.auth.signOut();
-      Object.keys(localStorage)
-        .filter(k => k.startsWith('supabase.'))
-        .forEach(k => localStorage.removeItem(k));
-      navigate('/login');
     } catch (err) {
-      console.error('Erro ao sair:', err);
+      console.error('Erro ao sair (signOut remoto falhou):', err);
+    } finally {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith('supabase.'))
+        .forEach((k) => localStorage.removeItem(k));
+      navigate('/login', { replace: true });
     }
   }
 

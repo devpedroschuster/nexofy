@@ -6,22 +6,31 @@ import { RefreshCw, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
 import { showToast } from '../components/shared/Toast';
 import { useEstudio } from '../hooks/useEstudio';
 
+const NOMES_DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const DIAS_BANCO = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024; // 5MB
+const AVATAR_TIPOS_ACEITOS = ['image/jpeg', 'image/png', 'image/webp'];
+
+// FIX: monta a data local (ano-mes-dia) sem passar por toISOString(),
+// que converte para UTC e pode deslocar o dia em fusos negativos (Brasil).
+const paraDataLocalStr = (d) => {
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${ano}-${mes}-${dia}`;
+};
+
 const gerarProximosDias = () => {
   const dias = [];
-  const nomesDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-  const diasBanco = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
   for (let i = 0; i < 7; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
-    const ano = d.getFullYear();
-    const mes = String(d.getMonth() + 1).padStart(2, '0');
-    const dia = String(d.getDate()).padStart(2, '0');
-    const dataLocal = `${ano}-${mes}-${dia}`;
+    const dataLocal = paraDataLocalStr(d);
     dias.push({
-      dataIso: dataLocal, 
-      diaSemana: i === 0 ? 'Hoje' : nomesDias[d.getDay()],
-      diaMes: `${dia}/${mes}`,
-      diaBanco: diasBanco[d.getDay()]
+      dataIso: dataLocal,
+      diaSemana: i === 0 ? 'Hoje' : NOMES_DIAS[d.getDay()],
+      diaMes: dataLocal.split('-').slice(1).reverse().join('/'),
+      diaBanco: DIAS_BANCO[d.getDay()],
     });
   }
   return dias;
@@ -30,12 +39,17 @@ const gerarProximosDias = () => {
 export default function AreaAluno() {
   const navigate = useNavigate();
   const { data: estudio } = useEstudio();
-const nomeEstudio = estudio?.nome;
+  const nomeEstudio = estudio?.nome;
   const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
+
+  // FIX: gerar a lista de dias uma única vez e derivar o dia ativo dela,
+  // em vez de chamar gerarProximosDias() duas vezes (evita dessincronia
+  // caso as duas chamadas caiam em lados opostos da virada da meia-noite).
   const proximosDias = useMemo(() => gerarProximosDias(), []);
-  const [abaAtiva, setAbaAtiva] = useState('schedule'); 
-  const [diaAtivo, setDiaAtivo] = useState(() => gerarProximosDias()[0].dataIso); 
+
+  const [abaAtiva, setAbaAtiva] = useState('schedule');
+  const [diaAtivo, setDiaAtivo] = useState(proximosDias[0].dataIso);
   const [modoEdicao, setModoEdicao] = useState(false);
   const [processandoId, setProcessandoId] = useState(null);
   const [formEdit, setFormEdit] = useState({ telefone: '', cpf: '', data_nascimento: '' });
@@ -46,18 +60,26 @@ const nomeEstudio = estudio?.nome;
     queryKey: ['meu-perfil'],
     queryFn: async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Não logado");
+      if (!session) throw new Error('Não logado');
+      // FIX: maybeSingle() no lugar de single() — permite distinguir
+      // "sem cadastro de aluno" de uma falha real de rede/permissão.
       const { data, error } = await supabase
         .from('alunos')
         .select(`*, planos (nome, preco, regras_acesso)`)
         .eq('auth_id', session.user.id)
-        .single();
+        .maybeSingle();
       if (error) throw error;
+      if (!data) throw new Error('Cadastro de aluno não encontrado para este usuário.');
       return data;
-    }
+    },
   });
 
-  // FIX: busca presenças do mês incluindo data_checkin para cruzar com feriados
+  // aluno.estudio_id é a fonte de verdade do tenant do próprio aluno logado —
+  // usamos esse valor (e não o estudio do contexto/URL) para filtrar tudo
+  // que pertence a este aluno, evitando vazamento cross-tenant.
+  const estudioIdAluno = aluno?.estudio_id;
+
+  // FIX: filtro explícito de estudio_id + janela de datas correta (local, com limite superior)
   const { data: presencasMes } = useQuery({
     queryKey: ['presencas-mes', aluno?.id],
     enabled: !!aluno?.id,
@@ -65,37 +87,35 @@ const nomeEstudio = estudio?.nome;
       const hoje = new Date();
       const primeiroDiaMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
       const ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+      const primeiroDiaStr = paraDataLocalStr(primeiroDiaMes);
+      const ultimoDiaStr = paraDataLocalStr(ultimoDiaMes);
 
-      const primeiroDiaStr = primeiroDiaMes.toISOString().split('T')[0];
-      const ultimoDiaStr = ultimoDiaMes.toISOString().split('T')[0];
-
-      // Busca presenças e feriados do mês em paralelo
       const [{ data: presencas, error }, { data: feriados }] = await Promise.all([
         supabase
           .from('presencas')
           .select(`id, data_checkin, agenda(atividade, espaco, modalidades(area))`)
           .eq('aluno_id', aluno.id)
-          .gte('data_checkin', primeiroDiaMes.toISOString()),
+          .eq('estudio_id', estudioIdAluno)
+          .gte('data_checkin', primeiroDiaStr)
+          .lte('data_checkin', ultimoDiaStr), // FIX: limite superior que faltava
         supabase
           .from('feriados')
           .select('data')
+          .eq('estudio_id', estudioIdAluno)
           .eq('bloqueia_agenda', true)
           .gte('data', primeiroDiaStr)
-          .lte('data', ultimoDiaStr)
+          .lte('data', ultimoDiaStr),
       ]);
 
       if (error) throw error;
 
-      // Monta um Set com as datas de feriado para lookup O(1)
-      const feriadosSet = new Set((feriados || []).map(f => f.data));
-
-      // FIX: exclui presenças que caíram em dias de feriado — não devem contar no limite do plano
-      return (presencas || []).filter(p => {
+      const feriadosSet = new Set((feriados || []).map((f) => f.data));
+      return (presencas || []).filter((p) => {
         const dataCheckin = p.data_checkin?.split('T')[0];
         return !feriadosSet.has(dataCheckin);
       });
-    }
-  }); 
+    },
+  });
 
   const { data: mensalidades, isLoading: loadingMensalidades } = useQuery({
     queryKey: ['minhas-mensalidades', aluno?.id],
@@ -105,42 +125,48 @@ const nomeEstudio = estudio?.nome;
         .from('mensalidades')
         .select('*')
         .eq('aluno_id', aluno.id)
+        .eq('estudio_id', estudioIdAluno) // FIX: isolamento de tenant
         .order('data_vencimento', { ascending: false });
       if (error && error.code !== '42P01') throw error;
       return data || [];
-    }
+    },
   });
 
-  const { data: aulasDoDia, isLoading: loadingAulas } = useQuery({
-    queryKey: ['agenda', diaAtivo],
-    enabled: !!aluno?.id,
+  const { data: aulasDoDia, isLoading: loadingAulas, isError: erroAulas } = useQuery({
+    queryKey: ['agenda', diaAtivo, estudioIdAluno],
+    enabled: !!aluno?.id && !!estudioIdAluno,
     queryFn: async () => {
-      const diaSelecionado = proximosDias.find(d => d.dataIso === diaAtivo);
-      const diaCurto = diaSelecionado.diaBanco.split('-')[0]; 
+      const diaSelecionado = proximosDias.find((d) => d.dataIso === diaAtivo);
+      // FIX: guarda contra diaSelecionado indefinido em vez de estourar TypeError
+      if (!diaSelecionado) return [];
+      const diaCurto = diaSelecionado.diaBanco.split('-')[0];
       const { data, error } = await supabase
         .from('agenda')
         .select(`*, professores (nome), presencas (aluno_id), modalidades(area)`)
+        .eq('estudio_id', estudioIdAluno) // FIX: isolamento de tenant
         .or(`dia_semana.ilike.*${diaCurto}*,data_especifica.eq.${diaSelecionado.dataIso}`)
         .order('horario', { ascending: true });
       if (error) throw error;
       return data || [];
-    }
+    },
   });
 
-  // FIX: busca feriados dos próximos 7 dias para bloquear a listagem de aulas
   const { data: feriadosDaSemana } = useQuery({
-    queryKey: ['feriados-semana'],
+    queryKey: ['feriados-semana', estudioIdAluno],
+    enabled: !!estudioIdAluno,
     queryFn: async () => {
       const hoje = proximosDias[0].dataIso;
       const em7dias = proximosDias[proximosDias.length - 1].dataIso;
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('feriados')
         .select('data, descricao')
+        .eq('estudio_id', estudioIdAluno) // FIX: isolamento de tenant
         .eq('bloqueia_agenda', true)
         .gte('data', hoje)
         .lte('data', em7dias);
+      if (error) throw error;
       return data || [];
-    }
+    },
   });
 
   const { data: isProfessor } = useQuery({
@@ -149,35 +175,44 @@ const nomeEstudio = estudio?.nome;
     queryFn: async () => {
       const { data } = await supabase.from('professores').select('id').eq('auth_id', aluno.auth_id).maybeSingle();
       return !!data;
-    }
+    },
   });
 
   const handleAvatarUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // FIX: valida tipo e tamanho ANTES de subir, com mensagem específica
+    if (!AVATAR_TIPOS_ACEITOS.includes(file.type)) {
+      showToast.error('Formato inválido. Envie uma imagem JPG, PNG ou WebP.');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      showToast.error('Imagem muito grande. O limite é 5MB.');
+      event.target.value = '';
+      return;
+    }
+
     try {
       setUploadingAvatar(true);
-      const file = event.target.files[0];
-      if (!file) return;
-      const fileExt = file.name.split('.').pop();
+      // FIX: extensão com fallback seguro, sem depender de file.name ter '.'
+      const partes = file.name.split('.');
+      const fileExt = partes.length > 1 ? partes.pop().toLowerCase() : 'jpg';
       const fileName = `${aluno.id}-${Date.now()}.${fileExt}`;
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, file);
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file);
       if (uploadError) throw uploadError;
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(fileName);
-      const { error: updateError } = await supabase
-        .from('alunos')
-        .update({ avatar_url: publicUrl })
-        .eq('id', aluno.id);
+      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName);
+      const { error: updateError } = await supabase.from('alunos').update({ avatar_url: publicUrl }).eq('id', aluno.id);
       if (updateError) throw updateError;
       await queryClient.invalidateQueries(['meu-perfil']);
-      showToast.success("Foto de perfil atualizada!");
+      showToast.success('Foto de perfil atualizada!');
     } catch (error) {
-      console.error("Erro ao fazer upload da imagem:", error);
-      showToast.error("Erro ao enviar a imagem. Verifique se ela é muito grande.");
+      console.error('Erro ao fazer upload da imagem:', error);
+      showToast.error(error.message || 'Erro ao enviar a imagem.');
     } finally {
       setUploadingAvatar(false);
+      event.target.value = '';
     }
   };
 
@@ -193,14 +228,22 @@ const nomeEstudio = estudio?.nome;
       if (error) throw error;
       await queryClient.invalidateQueries(['meu-perfil']);
       setModoEdicao(false);
-      showToast.success("Perfil atualizado com sucesso!");
+      showToast.success('Perfil atualizado com sucesso!');
     } catch (error) {
-      showToast.error("Erro ao atualizar os dados.");
+      // FIX: loga o erro real e repassa a mensagem específica quando existir
+      console.error('Erro ao atualizar perfil:', error);
+      showToast.error(error.message || 'Erro ao atualizar os dados.');
     } finally {
       setSalvandoPerfil(false);
     }
   };
 
+  // NOTA DE SEGURANÇA: p_aluno_id é enviado pelo client. A RPC `agendar_aula`
+  // no Postgres PRECISA validar internamente que p_aluno_id corresponde ao
+  // auth.uid() da sessão (ex.: comparando com `select id from alunos where
+  // auth_id = auth.uid()`), caso contrário existe uma janela de IDOR onde
+  // um usuário pode agendar/cancelar aulas em nome de outro aluno chamando
+  // a RPC diretamente. Isso não pode ser corrigido apenas no front-end.
   const handleAgendar = async (agendaId) => {
     setProcessandoId(agendaId);
     try {
@@ -208,7 +251,7 @@ const nomeEstudio = estudio?.nome;
       if (error) throw error;
       await queryClient.invalidateQueries(['agenda', diaAtivo]);
       await queryClient.invalidateQueries(['presencas-mes']);
-      showToast.success("Vaga garantida!");
+      showToast.success('Vaga garantida!');
     } catch (error) {
       showToast.error(`Ops! Recusado: ${error.message || error.details || 'Erro desconhecido'}`);
     } finally {
@@ -223,16 +266,32 @@ const nomeEstudio = estudio?.nome;
       if (error) throw error;
       await queryClient.invalidateQueries(['agenda', diaAtivo]);
       await queryClient.invalidateQueries(['presencas-mes']);
-      showToast.success("Agendamento cancelado.");
+      showToast.success('Agendamento cancelado.');
     } catch (error) {
-      showToast.error("Erro ao cancelar o agendamento.");
+      // FIX: idem — mostra a mensagem real em vez de genérica
+      console.error('Erro ao cancelar agendamento:', error);
+      showToast.error(error.message || 'Erro ao cancelar o agendamento.');
     } finally {
       setProcessandoId(null);
     }
   };
 
-  const doLogout = async () => { await supabase.auth.signOut(); navigate('/'); };
-  const openWhatsApp = (msg) => window.open(`https://wa.me/5551994424348?text=${encodeURIComponent(msg)}`, '_blank');
+  const doLogout = async () => {
+    await supabase.auth.signOut();
+    navigate('/');
+  };
+
+  // FIX: número de suporte vem da configuração do estúdio (multi-tenant),
+  // não mais hardcoded — cada estúdio direciona para o próprio WhatsApp.
+  const openWhatsApp = (msg) => {
+    const numero = estudio?.telefone_suporte?.replace(/\D/g, '');
+    if (!numero) {
+      showToast.error('Número de suporte não configurado para este estúdio.');
+      return;
+    }
+    window.open(`https://wa.me/55${numero}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
   const getInitials = (name) => {
     if (!name) return 'A';
     const parts = name.split(' ');
@@ -240,40 +299,65 @@ const nomeEstudio = estudio?.nome;
     return parts[0].substring(0, 2).toUpperCase();
   };
   const formatarData = (dataStr) => {
-    if (!dataStr) return "--/--/----";
+    if (!dataStr) return '--/--/----';
     const [ano, mes, dia] = dataStr.split('-');
     return `${dia}/${mes}/${ano}`;
   };
-  const formatarMoeda = (valor) => Number(valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  const formatarHorario = (horaStr) => horaStr ? horaStr.substring(0, 5) : "--:--";
-  const getStatusTexto = (status, dataVencimento) => status === "pago" ? "Pago" : (dataVencimento && new Date(dataVencimento) < new Date() ? "Atrasado" : "Pendente");
+  const formatarMoeda = (valor) => Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatarHorario = (horaStr) => (horaStr ? horaStr.substring(0, 5) : '--:--');
+  const getStatusTexto = (status, dataVencimento) =>
+    status === 'pago' ? 'Pago' : dataVencimento && new Date(dataVencimento) < new Date() ? 'Atrasado' : 'Pendente';
 
-  if (loadingAluno) return <div className="h-screen w-screen flex items-center justify-center bg-[#FDF8F5]"><RefreshCw className="animate-spin text-orange-600" size={48} /></div>;
-  if (erroAluno || !aluno) return <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#FDF8F5]"><p className="text-gray-600 mb-4">Erro ao carregar dados do aluno.</p><button onClick={doLogout} className="btn btn-primary">Voltar para o Início</button></div>;
+  if (loadingAluno) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#FDF8F5]">
+        <RefreshCw className="animate-spin text-orange-600" size={48} />
+      </div>
+    );
+  }
+  if (erroAluno || !aluno) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#FDF8F5]">
+        <p className="text-gray-600 mb-4">Erro ao carregar dados do aluno.</p>
+        <button onClick={doLogout} className="btn btn-primary">Voltar para o Início</button>
+      </div>
+    );
+  }
 
   const regrasPlano = aluno.planos?.regras_acesso || [];
 
+  // FIX: pré-computa o consumo por área uma única vez (Map), em vez de
+  // rodar presencasMes.filter(...) de novo para cada aula renderizada.
+  const consumoPorArea = useMemo(() => {
+    const mapa = new Map();
+    (presencasMes || []).forEach((p) => {
+      const area = p.agenda?.modalidades?.area;
+      if (!area) return;
+      mapa.set(area, (mapa.get(area) || 0) + 1);
+    });
+    return mapa;
+  }, [presencasMes]);
+
   let aulasPermitidas = [];
   if (aulasDoDia) {
-    aulasPermitidas = aulasDoDia.filter(aula => {
-      const jaAgendado = aula.presencas?.some(p => p.aluno_id === aluno.id);
-      if (jaAgendado) return true; 
+    aulasPermitidas = aulasDoDia.filter((aula) => {
+      const jaAgendado = aula.presencas?.some((p) => p.aluno_id === aluno.id);
+      if (jaAgendado) return true;
       if (!aluno.planos || regrasPlano.length === 0) return false;
       const aulaArea = aula.modalidades?.area;
-      return regrasPlano.some(r => r.modalidade === aulaArea);
+      return regrasPlano.some((r) => r.modalidade === aulaArea);
     });
   }
 
-  // FIX: verifica se o dia selecionado é feriado
-  const feriadoDoDiaAtivo = feriadosDaSemana?.find(f => f.data === diaAtivo);
+  const feriadoDoDiaAtivo = feriadosDaSemana?.find((f) => f.data === diaAtivo);
 
   return (
     <div id="page-dashboard">
       <aside className="sidebar">
         <div className="sidebar-logo">
-      <div className="logo-mark">{nomeEstudio?.charAt(0) ?? 'E'}</div>
-     <span className="logo-name">{nomeEstudio?.toUpperCase() ?? ''}</span>
-   </div>
+          <div className="logo-mark">{nomeEstudio?.charAt(0) ?? 'E'}</div>
+          <span className="logo-name">{nomeEstudio?.toUpperCase() ?? ''}</span>
+        </div>
         <div className="user-card">
           <div className="avatar overflow-hidden">
             {aluno.avatar_url ? (
@@ -283,28 +367,48 @@ const nomeEstudio = estudio?.nome;
             )}
           </div>
           <div>
-            <div className="user-card-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}>{aluno.nome_completo}</div>
+            <div
+              className="user-card-name"
+              style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}
+            >
+              {aluno.nome_completo}
+            </div>
             <div className="user-card-plan">{aluno.planos ? aluno.planos.nome : 'Sem plano ativo'}</div>
           </div>
         </div>
         <div className="nav-section">Menu</div>
-        <button className={`nav-item ${abaAtiva === 'schedule' ? 'active' : ''}`} onClick={() => setAbaAtiva('schedule')}><span className="nav-icon">📅</span> Agendar Aulas</button>
-        <button className={`nav-item ${abaAtiva === 'profile' ? 'active' : ''}`} onClick={() => setAbaAtiva('profile')}><span className="nav-icon">👤</span> Meu Perfil</button>
-        <button className={`nav-item ${abaAtiva === 'payments' ? 'active' : ''}`} onClick={() => setAbaAtiva('payments')}><span className="nav-icon">💳</span> Mensalidades</button>
+        <button className={`nav-item ${abaAtiva === 'schedule' ? 'active' : ''}`} onClick={() => setAbaAtiva('schedule')}>
+          <span className="nav-icon">📅</span> Agendar Aulas
+        </button>
+        <button className={`nav-item ${abaAtiva === 'profile' ? 'active' : ''}`} onClick={() => setAbaAtiva('profile')}>
+          <span className="nav-icon">👤</span> Meu Perfil
+        </button>
+        <button className={`nav-item ${abaAtiva === 'payments' ? 'active' : ''}`} onClick={() => setAbaAtiva('payments')}>
+          <span className="nav-icon">💳</span> Mensalidades
+        </button>
         {isProfessor && (
-          <button className="nav-item" onClick={() => navigate('/agenda')} 
+          <button
+            className="nav-item"
+            onClick={() => navigate('/agenda')}
             style={{ marginTop: '20px', backgroundColor: '#EFF6FF', color: '#2563EB', fontWeight: 'bold' }}
           >
             <span className="nav-icon"><RefreshCw size={16} /></span> Visão Professor
           </button>
         )}
-        <div className="sidebar-footer"><button className="nav-item" onClick={doLogout} style={{ color: 'var(--err)' }}><span className="nav-icon">↩</span> Sair</button></div>
+        <div className="sidebar-footer">
+          <button className="nav-item" onClick={doLogout} style={{ color: 'var(--err)' }}>
+            <span className="nav-icon">↩</span> Sair
+          </button>
+        </div>
       </aside>
       <div className="main-content">
         {abaAtiva === 'schedule' && (
           <div>
             <div className="main-header">
-              <div><div className="main-header-title">Agendar Aulas</div><div className="main-header-sub">Escolha o dia e reserve sua vaga</div></div>
+              <div>
+                <div className="main-header-title">Agendar Aulas</div>
+                <div className="main-header-sub">Escolha o dia e reserve sua vaga</div>
+              </div>
             </div>
             <div className="main-body">
               {aluno.planos && regrasPlano.length > 0 && (
@@ -315,37 +419,43 @@ const nomeEstudio = estudio?.nome;
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {regrasPlano.map((regra, idx) => {
-                       const usosDaRegra = presencasMes?.filter(p => {
-                          const pArea = p.agenda?.modalidades?.area;
-                          return regra.modalidade === pArea;
-                       }).length || 0;
-                       const limit = regra.limite;
-                       const pct = limit === 999 ? 0 : Math.min((usosDaRegra / limit) * 100, 100);
-                       return (
-                         <div key={idx} className="bg-gray-50 rounded-2xl p-4 border border-gray-100">
-                            <div className="flex justify-between items-end mb-2">
-                              <div>
-                                <p className="font-bold text-gray-700 text-sm">Área: {regra.modalidade}</p>
-                                <p className="text-xs text-gray-400 font-medium mt-0.5">
-                                  Usado: <span className="text-primary font-bold text-sm">{usosDaRegra}</span> / {limit === 999 ? 'Ilimitado' : limit}
-                                </p>
-                              </div>
-                              {limit !== 999 && <span className="text-[10px] font-bold text-gray-400">{Math.floor(pct)}%</span>}
+                      const usosDaRegra = consumoPorArea.get(regra.modalidade) || 0;
+                      const limit = regra.limite;
+                      const pct = limit === 999 ? 0 : Math.min((usosDaRegra / limit) * 100, 100);
+                      return (
+                        <div key={idx} className="bg-gray-50 rounded-2xl p-4 border border-gray-100">
+                          <div className="flex justify-between items-end mb-2">
+                            <div>
+                              <p className="font-bold text-gray-700 text-sm">Área: {regra.modalidade}</p>
+                              <p className="text-xs text-gray-400 font-medium mt-0.5">
+                                Usado: <span className="text-primary font-bold text-sm">{usosDaRegra}</span> /{' '}
+                                {limit === 999 ? 'Ilimitado' : limit}
+                              </p>
                             </div>
-                            {limit !== 999 && (
-                              <div className="bg-gray-200 h-1.5 rounded-full overflow-hidden">
-                                <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${pct}%`, backgroundColor: pct >= 100 ? 'var(--err)' : 'var(--pri)' }}></div>
-                              </div>
-                            )}
-                         </div>
-                       )
+                            {limit !== 999 && <span className="text-[10px] font-bold text-gray-400">{Math.floor(pct)}%</span>}
+                          </div>
+                          {limit !== 999 && (
+                            <div className="bg-gray-200 h-1.5 rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all duration-700 ease-out"
+                                style={{ width: `${pct}%`, backgroundColor: pct >= 100 ? 'var(--err)' : 'var(--pri)' }}
+                              ></div>
+                            </div>
+                          )}
+                        </div>
+                      );
                     })}
                   </div>
                 </div>
               )}
               <div className="day-tabs">
-                {proximosDias.map(d => (
-                  <button key={d.dataIso} className={`day-tab ${diaAtivo === d.dataIso ? 'active' : ''}`} onClick={() => setDiaAtivo(d.dataIso)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', padding: '8px 16px' }}>
+                {proximosDias.map((d) => (
+                  <button
+                    key={d.dataIso}
+                    className={`day-tab ${diaAtivo === d.dataIso ? 'active' : ''}`}
+                    onClick={() => setDiaAtivo(d.dataIso)}
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', padding: '8px 16px' }}
+                  >
                     <span style={{ fontSize: '13px' }}>{d.diaSemana}</span>
                     <span style={{ fontSize: '10px', opacity: 0.8 }}>{d.diaMes}</span>
                   </button>
@@ -353,14 +463,19 @@ const nomeEstudio = estudio?.nome;
               </div>
               <div id="class-list">
                 {loadingAulas ? (
-                   <div className="flex justify-center p-8"><RefreshCw className="animate-spin text-gray-400" /></div>
+                  <div className="flex justify-center p-8"><RefreshCw className="animate-spin text-gray-400" /></div>
+                ) : erroAulas ? (
+                  <div className="text-center py-14 bg-white rounded-3xl border border-gray-100 shadow-sm">
+                    <AlertCircle className="mx-auto text-red-300 mb-3" size={40} />
+                    <p className="text-gray-800 font-bold text-lg mb-1">Não foi possível carregar as aulas</p>
+                    <p className="text-gray-500 text-sm">Tente novamente em instantes.</p>
+                  </div>
                 ) : !aluno.planos ? (
-                   <div className="text-center py-14 bg-white rounded-3xl border border-gray-100 shadow-sm">
-                     <AlertCircle className="mx-auto text-gray-300 mb-3" size={40} />
-                     <p className="text-gray-800 font-bold text-lg mb-1">Sem plano ativo</p>
-                     <p className="text-gray-500 text-sm">Você precisa ter um plano para visualizar e agendar aulas.</p>
-                   </div>
-                // FIX: se o dia for feriado, exibe aviso e não mostra aulas (nem conta no limite)
+                  <div className="text-center py-14 bg-white rounded-3xl border border-gray-100 shadow-sm">
+                    <AlertCircle className="mx-auto text-gray-300 mb-3" size={40} />
+                    <p className="text-gray-800 font-bold text-lg mb-1">Sem plano ativo</p>
+                    <p className="text-gray-500 text-sm">Você precisa ter um plano para visualizar e agendar aulas.</p>
+                  </div>
                 ) : feriadoDoDiaAtivo ? (
                   <div className="text-center py-14 bg-white rounded-3xl border border-gray-100 shadow-sm">
                     <span style={{ fontSize: '40px' }}>⛔</span>
@@ -372,25 +487,20 @@ const nomeEstudio = estudio?.nome;
                     <p className="text-gray-500 font-medium">Nenhuma aula disponível para as áreas do seu plano neste dia.</p>
                   </div>
                 ) : (
-                  aulasPermitidas.map(aula => {
-                    const jaAgendado = aula.presencas?.some(p => p.aluno_id === aluno.id);
+                  aulasPermitidas.map((aula) => {
+                    const jaAgendado = aula.presencas?.some((p) => p.aluno_id === aluno.id);
                     const vagasRestantes = aula.capacidade - (aula.vagas_ocupadas || 0);
                     const lotado = vagasRestantes <= 0;
                     const estaProcessando = processandoId === aula.id;
                     const aulaArea = aula.modalidades?.area;
-                    const regraDestaAula = regrasPlano.find(r => r.modalidade === aulaArea);
-                    let usosDestaAula = 0;
-                    if (regraDestaAula) {
-                       usosDestaAula = presencasMes?.filter(p => p.agenda?.modalidades?.area === aulaArea).length || 0;
-                    }
+                    const regraDestaAula = regrasPlano.find((r) => r.modalidade === aulaArea);
+                    const usosDestaAula = regraDestaAula ? consumoPorArea.get(aulaArea) || 0 : 0;
                     const limiteAtingido = regraDestaAula && regraDestaAula.limite !== 999 && usosDestaAula >= regraDestaAula.limite;
                     return (
                       <div key={aula.id} className={`class-card anim-fade-up ${jaAgendado ? 'booked' : ''}`}>
                         <div className="class-time-block">
                           <div className="class-time">{formatarHorario(aula.horario)}</div>
-                          <div className={`class-space ${aulaArea === 'Dança' ? 'danca' : 'funcional'}`}>
-                            {aulaArea}
-                          </div>
+                          <div className={`class-space ${aulaArea === 'Dança' ? 'danca' : 'funcional'}`}>{aulaArea}</div>
                         </div>
                         <div className="class-info">
                           <div className="class-name">{aula.atividade}</div>
@@ -400,7 +510,13 @@ const nomeEstudio = estudio?.nome;
                               {aula.vagas_ocupadas || 0}/{aula.capacidade} vagas ocupadas
                             </span>
                             <div className="capacity-bar-track">
-                              <div className="capacity-bar-fill" style={{ width: `${((aula.vagas_ocupadas || 0) / aula.capacidade) * 100}%`, background: jaAgendado ? 'var(--ok)' : (lotado ? 'var(--err)' : 'var(--pri)') }}></div>
+                              <div
+                                className="capacity-bar-fill"
+                                style={{
+                                  width: `${((aula.vagas_ocupadas || 0) / aula.capacidade) * 100}%`,
+                                  background: jaAgendado ? 'var(--ok)' : lotado ? 'var(--err)' : 'var(--pri)',
+                                }}
+                              ></div>
                             </div>
                           </div>
                         </div>
@@ -410,15 +526,21 @@ const nomeEstudio = estudio?.nome;
                               <button onClick={() => handleCancelar(aula.id)} disabled={estaProcessando} className="btn-book cancel">
                                 {estaProcessando ? <RefreshCw className="animate-spin" size={16} /> : 'Cancelar'}
                               </button>
-                              <div className="booked-check flex items-center gap-1 mt-2 text-green-600"><CheckCircle2 size={14} /> Agendado</div>
+                              <div className="booked-check flex items-center gap-1 mt-2 text-green-600">
+                                <CheckCircle2 size={14} /> Agendado
+                              </div>
                             </>
                           ) : limiteAtingido ? (
                             <div className="text-[11px] font-bold text-red-400 text-center uppercase tracking-wider flex flex-col items-center gap-1">
-                              <AlertCircle size={16}/> Limite Atingido
+                              <AlertCircle size={16} /> Limite Atingido
                             </div>
                           ) : (
-                            <button onClick={() => handleAgendar(aula.id)} disabled={lotado || estaProcessando} className={`btn-book ${lotado ? 'disabled' : 'reserve'}`}>
-                              {estaProcessando ? <RefreshCw className="animate-spin text-white" size={16} /> : (lotado ? 'Esgotado' : 'Agendar')}
+                            <button
+                              onClick={() => handleAgendar(aula.id)}
+                              disabled={lotado || estaProcessando}
+                              className={`btn-book ${lotado ? 'disabled' : 'reserve'}`}
+                            >
+                              {estaProcessando ? <RefreshCw className="animate-spin text-white" size={16} /> : lotado ? 'Esgotado' : 'Agendar'}
                             </button>
                           )}
                         </div>
@@ -451,7 +573,7 @@ const nomeEstudio = estudio?.nome;
             <div className="main-body">
               <div className="profile-top">
                 <div className="profile-id-card card">
-                  <div 
+                  <div
                     className="avatar lg relative group cursor-pointer overflow-hidden border-2 border-transparent hover:border-orange-300 transition-all"
                     onClick={() => fileInputRef.current?.click()}
                     title="Clique para alterar a foto de perfil"
@@ -469,7 +591,13 @@ const nomeEstudio = estudio?.nome;
                       <Camera size={24} className="text-white" />
                     </div>
                   </div>
-                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleAvatarUpload} />
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleAvatarUpload}
+                  />
                   <div>
                     <div className="profile-name">{aluno.nome_completo}</div>
                     <div className="profile-since">Aluno {nomeEstudio}</div>
@@ -478,29 +606,71 @@ const nomeEstudio = estudio?.nome;
                 <div className="profile-plan-card card">
                   <div className="profile-plan-label">Plano Ativo</div>
                   <div className="profile-plan-name">{aluno.planos ? aluno.planos.nome : 'Nenhum'}</div>
-                  <div className="profile-plan-desc">{aluno.planos ? `Valor: ${formatarMoeda(aluno.planos.preco)}` : 'Você ainda não possui um plano vinculado.'}</div>
+                  <div className="profile-plan-desc">
+                    {aluno.planos ? `Valor: ${formatarMoeda(aluno.planos.preco)}` : 'Você ainda não possui um plano vinculado.'}
+                  </div>
                 </div>
               </div>
               <div className="card" style={{ marginBottom: '24px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--muted)', marginBottom: '24px' }}>Dados Pessoais</div>
+                <div
+                  style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--muted)', marginBottom: '24px' }}
+                >
+                  Dados Pessoais
+                </div>
                 <div className="data-grid">
-                  <div className="data-field"><label>E-mail (Acesso)</label><div className="data-value opacity-60 cursor-not-allowed">{aluno.email}</div></div>
+                  <div className="data-field">
+                    <label>E-mail (Acesso)</label>
+                    <div className="data-value opacity-60 cursor-not-allowed">{aluno.email}</div>
+                  </div>
                   <div className="data-field">
                     <label>Telefone</label>
-                    {modoEdicao ? <input className="inp py-2 mt-1" value={formEdit.telefone} onChange={e => setFormEdit({...formEdit, telefone: e.target.value})} placeholder="(00) 00000-0000" /> : <div className="data-value">{aluno.telefone || 'Não informado'}</div>}
+                    {modoEdicao ? (
+                      <input
+                        className="inp py-2 mt-1"
+                        value={formEdit.telefone}
+                        onChange={(e) => setFormEdit({ ...formEdit, telefone: e.target.value })}
+                        placeholder="(00) 00000-0000"
+                      />
+                    ) : (
+                      <div className="data-value">{aluno.telefone || 'Não informado'}</div>
+                    )}
                   </div>
                   <div className="data-field">
                     <label>CPF</label>
-                    {modoEdicao ? <input className="inp py-2 mt-1" value={formEdit.cpf} onChange={e => setFormEdit({...formEdit, cpf: e.target.value})} placeholder="000.000.000-00" /> : <div className="data-value">{aluno.cpf || 'Não informado'}</div>}
+                    {modoEdicao ? (
+                      <input
+                        className="inp py-2 mt-1"
+                        value={formEdit.cpf}
+                        onChange={(e) => setFormEdit({ ...formEdit, cpf: e.target.value })}
+                        placeholder="000.000.000-00"
+                      />
+                    ) : (
+                      <div className="data-value">{aluno.cpf || 'Não informado'}</div>
+                    )}
                   </div>
                   <div className="data-field">
                     <label>Data de Nascimento</label>
-                    {modoEdicao ? <input className="inp py-2 mt-1" type="date" value={formEdit.data_nascimento} onChange={e => setFormEdit({...formEdit, data_nascimento: e.target.value})} /> : <div className="data-value">{formatarData(aluno.data_nascimento) || 'Não informado'}</div>}
+                    {modoEdicao ? (
+                      <input
+                        className="inp py-2 mt-1"
+                        type="date"
+                        value={formEdit.data_nascimento}
+                        onChange={(e) => setFormEdit({ ...formEdit, data_nascimento: e.target.value })}
+                      />
+                    ) : (
+                      <div className="data-value">{formatarData(aluno.data_nascimento) || 'Não informado'}</div>
+                    )}
                   </div>
                 </div>
               </div>
               <div className="wa-btn-row">
-                <button className="btn btn-wa btn-full" onClick={() => openWhatsApp(`Olá, ${nomeEstudio}! Sou o aluno(a) ${aluno.nome_completo} e preciso de ajuda.`)} style={{ padding: '15px', fontSize: '15px' }}>💬 Suporte via WhatsApp</button>
+                <button
+                  className="btn btn-wa btn-full"
+                  onClick={() => openWhatsApp(`Olá, ${nomeEstudio}! Sou o aluno(a) ${aluno.nome_completo} e preciso de ajuda.`)}
+                  style={{ padding: '15px', fontSize: '15px' }}
+                >
+                  💬 Suporte via WhatsApp
+                </button>
               </div>
             </div>
           </div>
@@ -508,7 +678,10 @@ const nomeEstudio = estudio?.nome;
         {abaAtiva === 'payments' && (
           <div>
             <div className="main-header">
-              <div><div className="main-header-title">Mensalidades</div><div className="main-header-sub">Histórico e status dos seus pagamentos</div></div>
+              <div>
+                <div className="main-header-title">Mensalidades</div>
+                <div className="main-header-sub">Histórico e status dos seus pagamentos</div>
+              </div>
             </div>
             <div className="main-body">
               <div className="card">
@@ -521,11 +694,11 @@ const nomeEstudio = estudio?.nome;
                     <table className="pay-table">
                       <thead><tr><th>Vencimento</th><th>Valor</th><th>Status</th></tr></thead>
                       <tbody>
-                        {mensalidades.map(m => {
+                        {mensalidades.map((m) => {
                           const statusTxt = getStatusTexto(m.status, m.data_vencimento);
-                          let badgeClass = "badge-warn";
-                          if (statusTxt === "Pago") badgeClass = "badge-ok";
-                          if (statusTxt === "Atrasado") badgeClass = "badge-err";
+                          let badgeClass = 'badge-warn';
+                          if (statusTxt === 'Pago') badgeClass = 'badge-ok';
+                          if (statusTxt === 'Atrasado') badgeClass = 'badge-err';
                           return (
                             <tr key={m.id}>
                               <td style={{ fontWeight: 600 }}>{formatarData(m.data_vencimento)}</td>

@@ -3,10 +3,21 @@
 //
 // Componentes de loading state consistentes com o design system.
 // Usa animate-pulse (Tailwind) + tokens do Midnight Indigo.
+//
+// Acessibilidade: os skeletons individuais são aria-hidden (não têm conteúdo
+// semântico). Para anunciar o estado de carregamento a leitores de tela,
+// envolva a região com <SkeletonRegion> ou aplique role="status"/aria-live
+// no container pai da tela.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React from 'react';
 import { cn } from '../../lib/cn';
+
+const AVATAR_SIZES = {
+  sm: 'h-8 w-8',
+  md: 'h-10 w-10',
+  lg: 'h-12 w-12',
+};
 
 /* ── Base Skeleton ───────────────────────────────────────────────────────────── */
 export function Skeleton({ className, ...rest }) {
@@ -19,13 +30,23 @@ export function Skeleton({ className, ...rest }) {
   );
 }
 
+/* ── Região com anúncio de loading para leitores de tela ─────────────────────── */
+export function SkeletonRegion({ label = 'Carregando...', children, className }) {
+  return (
+    <div className={className} role="status" aria-live="polite" aria-busy="true">
+      <span className="sr-only">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 /* ── Linha de texto ─────────────────────────────────────────────────────────── */
 export function SkeletonText({ lines = 3, className }) {
   return (
     <div className={cn('space-y-2', className)} aria-hidden="true">
       {Array.from({ length: lines }).map((_, i) => (
         <Skeleton
-          key={i}
+          key={`skel-text-${i}`}
           className={cn('h-4', i === lines - 1 ? 'w-3/4' : 'w-full')}
         />
       ))}
@@ -55,7 +76,7 @@ export function SkeletonCard({ className }) {
   );
 }
 
-/* ── Row Skeleton (NOVO) ───────────────────────────────────────────────────── */
+/* ── Row Skeleton ─────────────────────────────────────────────────────────── */
 export function SkeletonRow({ className }) {
   return (
     <div
@@ -73,14 +94,9 @@ export function SkeletonRow({ className }) {
 
 /* ── Avatar Skeleton ────────────────────────────────────────────────────────── */
 export function SkeletonAvatar({ size = 'md', className }) {
-  const sizes = {
-    sm: 'h-8 w-8',
-    md: 'h-10 w-10',
-    lg: 'h-12 w-12',
-  };
   return (
     <Skeleton
-      className={cn('rounded-full shrink-0', sizes[size] ?? sizes.md, className)}
+      className={cn('rounded-full shrink-0', AVATAR_SIZES[size] ?? AVATAR_SIZES.md, className)}
     />
   );
 }
@@ -90,5 +106,6 @@ Skeleton.Text = SkeletonText;
 Skeleton.Card = SkeletonCard;
 Skeleton.Row = SkeletonRow;
 Skeleton.Avatar = SkeletonAvatar;
+Skeleton.Region = SkeletonRegion;
 
 export default Skeleton;

@@ -5,7 +5,10 @@ import { RefreshCw, Menu } from 'lucide-react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 
-import { useAuth } from './hooks/useAuth';
+// FIX (crítico): AuthProvider era usado no JSX mas nunca era importado
+// (ReferenceError: AuthProvider is not defined — a aplicação não chegava
+// a renderizar nada). Agora importado junto com useAuth.
+import { useAuth, AuthProvider } from './hooks/useAuth';
 import { useSuperAdmin } from './hooks/useSuperAdmin';
 import { useEstudio } from './hooks/useEstudio';
 import { rotaPorPerfil } from './lib/navigation';
@@ -162,107 +165,125 @@ const RotaCadastroEstudio = ({ sessao, perfil, loading }) => {
   return <Outlet />;
 };
 
-export default function App() {
+// FIX (crítico): toda a lógica que dependia de useAuth() foi extraída para
+// este componente interno, que é renderizado DENTRO de <AuthProvider> (via
+// AppShell abaixo). Antes, `App()` chamava useAuth() na própria raiz, antes
+// do AuthProvider existir na árvore — o que faz useAuth() lançar
+// "useAuth deve ser usado dentro de <AuthProvider>" e derrubar a aplicação
+// inteira no primeiro render.
+function AppRoutes() {
   const { sessao, perfil, loading, nomeUsuario, estudioId } = useAuth();
 
   if (loading) return <Spinner />;
 
   return (
+    <BrowserRouter>
+      <ToastProvider />
+      <Routes>
+
+        {/* Publicas */}
+        <Route path="/" element={
+          !sessao ? <Landing /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+        } />
+        <Route path="/login" element={
+          !sessao ? <Login /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+        } />
+        <Route path="/cadastro" element={
+          !sessao ? <Cadastro /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+        } />
+        <Route path="/redefinir-senha" element={<RedefinirSenha />} />
+
+        {/* Cadastro self-service — passo 2 (dados do estúdio) */}
+        <Route element={<RotaCadastroEstudio sessao={sessao} perfil={perfil} loading={loading} />}>
+          <Route path="/cadastro/estudio" element={<CadastroEstudio />} />
+        </Route>
+
+        {/* Super Admin — guard proprio, layout proprio, sem Sidebar de estudio */}
+        <Route element={<RotaSuperAdmin />}>
+          <Route path="/super" element={<SuperAdminLayout />}>
+            <Route index                element={<SuperAdminDashboard />} />
+            <Route path="estudios"      element={<SuperAdminEstudios />} />
+            <Route path="estudios/novo" element={<SuperAdminNovoEstudio />} />
+          </Route>
+        </Route>
+
+        {/* Aluno */}
+        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['aluno']} />}>
+          <Route path="/area-aluno" element={<AreaAluno />} />
+        </Route>
+
+        {/*
+          Admin + Professor
+          Nota: quando super_admin usa impersonation, perfil ainda e 'super_admin'.
+          O acesso ao dashboard e feito via navigate('/dashboard') no handleAcessar,
+          mas o RLS do servidor ja enxerga o estudio_id correto pelo override.
+          O guard allowedRoles nao bloqueia porque RotaPrivada recebe perfil='super_admin'
+          que nao esta na lista — para resolver isso, o super_admin em modo impersonation
+          acessa estas rotas como 'admin' efetivo. Duas opcoes:
+            A) Adicionar 'super_admin' nos allowedRoles de admin (abaixo, mais simples)
+            B) Criar um layout de impersonation separado (mais isolado)
+          Usamos a opcao A, que e a padrao para ferramentas de suporte.
+        */}
+        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'professor', 'super_admin']} />}>
+          <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
+            <Route path="/agenda"              element={<Agenda />} />
+            <Route path="/professor/alunos"    element={<ProfessorAlunos />} />
+            <Route path="/professor/comissoes" element={<ProfessorComissoes />} />
+          </Route>
+        </Route>
+
+        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'super_admin']} />}>
+          <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
+            <Route path="/dashboard"             element={<Dashboard />} />
+            <Route path="/leads"                 element={<Leads />} />
+            <Route path="/alunos"                element={<Alunos />} />
+            <Route path="/alunos/novo"           element={<NovoAluno />} />
+            <Route path="/alunos/:id"            element={<PerfilAluno />} />
+            <Route path="/professores"           element={<Professores />} />
+            <Route path="/financeiro"            element={<Financeiro />} />
+            <Route path="/despesas"              element={<Despesas />} />
+            <Route path="/resultado-financeiro"  element={<ResultadoFinanceiro />} />
+            <Route path="/planos"                element={<Planos />} />
+            <Route path="/modalidades"           element={<Modalidades />} />
+            <Route path="/presenca"              element={<Presenca />} />
+            <Route path="/comissoes"             element={<Comissoes />} />
+            <Route path="/aniversariantes"       element={<Aniversariantes />} />
+            <Route path="/configuracoes/feriados"element={<ConfiguracoesFeriados />} />
+            <Route path="/notificacoes"          element={<Notificacoes />} />
+            <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
+            <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
+          </Route>
+        </Route>
+
+        {/* 404 */}
+        <Route path="*" element={
+          <PaginaNaoEncontrada destino={destinoPosAuth(sessao, perfil)} />
+        } />
+
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default function App() {
+  return (
     <QueryClientProvider client={queryClient}>
       <ErrorBoundary>
         <ThemeProvider>
           {/*
-            ImpersonationProvider envolve o BrowserRouter para que
-            useImpersonation() funcione em qualquer componente da arvore,
-            incluindo o BannerImpersonation montado dentro do LayoutComSidebar.
+            ImpersonationProvider envolve o BrowserRouter (dentro de AppRoutes)
+            para que useImpersonation() funcione em qualquer componente da
+            arvore, incluindo o BannerImpersonation montado dentro do
+            LayoutComSidebar.
+
+            AuthProvider agora envolve AppRoutes, que é onde useAuth() é
+            efetivamente chamado — corrigindo o crash anterior.
           */}
-          <ImpersonationProvider>
-            <BrowserRouter>
-              <ToastProvider />
-              <Routes>
-
-                {/* Publicas */}
-                <Route path="/" element={
-                  !sessao ? <Landing /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
-                } />
-                <Route path="/login" element={
-                  !sessao ? <Login /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
-                } />
-                <Route path="/cadastro" element={
-                  !sessao ? <Cadastro /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
-                } />
-                <Route path="/redefinir-senha" element={<RedefinirSenha />} />
-
-                {/* Cadastro self-service — passo 2 (dados do estúdio) */}
-                <Route element={<RotaCadastroEstudio sessao={sessao} perfil={perfil} loading={loading} />}>
-                  <Route path="/cadastro/estudio" element={<CadastroEstudio />} />
-                </Route>
-
-                {/* Super Admin — guard proprio, layout proprio, sem Sidebar de estudio */}
-                <Route element={<RotaSuperAdmin />}>
-                  <Route path="/super" element={<SuperAdminLayout />}>
-                    <Route index                element={<SuperAdminDashboard />} />
-                    <Route path="estudios"      element={<SuperAdminEstudios />} />
-                    <Route path="estudios/novo" element={<SuperAdminNovoEstudio />} />
-                  </Route>
-                </Route>
-
-                {/* Aluno */}
-                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['aluno']} />}>
-                  <Route path="/area-aluno" element={<AreaAluno />} />
-                </Route>
-
-                {/*
-                  Admin + Professor
-                  Nota: quando super_admin usa impersonation, perfil ainda e 'super_admin'.
-                  O acesso ao dashboard e feito via navigate('/dashboard') no handleAcessar,
-                  mas o RLS do servidor ja enxerga o estudio_id correto pelo override.
-                  O guard allowedRoles nao bloqueia porque RotaPrivada recebe perfil='super_admin'
-                  que nao esta na lista — para resolver isso, o super_admin em modo impersonation
-                  acessa estas rotas como 'admin' efetivo. Duas opcoes:
-                    A) Adicionar 'super_admin' nos allowedRoles de admin (abaixo, mais simples)
-                    B) Criar um layout de impersonation separado (mais isolado)
-                  Usamos a opcao A, que e a padrao para ferramentas de suporte.
-                */}
-                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'professor', 'super_admin']} />}>
-                  <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
-                    <Route path="/agenda"              element={<Agenda />} />
-                    <Route path="/professor/alunos"    element={<ProfessorAlunos />} />
-                    <Route path="/professor/comissoes" element={<ProfessorComissoes />} />
-                  </Route>
-                </Route>
-
-                <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'super_admin']} />}>
-                  <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
-                    <Route path="/dashboard"             element={<Dashboard />} />
-                    <Route path="/leads"                 element={<Leads />} />
-                    <Route path="/alunos"                element={<Alunos />} />
-                    <Route path="/alunos/novo"           element={<NovoAluno />} />
-                    <Route path="/alunos/:id"            element={<PerfilAluno />} />
-                    <Route path="/professores"           element={<Professores />} />
-                    <Route path="/financeiro"            element={<Financeiro />} />
-                    <Route path="/despesas"              element={<Despesas />} />
-                    <Route path="/resultado-financeiro"  element={<ResultadoFinanceiro />} />
-                    <Route path="/planos"                element={<Planos />} />
-                    <Route path="/modalidades"           element={<Modalidades />} />
-                    <Route path="/presenca"              element={<Presenca />} />
-                    <Route path="/comissoes"             element={<Comissoes />} />
-                    <Route path="/aniversariantes"       element={<Aniversariantes />} />
-                    <Route path="/configuracoes/feriados"element={<ConfiguracoesFeriados />} />
-                    <Route path="/notificacoes"          element={<Notificacoes />} />
-                    <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
-                    <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
-                  </Route>
-                </Route>
-
-                {/* 404 */}
-                <Route path="*" element={
-                  <PaginaNaoEncontrada destino={destinoPosAuth(sessao, perfil)} />
-                } />
-
-              </Routes>
-            </BrowserRouter>
-          </ImpersonationProvider>
+          <AuthProvider>
+            <ImpersonationProvider>
+              <AppRoutes />
+            </ImpersonationProvider>
+          </AuthProvider>
         </ThemeProvider>
       </ErrorBoundary>
       {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}

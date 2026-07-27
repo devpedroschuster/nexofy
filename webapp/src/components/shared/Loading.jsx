@@ -1,3 +1,4 @@
+// src/components/shared/Loading.jsx
 import React from 'react';
 import { RefreshCw } from 'lucide-react';
 
@@ -5,15 +6,21 @@ export function Spinner({ size = 24, className = "text-primary" }) {
   return <RefreshCw className={`animate-spin ${className}`} size={size} />;
 }
 
-export function TableSkeleton() {
+export function TableSkeleton({ rows = 5, cols = 2 }) {
   return (
     <div className="w-full animate-pulse space-y-4 p-4">
-      {[1, 2, 3, 4, 5].map((i) => (
+      {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="flex gap-4">
           <div className="h-12 w-12 bg-gray-100 dark:bg-zinc-800 rounded-full transition-colors" />
           <div className="flex-1 space-y-2 py-1">
-            <div className="h-4 bg-gray-100 dark:bg-zinc-800 rounded w-1/4 transition-colors" />
-            <div className="h-4 bg-gray-100 dark:bg-zinc-800 rounded w-3/4 transition-colors" />
+            {Array.from({ length: cols }).map((_, j) => (
+              <div
+                key={j}
+                className={`h-4 bg-gray-100 dark:bg-zinc-800 rounded transition-colors ${
+                  j === 0 ? 'w-1/4' : 'w-3/4'
+                }`}
+              />
+            ))}
           </div>
         </div>
       ))}
@@ -37,12 +44,20 @@ export function CardSkeleton() {
 }
 
 export function ChartSkeleton() {
+  const heights = React.useMemo(
+    () => Array.from({ length: 7 }, () => Math.random() * 80 + 20),
+    []
+  );
   return (
     <div className="bg-white dark:bg-[#1A1A1A] p-8 rounded-[40px] border border-gray-100 dark:border-zinc-800 shadow-sm h-[400px] animate-pulse transition-colors">
       <div className="h-6 w-48 bg-gray-100 dark:bg-zinc-800 rounded-lg mb-8 transition-colors" />
       <div className="flex items-end gap-4 h-[300px] pb-4 border-b border-gray-50 dark:border-zinc-800/50 transition-colors">
-        {[1,2,3,4,5,6,7].map(i => (
-          <div key={i} className="flex-1 bg-gray-100 dark:bg-zinc-800 rounded-t-lg transition-colors" style={{ height: `${Math.random() * 80 + 20}%` }} />
+        {heights.map((h, i) => (
+          <div
+            key={i}
+            className="flex-1 bg-gray-100 dark:bg-zinc-800 rounded-t-lg transition-colors"
+            style={{ height: `${h}%` }}
+          />
         ))}
       </div>
     </div>

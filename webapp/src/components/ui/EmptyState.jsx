@@ -3,9 +3,17 @@
 //
 // Estado vazio consistente: ícone + título + descrição + ação opcional.
 // Tratado como convite à ação, não como erro.
+//
+// Props:
+//   icon        {ReactNode}  — ícone customizado (default: <SearchX />)
+//   title       {string}     — título (alias legado: `titulo`)
+//   description {string}     — descrição (alias legado: `mensagem`)
+//   action      {ReactNode}  — botão/CTA opcional
+//   className   {string}     — classes extras
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React from 'react';
+import PropTypes from 'prop-types';
 import { SearchX } from 'lucide-react';
 import { cn } from '../../lib/cn';
 
@@ -15,13 +23,13 @@ export default function EmptyState({
   description,
   action,
   className,
-  /* aliases para retrocompatibilidade */
+  /* aliases para retrocompatibilidade — remover após migração completa dos call-sites */
   titulo,
   mensagem,
 }) {
-  const _title       = title       ?? titulo;
+  const _title = title ?? titulo;
   const _description = description ?? mensagem;
-  const _icon        = icon ?? <SearchX size={24} />;
+  const _icon = icon ?? <SearchX size={24} />;
 
   return (
     <div
@@ -32,7 +40,6 @@ export default function EmptyState({
         className
       )}
     >
-      {/* Ícone em container colorido */}
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-soft text-primary">
         {_icon}
       </div>
@@ -49,11 +56,17 @@ export default function EmptyState({
         </p>
       )}
 
-      {action && (
-        <div className="mt-6">
-          {action}
-        </div>
-      )}
+      {action && <div className="mt-6">{action}</div>}
     </div>
   );
 }
+
+EmptyState.propTypes = {
+  icon: PropTypes.node,
+  title: PropTypes.string,
+  description: PropTypes.string,
+  action: PropTypes.node,
+  className: PropTypes.string,
+  titulo: PropTypes.string,    // legado
+  mensagem: PropTypes.string,  // legado
+};

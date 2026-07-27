@@ -2,35 +2,70 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { alunosService } from '../services/alunosService';
 import { showToast } from './shared/Toast';
+import { useAuth } from '../hooks/useAuth';
 import { Package, Calendar, DollarSign, Loader2 } from 'lucide-react';
 
 import Modal from './ui/Modal';
 import Button from './ui/Button';
 import Input, { Label } from './ui/Input';
 
+function traduzirErroRenovacao(error) {
+  const msg = error?.message || '';
+  const code = error?.code || '';
+  if (code === '23503' || msg.includes('foreign key')) {
+    return 'O plano selecionado não foi encontrado. Atualize a página e tente de novo.';
+  }
+  if (code === '42501' || msg.includes('permission denied')) {
+    return 'Você não tem permissão para renovar este plano.';
+  }
+  return 'Não foi possível renovar o plano. Verifique os dados e tente de novo.';
+}
+
+const INITIAL_FORM = {
+  plano_id: '',
+  data_inicio: new Date().toISOString().split('T')[0],
+  data_fim: '',
+  valor_pago: ''
+};
+
 export default function ModalRenovarPlano({ isOpen, onClose, alunoId, onSucesso }) {
+  const { estudioId } = useAuth();
   const [planos, setPlanos] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    plano_id: '',
-    data_inicio: new Date().toISOString().split('T')[0], 
-    data_fim: '',
-    valor_pago: ''
-  });
+  const [form, setForm] = useState(INITIAL_FORM);
 
   useEffect(() => {
-    if (isOpen && alunoId) {
-      supabase.from('planos').select('id, nome, preco, duracao_meses').order('preco').then(({ data }) => {
-        if (data) setPlanos(data);
-      });
+    if (isOpen && alunoId && estudioId) {
+      (async () => {
+        try {
+          const [{ data: planosData, error: errPlanos }, { data: alunoData, error: errAluno }] = await Promise.all([
+            supabase.from('planos')
+              .select('id, nome, preco, duracao_meses')
+              .eq('estudio_id', estudioId)
+              .order('preco'),
+            supabase.from('alunos')
+              .select('data_fim_plano')
+              .eq('id', alunoId)
+              .eq('estudio_id', estudioId)
+              .single(),
+          ]);
 
-      supabase.from('alunos').select('data_fim_plano').eq('id', alunoId).single().then(({ data }) => {
-        if (data && data.data_fim_plano) {
-          setForm(prev => ({ ...prev, data_inicio: data.data_fim_plano }));
+          if (errPlanos) throw errPlanos;
+          setPlanos(planosData ?? []);
+
+          if (!errAluno && alunoData?.data_fim_plano) {
+            setForm(prev => ({ ...prev, data_inicio: alunoData.data_fim_plano }));
+          }
+        } catch (error) {
+          console.error('[ModalRenovarPlano] Erro ao carregar dados:', error);
+          showToast.error('Não foi possível carregar os planos disponíveis.');
         }
-      });
+      })();
+    } else if (!isOpen) {
+      setForm(INITIAL_FORM);
+      setPlanos([]);
     }
-  }, [isOpen, alunoId]);
+  }, [isOpen, alunoId, estudioId]);
 
   const calcularDataFim = (dataInicioStr, meses) => {
     const data = new Date(dataInicioStr + 'T12:00:00');
@@ -41,7 +76,7 @@ export default function ModalRenovarPlano({ isOpen, onClose, alunoId, onSucesso 
   const handlePlanoChange = (e) => {
     const planoId = e.target.value;
     const planoSelecionado = planos.find(p => String(p.id) === String(planoId));
-    
+
     if (planoSelecionado) {
       setForm({
         ...form,
@@ -56,19 +91,30 @@ export default function ModalRenovarPlano({ isOpen, onClose, alunoId, onSucesso 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (form.data_fim < form.data_inicio) {
+      showToast.error('A data de vencimento não pode ser anterior à data de início.');
+      return;
+    }
+    const valor = Number(form.valor_pago);
+    if (!valor || valor <= 0) {
+      showToast.error('Informe um valor válido maior que zero.');
+      return;
+    }
+
     setLoading(true);
     try {
       await alunosService.renovarPlano(alunoId, {
         plano_id: form.plano_id,
         data_inicio: form.data_inicio,
         data_fim: form.data_fim,
-        valor_pago: form.valor_pago
+        valor_pago: valor
       });
       showToast.success("Plano renovado com sucesso!");
       onSucesso();
       onClose();
     } catch (error) {
-      showToast.error("Erro ao renovar plano: " + error.message);
+      showToast.error(traduzirErroRenovacao(error));
     } finally {
       setLoading(false);
     }
@@ -77,13 +123,13 @@ export default function ModalRenovarPlano({ isOpen, onClose, alunoId, onSucesso 
   return (
     <Modal aberto={isOpen} fechar={onClose} title="Renovar Plano do Aluno" size="md">
       <form onSubmit={handleSubmit} className="space-y-5 pt-2">
-        
+
         <div>
           <Label className="block mb-1.5">Selecionar Novo Plano</Label>
-          <Input 
-            as="select" 
+          <Input
+            as="select"
             leftIcon={<Package size={18} />}
-            value={form.plano_id} 
+            value={form.plano_id}
             onChange={handlePlanoChange}
             required
           >
@@ -97,8 +143,8 @@ export default function ModalRenovarPlano({ isOpen, onClose, alunoId, onSucesso 
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label className="block mb-1.5">Data de Início</Label>
-            <Input 
-              type="date" 
+            <Input
+              type="date"
               leftIcon={<Calendar size={18} />}
               value={form.data_inicio}
               onChange={e => {
@@ -117,11 +163,11 @@ export default function ModalRenovarPlano({ isOpen, onClose, alunoId, onSucesso 
           </div>
           <div>
             <Label className="block mb-1.5">Data de Vencimento</Label>
-            <Input 
-              type="date" 
+            <Input
+              type="date"
               leftIcon={<Calendar size={18} />}
               value={form.data_fim}
-              onChange={e => setForm({...form, data_fim: e.target.value})}
+              onChange={e => setForm({ ...form, data_fim: e.target.value })}
               required
             />
           </div>
@@ -129,31 +175,23 @@ export default function ModalRenovarPlano({ isOpen, onClose, alunoId, onSucesso 
 
         <div>
           <Label className="block mb-1.5">Valor Negociado (R$)</Label>
-          <Input 
-            type="number" 
-            step="0.01" 
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
             leftIcon={<DollarSign size={18} />}
             value={form.valor_pago}
-            onChange={e => setForm({...form, valor_pago: e.target.value})}
+            onChange={e => setForm({ ...form, valor_pago: e.target.value })}
             required
           />
         </div>
 
         <Modal.Footer>
-          <Button 
-            type="button" 
-            variant="ghost" 
-            onClick={onClose}
-            disabled={loading}
-          >
+          <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
             Cancelar
           </Button>
-          
-          <Button 
-            type="submit" 
-            variant="brand" 
-            loading={loading}
-          >
+
+          <Button type="submit" variant="brand" loading={loading}>
             {loading ? (
               <><Loader2 className="animate-spin" size={20} /> Processando...</>
             ) : (

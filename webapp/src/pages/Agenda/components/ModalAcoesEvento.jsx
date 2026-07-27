@@ -6,7 +6,9 @@ import { IconeEspaco } from '../../../lib/iconesEspaco';
 import Button from '../../../components/ui/Button';
 
 function DetalheAula({ evento, espacos = [] }) {
-  const d = evento.dadosOriginais;
+  const d = evento?.dadosOriginais;
+  if (!d) return null; // ✅ defesa em profundidade, não depende só do guard do pai
+
   const duracaoLabel = d.duracao_minutos
     ? d.duracao_minutos < 60
       ? `${d.duracao_minutos} min`
@@ -42,8 +44,9 @@ function DetalheAula({ evento, espacos = [] }) {
 export default function ModalAcoesEvento({
   evento, isAdmin, espacos = [], onAgendar, onChamada, onEditar, onEncerrar, onExcluir
 }) {
-  if (!evento) return null;
-  const corTema = PALETA_CORES.find(c => c.id === (evento.dadosOriginais.cor || 'laranja')) || PALETA_CORES[0];
+  if (!evento?.dadosOriginais) return null; // ✅ Bug #1: cobre evento e dadosOriginais ausentes
+  const d = evento.dadosOriginais;
+  const corTema = PALETA_CORES.find(c => c.id === (d.cor || 'laranja')) || PALETA_CORES[0];
 
   return (
     <div className="space-y-4 pt-2">
@@ -56,10 +59,10 @@ export default function ModalAcoesEvento({
           </span>
         </div>
         <p className="text-sm font-medium" style={{ color: corTema.text, opacity: 0.8 }}>
-          Prof: {evento.dadosOriginais.professores?.nome || 'Não definido'}
+          Prof: {d.professores?.nome || 'Não definido'}
         </p>
         <p className="text-sm font-medium" style={{ color: corTema.text, opacity: 0.7 }}>
-          Modalidade: {evento.dadosOriginais.modalidades?.nome || '—'}
+          Modalidade: {d.modalidades?.nome || '—'}
         </p>
       </div>
 
@@ -80,7 +83,7 @@ export default function ModalAcoesEvento({
             <Edit2 size={18} /> Editar Cadastro da Grade
           </Button>
           <div className="flex gap-2">
-            {evento.dadosOriginais.eh_recorrente && !evento.dadosOriginais.data_fim && (
+            {d.eh_recorrente && !d.data_fim && (
               <Button variant="ghost" className="flex-1 bg-warning-soft text-warning hover:bg-warning/20" onClick={() => onEncerrar(evento)}>
                 <Ban size={18} /> Cancelar Aula
               </Button>

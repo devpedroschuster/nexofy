@@ -10,10 +10,11 @@ import { showToast } from '../../../components/shared/Toast';
 // Classifica o motivo do bloqueio a partir da mensagem de erro do service/RPC.
 // Retorna 'lotacao' | 'plano' | null
 //
-// BUG #8 fix: condições tornadas mais estritas para evitar que erros genéricos
-// do PostgREST (ex: "invalid input for column modalidade_id", "constraint on
-// plano_id") sejam confundidos com avisos de negócio e abram o modal de
-// restrição de plano. Toda comparação é feita em lowercase para uniformidade.
+// Atenção: esta classificação depende de casar substring da mensagem vinda
+// do backend (RPC/trigger). Qualquer alteração no texto dessas mensagens no
+// banco precisa vir acompanhada de atualização aqui, senão o agendamento
+// passa a ser bloqueado com um toast genérico em vez de oferecer o modal de
+// "prosseguir mesmo assim".
 function classificarMotivoAviso(msgErro) {
   if (!msgErro) return null;
   const msg = msgErro.toLowerCase();
@@ -22,8 +23,6 @@ function classificarMotivoAviso(msgErro) {
     return 'lotacao';
   }
 
-  // Strings vindas especificamente do RPC/trigger de negócio — mais estritas.
-  // NÃO usar termos genéricos como 'plano' ou 'modalidade' isolados.
   if (
     msg.includes('limite semanal esgotado') ||
     msg.includes('fora do plano do aluno') ||
@@ -45,8 +44,6 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
     nome_visitante: '',
     aula_id: '',
     data_aula: '',
-    // Campos de exibição — preenchidos pelo modal ao selecionar aluno/aula.
-    // Não são enviados ao banco; apenas enriquecem o toast de sucesso.
     _nomeAluno: '',
     _nomeAtividade: '',
   });
@@ -55,39 +52,38 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
   const [infoVaga, setInfoVaga] = useState(null);
   const [verificandoVaga, setVerificandoVaga] = useState(false);
 
-  // Estado unificado para qualquer modal de aviso que permite prosseguir.
-  // tipo: 'lotacao' | 'plano' | ''
   const [modalLotacao, setModalLotacao] = useState({ isOpen: false, msg: '', tipo: '' });
 
-  // BUG #4 fix: sinalizador de cancelamento evita race condition entre requisições concorrentes.
-  // BUG #5 fix: retornos antecipados agora também resetam verificandoVaga para false.
   useEffect(() => {
     let cancelado = false;
+    let timeoutId;
 
     async function checarDisponibilidadeLive() {
       const { aula_id, data_aula, tipo, aluno_id } = agendamentoForm;
       if (!aula_id || !data_aula) {
         setInfoVaga(null);
-        setVerificandoVaga(false); // BUG #5
+        setVerificandoVaga(false);
         return;
       }
 
-      // Para cadastrado: só verifica DEPOIS que o aluno foi escolhido
       const prontoParaVerificar =
         tipo === 'visitante' || (tipo === 'cadastrado' && !!aluno_id);
       if (!prontoParaVerificar) {
         setInfoVaga(null);
-        setVerificandoVaga(false); // BUG #5
+        setVerificandoVaga(false);
         return;
       }
 
       setVerificandoVaga(true);
       const alunoIdParaChecar = tipo === 'cadastrado' ? aluno_id : null;
+      // Fix: propaga estudioId para a RPC de disponibilidade — as demais
+      // chamadas do módulo (agendar_avulso, criar_lead_com_presenca) sempre
+      // escopam por estudio_id; esta era a única exceção, o que permitia
+      // consultar disponibilidade de uma aula de outro estúdio só com o UUID.
       const info = await agendamentoService.verificarDisponibilidade(
-        aula_id, data_aula, alunoIdParaChecar
+        aula_id, data_aula, alunoIdParaChecar, estudioId
       );
-      if (!cancelado) { // BUG #4
-        // BUG #10: erro técnico (rede/banco) não deve aparecer como bloqueio de negócio.
+      if (!cancelado) {
         if (info?.isErroTecnico) {
           showToast.error("Erro ao verificar disponibilidade. Tente novamente.");
           setInfoVaga(null);
@@ -97,20 +93,17 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
         setVerificandoVaga(false);
       }
     }
-    checarDisponibilidadeLive();
+    // debounce de 300ms evita disparar uma RPC a cada troca rápida
+    // de aula/data/aluno — sem isso, navegar rápido no calendário dispara
+    // uma chamada por mudança de seleção, mesmo que só a última importe.
+    timeoutId = setTimeout(checarDisponibilidadeLive, 300);
 
-    return () => { cancelado = true; }; // BUG #4
-  }, [agendamentoForm.aula_id, agendamentoForm.data_aula, agendamentoForm.aluno_id, agendamentoForm.tipo]);
+    return () => {
+      cancelado = true;
+      clearTimeout(timeoutId);
+    };
+  }, [agendamentoForm.aula_id, agendamentoForm.data_aula, agendamentoForm.aluno_id, agendamentoForm.tipo, estudioId]);
 
-  // BUG #5 fix: ignorarAvisos agora é propagado para presencaService.agendarAvulso,
-  // que por sua vez o passa ao banco via RPC (p_ignorar_avisos). Dessa forma a
-  // segunda tentativa (confirmação do usuário) realmente bypassa a validação de
-  // capacidade/plano no banco, em vez de receber o mesmo erro e reabrir o modal
-  // indefinidamente (loop infinito).
-  //
-  // Adicionalmente, se ignorarAvisos === true e o banco ainda retornar um erro,
-  // trata-se de erro real (não de negócio): mostra toast genérico e não reabre
-  // o modal — garantindo que o loop seja impossível mesmo em cenários inesperados.
   const handleAgendarAluno = async (e, ignorarAvisos = false) => {
     if (e) e.preventDefault();
 
@@ -124,7 +117,10 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
       }
     }
 
-    if (savingAgendamento) return;
+    // Fix: retorno consistente (boolean) em vez de `undefined` neste
+    // caminho — evita surpresas para qualquer chamador futuro que dependa
+    // do valor de retorno.
+    if (savingAgendamento) return false;
     setSavingAgendamento(true);
 
     let abrirModalAviso = false;
@@ -142,11 +138,10 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
           alunoId: agendamentoForm.aluno_id,
           aulaId: agendamentoForm.aula_id,
           dataAula: agendamentoForm.data_aula,
-          ignorarAvisos, // BUG #5 fix: propaga o flag para o service/banco
+          ignorarAvisos,
         }, estudioId);
       }
 
-      // ── Toast contextual ───────────────────────────────────────────────
       const nome =
         agendamentoForm.tipo === 'visitante'
           ? agendamentoForm.nome_visitante || 'Visitante'
@@ -163,7 +158,6 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
         : `✅ ${nome} agendado para ${atividade}. Tudo certo!`;
 
       showToast.success(msgSucesso);
-      // ──────────────────────────────────────────────────────────────────
 
       setAgendamentoForm({
         tipo: 'cadastrado',
@@ -175,17 +169,12 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
         _nomeAtividade: '',
       });
 
-      // BUG #6 fix: prefixo ['agenda'] cobre toda a árvore de cache da agenda,
-      // incluindo ['agenda', estudioId, 'dadosMes', inicio, fim] de useAgendaDadosMes.
       queryClient.invalidateQueries({ queryKey: ['agenda'] });
       if (onSucesso) onSucesso();
       return true;
     } catch (err) {
       const msgErro = err.message || '';
 
-      // BUG #5 fix: se já estávamos em modo "ignorar avisos" e o banco AINDA
-      // retornou erro, é um erro real (ex: problema de rede, constraint não
-      // relacionada à capacidade). Não reabrir o modal — isso quebraria o loop.
       if (ignorarAvisos) {
         showToast.error('Não foi possível realizar o agendamento. Tente novamente.');
         return false;
@@ -208,9 +197,6 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
     }
   };
 
-  // BUG #12 fix: finally garante reset de savingAgendamento independente do
-  // resultado da segunda tentativa, inclusive se handleAgendarAluno lançar
-  // uma exceção não tratada.
   const confirmarAgendamentoLotado = async () => {
     setModalLotacao({ isOpen: false, msg: '', tipo: '' });
     try {

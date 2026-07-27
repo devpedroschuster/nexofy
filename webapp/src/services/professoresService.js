@@ -1,18 +1,22 @@
 import { supabase } from '../lib/supabase';
 
 export const professoresService = {
+  // CR3 FIX: estudioId agora é obrigatório — sem ele a query simplesmente
+  // não roda, em vez de silenciosamente listar professores de todos os
+  // estúdios da plataforma.
   async listar(busca = '', estudioId) {
+    if (!estudioId) return [];
+
     let query = supabase
       .from('professores')
       .select('*')
+      .eq('estudio_id', estudioId)
       .order('nome');
 
-      if (estudioId) {
-      query = query.eq('estudio_id', estudioId);
-    }
-
     if (busca) {
-      query = query.ilike('nome', `%${busca}%`);
+      // Escapa curingas do PostgREST (% e _) para busca literal correta.
+      const termo = busca.replace(/[%_]/g, '\\$&');
+      query = query.ilike('nome', `%${termo}%`);
     }
 
     const { data, error } = await query;
@@ -20,22 +24,27 @@ export const professoresService = {
     return data;
   },
 
-  // Sprint 02: estudioId obrigatório no INSERT de professores
+  // Sprint 02: estudioId obrigatório no INSERT de professores.
+  // CR1 FIX: o UPDATE agora também filtra por estudio_id — antes, qualquer
+  // edição de professor era feita apenas por `id`, permitindo sobrescrever
+  // dados de professores de outros estúdios (IDOR de escrita).
   async salvar(professor, estudioId) {
+    if (!estudioId) throw new Error('estudioId é obrigatório.');
+
     const payload = {
       nome: professor.nome,
       email: professor.email || null,
       telefone: professor.telefone || null,
       pix_comissao: professor.pix_comissao || null,
-      auth_id: professor.auth_id || null
+      auth_id: professor.auth_id || null,
     };
 
     if (professor.id) {
-      // UPDATE: estudio_id não precisa ser alterado
       const { data, error } = await supabase
         .from('professores')
         .update(payload)
         .eq('id', professor.id)
+        .eq('estudio_id', estudioId)
         .select()
         .single();
 
@@ -53,19 +62,17 @@ export const professoresService = {
     }
   },
 
+  // CR3 FIX: estudioId agora é obrigatório.
   async alternarStatus(id, novoStatus, estudioId) {
-    let query = supabase
+    if (!estudioId) throw new Error('estudioId é obrigatório.');
+
+    const { error } = await supabase
       .from('professores')
       .update({ ativo: novoStatus })
-      .eq('id', id);
-
-    if (estudioId) {
-      query = query.eq('estudio_id', estudioId);
-    }
-
-    const { error } = await query;
+      .eq('id', id)
+      .eq('estudio_id', estudioId);
 
     if (error) throw error;
     return true;
-  }
+  },
 };

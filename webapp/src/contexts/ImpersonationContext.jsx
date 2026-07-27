@@ -6,14 +6,17 @@
 //   - Armazena { estudio: { id, nome, slug } | null } em memória (não em localStorage)
 //   - Chama set_estudio_override / clear_estudio_override via RPC do Supabase
 //   - Invalida o cache do React Query ao entrar/sair do modo impersonation
-//     (garante que queries usem o novo estudio_id override do servidor)
+//   - Reseta automaticamente ao detectar SIGNED_OUT (evita contaminação entre sessões)
 //   - Expõe useImpersonation() para qualquer componente consumir
 //
 // DECISÃO DE SEGURANÇA — sem persistência entre sessões:
 //   O override é persistido em impersonation_sessions (linked a auth.uid()), com TTL de 4h.
-//   Não depende de estado de conexão Postgres — seguro sob qualquer modo de pooling.
 //   O frontend reflete isso: ao recarregar a página o estado em memória é perdido
-//   e o override no servidor já expirou. Não há risco de "override esquecido".
+//   e o override no servidor já expirou.
+//
+// CORREÇÃO (auditoria): o estado local também é resetado no evento SIGNED_OUT do
+// Supabase Auth, para impedir que o banner/flag de impersonation "vaze" para a
+// próxima sessão de login na mesma aba (ex.: computador compartilhado).
 //
 // INTEGRAÇÃO COM useAuth:
 //   Quando em modo impersonation, o estudioId do useAuth ainda é null (o super_admin
@@ -25,6 +28,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -46,9 +50,34 @@ export function ImpersonationProvider({ children }) {
   // Ref para rastrear a última operação e ignorar respostas de chamadas stale
   const opRef = useRef(0);
 
+  // ── Reset "duro": limpa estado local + purga (não só invalida) queries
+  //    do cache que podem conter dados do tenant impersonado.
+  //    Usar `clear()` aqui em vez de `invalidateQueries()` evita qualquer
+  //    flash de dados do estúdio anterior antes do próximo fetch.
+  const resetDuro = useCallback(() => {
+    opRef.current += 1; // invalida qualquer RPC em voo
+    setEstudioAtivo(null);
+    setCarregando(false);
+    qc.clear();
+  }, [qc]);
+
+  // ── Reage a logout/troca de usuário para evitar contaminação entre sessões ──
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        resetDuro();
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [resetDuro]);
+
   // ── Entrar em modo impersonation ──────────────────────────────────────────
   const acessarEstudio = useCallback(async (estudio) => {
     if (!estudio?.id) return;
+
+    // No-op se já estamos impersonando exatamente este estúdio — evita
+    // RPC + invalidação de cache desnecessárias.
+    if (estudioAtivo?.id === estudio.id) return;
 
     const op = ++opRef.current;
     setCarregando(true);
@@ -63,7 +92,9 @@ export function ImpersonationProvider({ children }) {
 
       setEstudioAtivo({ id: estudio.id, nome: estudio.nome, slug: estudio.slug });
 
-      // Invalida todo o cache — queries vão reexecutar com o novo override ativo
+      // Invalida todo o cache — queries vão reexecutar com o novo override ativo.
+      // (Trade-off conhecido: invalida também queries globais não tenant-scoped;
+      // aceito por segurança/simplicidade. Ver nota de performance na auditoria.)
       await qc.invalidateQueries();
 
     } catch (err) {
@@ -72,7 +103,7 @@ export function ImpersonationProvider({ children }) {
     } finally {
       if (op === opRef.current) setCarregando(false);
     }
-  }, [qc]);
+  }, [qc, estudioAtivo]);
 
   // ── Sair do modo impersonation ────────────────────────────────────────────
   const sairImpersonation = useCallback(async () => {

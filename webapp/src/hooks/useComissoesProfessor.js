@@ -36,3 +36,13 @@ export function useInvalidarComissoes() {
     qc.invalidateQueries({ queryKey: ['resumo-mensal', estudioId, mesAno] });
   };
 }
+
+// Novo: busca os detalhes direto do servidor, ignorando cache — para ser
+// chamado imediatamente antes de uma ação irreversível como "fechar mês",
+// garantindo que o total usado no fechamento reflete o estado mais recente
+// possível (mitiga o Bug 2 da auditoria: fechamento sobre dado com até 2min
+// de desatualização).
+export function useBuscarDetalhesFrescos() {
+  const { estudioId } = useAuth();
+  return (professorId, mesAno) => comissoesService.buscarDetalhes(professorId, mesAno, estudioId);
+}

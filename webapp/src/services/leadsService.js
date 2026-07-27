@@ -12,6 +12,19 @@ const SELECT_BASE =
   'id, nome_visitante, telefone_visitante, data_visita, status_conversao, ' +
   'observacao_lead, aluno_convertido_id, agenda(atividade)';
 
+  /**
+ * Calcula o intervalo [inicio, fim) de um mês para uso em filtros
+ * `gte`/`lt` sobre `data_visita`. `mes` é 0-indexado (igual ao
+ * Date.getMonth()), consistente com o resto do arquivo.
+ * Centralizado aqui para evitar divergência entre "pendentes" e
+ * "histórico" caso a lógica de fuso/limite de mês mude no futuro.
+ */
+function getIntervaloMes(ano, mes) {
+  const inicio = new Date(ano, mes, 1).toISOString().split('T')[0];
+  const fim = new Date(ano, mes + 1, 1).toISOString().split('T')[0];
+  return { inicio, fim };
+}
+
 export const leadsService = {
   // ── CRIAÇÃO ────────────────────────────────────────────────────────────
   // Bug #1: substituído rollback manual por RPC Postgres (criar_lead_com_presenca).
@@ -53,8 +66,7 @@ export const leadsService = {
    * `mes` é 0-indexado (igual ao Date.getMonth()).
    */
   async listarLeadsPendentesPorMes({ ano, mes, estudioId }) {
-    const inicio = new Date(ano, mes, 1).toISOString().split('T')[0];
-    const fim = new Date(ano, mes + 1, 1).toISOString().split('T')[0];
+    const { inicio, fim } = getIntervaloMes(ano, mes);
 
     const { data, error } = await supabase
       .from('leads')
@@ -92,8 +104,7 @@ export const leadsService = {
    * `mes` é 0-indexado (igual ao Date.getMonth()).
    */
   async listarHistoricoLeadsPorMes({ ano, mes, estudioId }) {
-    const inicio = new Date(ano, mes, 1).toISOString().split('T')[0];
-    const fim = new Date(ano, mes + 1, 1).toISOString().split('T')[0];
+    const { inicio, fim } = getIntervaloMes(ano, mes);
 
     const { data, error } = await supabase
       .from('leads')

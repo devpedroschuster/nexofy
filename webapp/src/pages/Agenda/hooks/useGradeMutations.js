@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useQueryClient } from '@tanstack/react-query';
@@ -6,10 +6,17 @@ import { gradeService } from '../../../services/gradeService';
 import { showToast } from '../../../components/shared/Toast';
 import { useAuth } from '../../../hooks/useAuth';
 
+const HORARIO_REGEX = /^\d{2}:\d{2}/;
+
 export function useGradeMutations({ onSuccess }) {
   const [savingAula, setSavingAula] = useState(false);
   const queryClient = useQueryClient();
   const { estudioId } = useAuth();
+
+  // Guards internos de duplo-clique para excluir/encerrar — não mudam a
+  // interface pública do hook (Agenda.jsx chama essas funções diretamente
+  // sem controlar loading próprio), só evitam RPCs/updates concorrentes.
+  const processandoRef = useRef({ excluir: null, encerrar: null });
 
   const invalidarCacheAgenda = () => {
     queryClient.invalidateQueries({ queryKey: ['agenda'] });
@@ -20,8 +27,23 @@ export function useGradeMutations({ onSuccess }) {
   };
 
   const salvarAula = async (novaAula) => {
-    setSavingAula(true);
+    if (savingAula) return; // guard contra duplo-submit
+
+    if (!estudioId) {
+      showToast.error("Sessão ainda carregando, tente novamente em instantes.");
+      return;
+    }
+
+    // Validações de negócio: ficam FORA do try/catch de infraestrutura de
+    // propósito, para que a mensagem amigável nunca seja confundida com um
+    // erro técnico do Supabase.
     try {
+      if (!novaAula.horario || !HORARIO_REGEX.test(novaAula.horario)) {
+        // Sem isso, a aula é salva no banco mas desaparece silenciosamente
+        // do calendário (calendarioParser descarta horário inválido).
+        throw new Error('Informe um horário válido (HH:MM).');
+      }
+
       const payload = {
         atividade: novaAula.atividade || novaAula.nomeModalidade || '',
         modalidade_id: novaAula.modalidadeId || null,
@@ -58,25 +80,43 @@ export function useGradeMutations({ onSuccess }) {
         payload.dia_semana = diaCalculado.toLowerCase();
       }
 
-      await gradeService.salvarAula(payload, estudioId);
-      invalidarCacheAgenda();
-      showToast.success('Grade atualizada com sucesso!');
-      onSuccess?.();
-    } catch (err) {
-      showToast.error(err.message);
-    } finally {
-      setSavingAula(false);
+      setSavingAula(true);
+      try {
+        await gradeService.salvarAula(payload, estudioId);
+        invalidarCacheAgenda();
+        showToast.success('Grade atualizada com sucesso!');
+        onSuccess?.();
+      } catch (err) {
+        // Erro técnico de infraestrutura (Supabase/Postgres): não expor
+        // detalhes crus de constraint/schema para o usuário final.
+        console.error('[useGradeMutations] erro ao salvar aula', err);
+        showToast.error('Erro ao salvar. Tente novamente.');
+      } finally {
+        setSavingAula(false);
+      }
+    } catch (validationErr) {
+      // Erro de validação de negócio: mensagem já é amigável, pode ir direto.
+      showToast.error(validationErr.message);
     }
   };
 
   const excluirAula = async (eventoId) => {
+    if (!estudioId) {
+      showToast.error("Sessão ainda carregando, tente novamente em instantes.");
+      return;
+    }
+    if (processandoRef.current.excluir === eventoId) return; // guard duplo-clique
+    processandoRef.current.excluir = eventoId;
     try {
       await gradeService.excluirAula(eventoId, estudioId);
       invalidarCacheAgenda();
       showToast.success('Grade removida com sucesso.');
       onSuccess?.();
     } catch (err) {
-      showToast.error(err.message || 'Erro ao excluir.');
+      console.error('[useGradeMutations] erro ao excluir aula', err);
+      showToast.error('Erro ao excluir. Tente novamente.');
+    } finally {
+      processandoRef.current.excluir = null;
     }
   };
 
@@ -87,6 +127,12 @@ export function useGradeMutations({ onSuccess }) {
   };
 
   const encerrarAula = async (eventoId, dataStart) => {
+    if (!estudioId) {
+      showToast.error("Sessão ainda carregando, tente novamente em instantes.");
+      return;
+    }
+    if (processandoRef.current.encerrar === eventoId) return; // guard duplo-clique
+    processandoRef.current.encerrar = eventoId;
     try {
       const { dataClicada } = prepararEncerramento(dataStart);
       await gradeService.encerrarAula(eventoId, dataClicada, estudioId);
@@ -94,7 +140,10 @@ export function useGradeMutations({ onSuccess }) {
       showToast.success('Turma encerrada a partir desta data.');
       onSuccess?.();
     } catch (err) {
-      showToast.error(err.message || 'Erro ao encerrar turma.');
+      console.error('[useGradeMutations] erro ao encerrar aula', err);
+      showToast.error('Erro ao encerrar turma. Tente novamente.');
+    } finally {
+      processandoRef.current.encerrar = null;
     }
   };
 

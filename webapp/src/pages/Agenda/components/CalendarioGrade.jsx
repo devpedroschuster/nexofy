@@ -3,8 +3,10 @@ import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Users } from 'lucide-react';
-import { PALETA_CORES } from '../../../lib/constants';
+import { PALETA_CORES, LIMITES } from '../../../lib/constants'; // FIX: LIMITES para capacidade padrão
 import 'react-big-calendar/lib/css/react-big-calendar.css';
+
+const CAPACIDADE_PADRAO = LIMITES.CAPACIDADE_AULA_PADRAO ?? 15;
 
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales: { 'pt-BR': ptBR } });
 
@@ -66,9 +68,57 @@ const CustomToolbar = (toolbar) => (
   </div>
 );
 
+const CALENDAR_STYLES = `
+  .rbc-calendar { font-family: inherit; }
+  .rbc-header {
+    padding: 16px 0;
+    font-weight: 800;
+    color: hsl(var(--muted-foreground));
+    text-transform: capitalize;
+    font-size: 13px;
+    border-bottom: 1px solid hsl(var(--border) / 0.5) !important;
+  }
+  .rbc-header + .rbc-header { border-left: 1px dashed hsl(var(--border) / 0.3); }
+  .rbc-today { background-color: hsl(var(--primary-soft) / 0.3); }
+  .rbc-time-view {
+    border-radius: calc(var(--radius) + 12px);
+    border: 1px solid hsl(var(--border) / 0.5);
+    background-color: hsl(var(--card));
+  }
+  .rbc-timeslot-group { border-color: hsl(var(--border) / 0.3); min-height: 85px; }
+  .rbc-time-slot { border-color: hsl(var(--border) / 0.2); }
+  .rbc-time-gutter .rbc-timeslot-group {
+    font-size: 11px; font-weight: 700; color: hsl(var(--muted-foreground)); padding-right: 8px;
+  }
+  .rbc-month-view {
+    border: 1px solid hsl(var(--border) / 0.5);
+    border-radius: calc(var(--radius) + 12px);
+    overflow: hidden;
+    background-color: hsl(var(--card));
+  }
+  .rbc-off-range-bg { background-color: hsl(var(--muted) / 0.3); }
+  .rbc-date-cell { color: hsl(var(--foreground)); font-weight: 800; padding: 8px; font-size: 12px; }
+  .rbc-event-content { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  @media (max-width: 768px) {
+    .rbc-month-view { min-width: 600px; }
+    .style-calendar-wrapper { overflow-x: auto; padding-bottom: 20px; }
+  }
+`;
+
 const CustomEventCard = ({ event }) => {
+  // FIX: card dedicado para feriados — não inventa capacidade/professor
+  if (event.isFeriado) {
+    return (
+      <div
+        className="h-full flex items-center gap-1.5 px-2 overflow-hidden pointer-events-none opacity-90"
+        title={event.title}
+      >
+        <span className="font-black text-[11px] truncate">{event.title}</span>
+      </div>
+    );
+  }
   const agendados = event.alunosAgendados?.length || 0;
-  const capacidade = event.dadosOriginais?.capacidade || 15;
+  const capacidade = event.dadosOriginais?.capacidade || CAPACIDADE_PADRAO;
   const isLotado = agendados >= capacidade;
   const porcentagem = Math.min((agendados / capacidade) * 100, 100);
 
@@ -151,10 +201,24 @@ const CustomEventCard = ({ event }) => {
 };
 
 function eventPropGetter(event) {
+  // FIX: estilo de bloqueio dedicado para feriados
+  if (event.isFeriado) {
+    return {
+      className: '!rounded-xl border border-white/10',
+      style: {
+        backgroundColor: '#94a3b8',
+        color: '#0f172a',
+        borderLeft: '5px solid #64748b',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+        cursor: 'not-allowed',
+        overflow: 'hidden',
+      },
+    };
+  }
   const corDB = event.dadosOriginais?.cor || 'laranja';
   const corTema = PALETA_CORES.find((c) => c.id === corDB) || PALETA_CORES[0];
   const agendados = event.alunosAgendados?.length || 0;
-  const capacidade = event.dadosOriginais?.capacidade || 15;
+  const capacidade = event.dadosOriginais?.capacidade || CAPACIDADE_PADRAO;
   const isLotado = agendados >= capacidade;
 
   return {
@@ -171,59 +235,12 @@ function eventPropGetter(event) {
 }
 
 export default function CalendarioGrade({
-  eventos,
-  currentDate,
-  setCurrentDate,
-  currentView,
-  setCurrentView,
-  handleSelectSlot,
-  handleSelectEvent,
-  isAdmin = false,
+  eventos, currentDate, setCurrentDate, currentView, setCurrentView,
+  handleSelectSlot, handleSelectEvent, isAdmin = false,
 }) {
   return (
     <div className="h-full style-calendar-wrapper">
-      <style>{`
-        .rbc-calendar { font-family: inherit; }
-        .rbc-header {
-          padding: 16px 0;
-          font-weight: 800;
-          color: hsl(var(--muted-foreground));
-          text-transform: capitalize;
-          font-size: 13px;
-          border-bottom: 1px solid hsl(var(--border) / 0.5) !important;
-        }
-        .rbc-header + .rbc-header { border-left: 1px dashed hsl(var(--border) / 0.3); }
-        .rbc-today { background-color: hsl(var(--primary-soft) / 0.3); }
-        .rbc-time-view {
-          border-radius: calc(var(--radius) + 12px);
-          border: 1px solid hsl(var(--border) / 0.5);
-          background-color: hsl(var(--card));
-        }
-        .rbc-timeslot-group {
-          border-color: hsl(var(--border) / 0.3);
-          min-height: 85px; 
-        }
-        .rbc-time-slot { border-color: hsl(var(--border) / 0.2); }
-        .rbc-time-gutter .rbc-timeslot-group {
-          font-size: 11px;
-          font-weight: 700;
-          color: hsl(var(--muted-foreground));
-          padding-right: 8px;
-        }
-        .rbc-month-view {
-          border: 1px solid hsl(var(--border) / 0.5);
-          border-radius: calc(var(--radius) + 12px);
-          overflow: hidden;
-          background-color: hsl(var(--card));
-        }
-        .rbc-off-range-bg { background-color: hsl(var(--muted) / 0.3); }
-        .rbc-date-cell { color: hsl(var(--foreground)); font-weight: 800; padding: 8px; font-size: 12px; }
-        .rbc-event-content { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-        @media (max-width: 768px) {
-          .rbc-month-view { min-width: 600px; }
-          .style-calendar-wrapper { overflow-x: auto; padding-bottom: 20px; }
-        }
-      `}</style>
+      <style>{CALENDAR_STYLES}</style> {/* FIX: referencia constante do módulo */}
       <Calendar
         localizer={localizer}
         formats={formatosCalendario}

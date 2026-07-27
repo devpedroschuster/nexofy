@@ -95,6 +95,7 @@ export const despesasService = {
 
   // Sprint 02: estudioId obrigatório no INSERT de despesas
   async salvar(despesa, estudioId) {
+  if (!estudioId) throw new Error('estudioId é obrigatório para salvar despesa.');
     const payload = { ...despesa };
 
     if (!payload.id) {
@@ -124,6 +125,7 @@ export const despesasService = {
   },
 
   async excluir(id, estudioId) {
+  if (!estudioId) throw new Error('estudioId é obrigatório para excluir despesa.');
     const { error } = await supabase
       .from('despesas')
       .delete()
@@ -134,6 +136,7 @@ export const despesasService = {
   },
 
   async registrarPagamento(id, estudioId) {
+  if (!estudioId) throw new Error('estudioId é obrigatório para registrar pagamento.');
     const hoje = new Date().toISOString();
     const { error } = await supabase
       .from('despesas')

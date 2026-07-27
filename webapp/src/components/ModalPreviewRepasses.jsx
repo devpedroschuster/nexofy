@@ -23,7 +23,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 
-import Modal from './shared/Modal';
+import Modal from './ui/Modal';
 import Button from './ui/Button';
 import Badge from './ui/Badge';
 import { formatarMoeda } from '../lib/utils';

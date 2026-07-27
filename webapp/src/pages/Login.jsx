@@ -2,7 +2,7 @@
 // ─── Midnight Indigo · Login ──────────────────────────────────────────────────
 //
 // Multi-tenant: o nome do estúdio vem do contexto do subdomínio/slug via
-// useEstudioPublico (já existe no projeto). Fallback para nome genérico.
+// useEstudioPublico. Fallback para nome genérico.
 //
 // Design: card centralizado, dark mode nativo, componentes do design system.
 // Zero hardcodes de cor — 100% tokens CSS.
@@ -13,7 +13,7 @@
 //   3. Recuperar senha → modal inline → reset email via Supabase
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, KeyRound, X, Info } from 'lucide-react';
@@ -21,6 +21,7 @@ import { Mail, Lock, ArrowRight, KeyRound, X, Info } from 'lucide-react';
 import { rotaPorPerfil } from '../lib/navigation';
 import { showToast } from '../components/shared/Toast';
 import { REGEX } from '../lib/constants';
+import { useEstudioPublico } from '../hooks/useEstudioPublico'; // FIX: agora realmente usado
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import { cn } from '../lib/cn';
@@ -34,60 +35,98 @@ export default function Login() {
 
   const navigate = useNavigate();
 
+  // FIX (Bug crítico #1 - tenant isolation): contexto do estúdio atual via slug
+  // do subdomínio. Usado para filtrar as queries de perfil (alunos/professores)
+  // e evitar que um auth_id presente em mais de um estúdio (ex: professor que
+  // dá aula em duas unidades) resolva o perfil errado ou quebre o .maybeSingle().
+  const { data: estudioPublico, isLoading: estudioLoading } = useEstudioPublico();
+  const nomeEstudio = estudioPublico?.nome || 'plataforma';
+
+  // FIX (Race condition): flag explícita para o listener de auth ignorar
+  // eventos SIGNED_IN originados de handleLogin (login por senha), em vez de
+  // depender de inferir isso a partir de session.user.amr, que não é
+  // garantidamente populado de forma síncrona no momento do evento.
+  const loginViaSenhaRef = useRef(false);
+
   /* ── Captura sessão de magic link (professor novo) ──────────────────────── */
-/* ── Captura sessão de magic link (professor novo) ──────────────────────── */
-useEffect(() => {
-  const { data: { subscription } } = supabase.auth.onAuthStateChange(
-    async (event, session) => {
-      // Só interessa o SIGNED_IN vindo de magic link (OTP).
-      // Login com senha já é tratado inteiramente no handleLogin.
-      if (event !== 'SIGNED_IN' || !session) return;
-      if (session.user.app_metadata?.provider !== 'email') return;
-      if (!session.user.confirmed_at) return; // ainda não era magic link confirmado
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        // Só interessa o SIGNED_IN vindo de magic link (OTP).
+        // Login com senha é tratado inteiramente no handleLogin — a flag abaixo
+        // garante que este listener não dispare uma segunda navegação concorrente.
+        if (event !== 'SIGNED_IN' || !session) return;
+        if (loginViaSenhaRef.current) return; // FIX: substitui a inferência via amr
+        if (session.user.app_metadata?.provider !== 'email') return;
+        if (!session.user.confirmed_at) return;
 
-      // Distingue magic link de signInWithPassword:
-      // magic link popula `last_sign_in_at` via OTP e não tem `amr` com 'password'
-      const amr = session.user.amr ?? session.amr;
-      const veioDeSenha = Array.isArray(amr) && amr.some(m => m.method === 'password');
-      if (veioDeSenha) return;
+        if (!estudioPublico?.id) return; // FIX: sem estúdio resolvido, não prosseguir
 
-      const { data: profData } = await supabase
-        .from('professores')
-        .select('primeiro_acesso, nome')
-        .eq('auth_id', session.user.id)
-        .maybeSingle();
+        // ⚠️ ASSUMIR/VALIDAR: pressupõe que `professores` tem coluna `estudio_id`
+        // e uma policy RLS pública compatível com o fluxo pré-login (mesmo padrão
+        // de `useEstudioPublico`). Confirmar no banco antes de subir para produção.
+        const { data: profData, error: profError } = await supabase
+          .from('professores')
+          .select('primeiro_acesso, nome')
+          .eq('auth_id', session.user.id)
+          .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
+          .maybeSingle();
 
-      if (profData?.primeiro_acesso) {
-        navigate('/redefinir-senha', {
-          state: { primeiroAcesso: true, nome: (profData.nome || '').split(' ')[0] },
-        });
+        if (profError) {
+          showToast.error('Não foi possível carregar seu perfil. Tente novamente.');
+          return; // FIX: erro não é mais descartado silenciosamente
+        }
+
+        if (profData?.primeiro_acesso) {
+          navigate('/redefinir-senha', {
+            state: { primeiroAcesso: true, nome: (profData.nome || '').split(' ')[0] },
+          });
+        }
       }
-    }
-  );
+    );
 
-  return () => subscription.unsubscribe();
-}, []);
+    return () => subscription.unsubscribe();
+  }, [estudioPublico?.id, navigate]);
 
   /* ── Login ──────────────────────────────────────────────────────────────── */
   async function handleLogin(e) {
     e.preventDefault();
     if (loading) return;
+
+    // FIX: valida e-mail no client antes de bater no Supabase (form usa noValidate)
+    const emailLimpo = email.trim();
+    if (!REGEX.EMAIL.test(emailLimpo)) {
+      showToast.error('Digite um e-mail válido.');
+      return;
+    }
+
+    if (!estudioPublico?.id) {
+      showToast.error('Não foi possível identificar o estúdio. Recarregue a página.');
+      return;
+    }
+
     setLoading(true);
+    loginViaSenhaRef.current = true; // FIX: marca antes do signIn para blindar o listener
 
     try {
       const { data: authData, error } = await supabase.auth.signInWithPassword({
-        email:    email.trim(),
+        email:    emailLimpo,
         password: senha,
       });
 
       if (error) throw error;
 
+      // ⚠️ ASSUMIR/VALIDAR: mesma suposição de estudio_id + RLS pública citada acima,
+      // agora para a tabela `alunos`.
       // 1. Verificar primeiro_acesso em alunos
-      const { data: alunoData } = await supabase
+      const { data: alunoData, error: alunoError } = await supabase
         .from('alunos')
         .select('primeiro_acesso, nome_completo, role')
         .eq('auth_id', authData.user.id)
+        .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
         .maybeSingle();
+
+      if (alunoError) throw alunoError; // FIX: erro não é mais descartado
 
       if (alunoData?.primeiro_acesso) {
         navigate('/redefinir-senha', {
@@ -98,11 +137,14 @@ useEffect(() => {
 
       // 2. Verificar primeiro_acesso em professores
       if (!alunoData) {
-        const { data: profData } = await supabase
+        const { data: profData, error: profError } = await supabase
           .from('professores')
           .select('primeiro_acesso, nome')
           .eq('auth_id', authData.user.id)
+          .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
           .maybeSingle();
+
+        if (profError) throw profError; // FIX: erro não é mais descartado
 
         if (profData?.primeiro_acesso) {
           navigate('/redefinir-senha', {
@@ -127,15 +169,19 @@ useEffect(() => {
         return;
       }
 
-      // Fallback
-      showToast.success('Login realizado com sucesso!');
-      navigate('/');
+      // Fallback: nenhum perfil encontrado neste estúdio.
+      // FIX: antes caía aqui silenciosamente até em casos de erro descartado;
+      // agora só chega aqui de fato quando não existe vínculo nenhum.
+      showToast.error('Não encontramos seu perfil neste estúdio. Contate o suporte.');
 
     } catch (err) {
       if (err.code === 'invalid_credentials' || err.message?.includes('Invalid login')) {
         showToast.error('E-mail ou senha incorretos.');
       } else if (err.code === 'email_not_confirmed') {
         showToast.error('Confirme seu e-mail antes de acessar.');
+      } else if (err.status === 429) {
+        // FIX: tratamento específico para rate limit do Supabase Auth
+        showToast.error('Muitas tentativas. Aguarde alguns minutos e tente novamente.');
       } else if (err.message?.includes('expired') || err.message?.includes('invalid')) {
         showToast.error('Link expirado. Solicite um novo link de recuperação.');
       } else {
@@ -143,6 +189,7 @@ useEffect(() => {
       }
     } finally {
       setLoading(false);
+      loginViaSenhaRef.current = false; // FIX: libera o listener para futuros magic links
     }
   }
 
@@ -170,7 +217,8 @@ useEffect(() => {
 
             <div>
               <h1 className="text-2xl font-display font-semibold text-foreground tracking-tight">
-                Entrar na plataforma
+                {/* FIX: nome do estúdio agora realmente vem do contexto do subdomínio */}
+                Entrar {estudioLoading ? '' : `em ${nomeEstudio}`}
               </h1>
               <p className="mt-1 text-sm text-muted-foreground">
                 Bem-vindo de volta. Acesse sua conta.
@@ -211,6 +259,7 @@ useEffect(() => {
               size="lg"
               fullWidth
               loading={loading}
+              disabled={estudioLoading} // FIX: evita submit antes do estúdio resolver
               rightIcon={<ArrowRight size={18} />}
             >
               Entrar

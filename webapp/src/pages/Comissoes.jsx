@@ -21,6 +21,7 @@ import EmptyState from '../components/ui/EmptyState';
 import Modal, { ModalConfirmacao, useModal } from '../components/ui/Modal';
 import ModalPreviewRepasses from '../components/ModalPreviewRepasses';
 import { formatarMoeda } from '../lib/utils';
+import { formatarData } from '../lib/utils';
 import Badge from '../components/ui/Badge';
 
 import Input from '../components/ui/Input';
@@ -58,12 +59,6 @@ function mesAnoAtual() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function formatarData(iso) {
-  if (!iso) return '—';
-  const [ano, mes, dia] = iso.split('T')[0].split('-');
-  return `${dia}/${mes}/${ano}`;
-}
-
 // ─── sub-componentes ──────────────────────────────────────────────────────────
 
 function TipoAulaBadge({ tipo }) {
@@ -81,7 +76,6 @@ function AbaDetalhe({
   filtros,
   setFiltros,
   estudioId,
-  loading: loadingProfs,
 }) {
   const invalidarComissoes = useInvalidarComissoes();
   const modalFechamento = useModal();
@@ -112,26 +106,44 @@ function AbaDetalhe({
     return { total, qtd: lancamentosFiltrados.length, pagas, pendentes };
   }, [lancamentosFiltrados]);
 
-  const handleFecharMes = async () => {
-    setFechando(true);
-    try {
-      // Fecha com o total COMPLETO (sem filtro de tipo) — fechamento é do mês inteiro
-      await comissoesService.fecharMes(
-        filtros.professorId,
-        filtros.mesAno,
-        dados.resumo.total_comissao,
-        estudioId,
-      );
-      showToast.success('Mês fechado e comissões aprovadas com sucesso!');
-      modalFechamento.fechar();
+ const buscarDetalhesFrescos = useBuscarDetalhesFrescos();
+
+const handleFecharMes = async () => {
+  setFechando(true);
+  try {
+    // Busca o total mais recente diretamente do servidor antes de confirmar
+    // o fechamento — em vez de confiar no cache de até 2 minutos.
+    const dadosFrescos = await buscarDetalhesFrescos(filtros.professorId, filtros.mesAno);
+
+    if (dadosFrescos.fechamento) {
+      showToast.error('Este mês já foi fechado anteriormente.');
+      return;
+    }
+
+    await comissoesService.fecharMes(
+      filtros.professorId,
+      filtros.mesAno,
+      dadosFrescos.resumo.total_comissao,
+      estudioId,
+    );
+    showToast.success('Mês fechado e comissões aprovadas com sucesso!');
+    modalFechamento.fechar();
+    invalidarComissoes(filtros.professorId, filtros.mesAno);
+  } catch (error) {
+    // ALREADY_CLOSED: outro admin fechou este mês entre a checagem e o
+    // clique atual (ver correção em comissoesService.fecharMes, que agora
+    // faz insert puro + trata unique_violation em vez de upsert silencioso).
+    if (error.message === 'ALREADY_CLOSED') {
+      showToast.error('Este mês acabou de ser fechado por outra pessoa. Atualize a página.');
       invalidarComissoes(filtros.professorId, filtros.mesAno);
-    } catch (error) {
+    } else {
       console.error(error);
       showToast.error('Erro ao fechar o mês');
-    } finally {
-      setFechando(false);
     }
-  };
+  } finally {
+    setFechando(false);
+  }
+};
 
   // UX-02: exporta somente os lançamentos do filtro ativo
   const exportarExcel = () => {
@@ -541,7 +553,8 @@ export default function Comissoes() {
       try {
         const profs = await comissoesService.listarProfessores(estudioId);
         setProfessores(profs || []);
-      } catch {
+      } catch (err) {
+        console.error('[Comissoes] listarProfessores:', err);
         showToast.error('Erro ao carregar lista de professores');
       }
     }
@@ -564,7 +577,7 @@ export default function Comissoes() {
         return;
       }
       setResultadoGeracao(resultado);
-      showToast.success(`${resultado.gerados} repasse(s) gerado(s) com sucesso!`);
+      showToast.success(`${resultado.gerados ?? 0} repasse(s) gerado(s) com sucesso!`);
       invalidarComissoes(filtros.professorId, filtros.mesAno);
     } catch (err) {
       const msg = err?.message || 'Erro ao gerar repasses mensais.';
@@ -581,8 +594,6 @@ export default function Comissoes() {
     setFiltros(f => ({ ...f, professorId }));
     setAba('detalhe');
   };
-
-  const mesFormatado = filtros.mesAno.split('-').reverse().join('/');
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in max-w-7xl mx-auto">

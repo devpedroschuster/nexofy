@@ -1,8 +1,8 @@
 import { CheckCircle2, Printer, UserX } from 'lucide-react';
 import { formatarMoeda } from '../lib/utils';
 import { useEstudio } from '../hooks/useEstudio';
+import { showToast } from './shared/Toast';
 
-// Mapa de labels para forma de pagamento
 const FORMA_LABELS = {
   pix: 'Pix',
   credito: 'Cartão de Crédito',
@@ -11,7 +11,6 @@ const FORMA_LABELS = {
   transferencia: 'Transferência',
 };
 
-// Mapa de labels para tipo de aula
 const TIPO_AULA_LABELS = {
   regular: 'Regular',
   experimental: 'Experimental',
@@ -19,7 +18,6 @@ const TIPO_AULA_LABELS = {
   reposicao: 'Reposição',
 };
 
-// UX-05: mensagem contextual quando não há itens de repasse
 function MensagemSemRepasse({ tipoAula }) {
   if (tipoAula === 'experimental') {
     return (
@@ -48,22 +46,12 @@ function esc(str) {
     .replace(/'/g, '&#39;');
 }
 
-/**
- * RepasseAlunoCard
- *
- * Props:
- *   aluno            – objeto com nome_completo
- *   mensalidade      – objeto com tipo_aula (e opcionalmente data_pagamento, planos.nome)
- *   resultado        – objeto retornado por financeiroService.confirmarPagamento
- *   pagamento        – { valor_pago, forma_pagamento, data_pagamento } (dados do recibo)
- */
 export default function RepasseAlunoCard({ aluno, mensalidade, resultado, pagamento }) {
   const { data: estudio } = useEstudio();
   const nomeEstudio = estudio?.nome ?? 'Estúdio';
 
   if (!resultado) return null;
 
-  // Data de pagamento: prefere o campo explícito, cai na data de hoje
   const dataFormatada = (() => {
     const raw = pagamento?.data_pagamento || new Date().toISOString();
     return new Date(raw).toLocaleDateString('pt-BR', {
@@ -86,79 +74,90 @@ export default function RepasseAlunoCard({ aluno, mensalidade, resultado, pagame
     if (!printArea) return;
 
     const win = window.open('', '_blank', 'width=480,height=700');
-    win.document.write(`
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-      <head>
-        <meta charset="UTF-8" />
-        <title>Comprovante de Pagamento – ${esc(nomeEstudio)}</title>
-        <style>
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: #fff;
-            color: #111;
-            padding: 32px;
-          }
-          .recibo { max-width: 400px; margin: 0 auto; }
-          .logo { font-size: 22px; font-weight: 900; color: #ca8a04; letter-spacing: -0.5px; margin-bottom: 4px; }
-          .titulo { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; margin-bottom: 24px; }
-          .icone-ok { font-size: 28px; margin-bottom: 12px; }
-          .valor-destaque { font-size: 36px; font-weight: 900; margin: 8px 0 24px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-          td { padding: 8px 0; font-size: 14px; border-bottom: 1px solid #f3f4f6; }
-          td:first-child { color: #6b7280; }
-          td:last-child { text-align: right; font-weight: 600; }
-          .secao-titulo { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin: 20px 0 8px; }
-          .repasse-item { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }
-          .sem-repasse { font-size: 12px; color: #9ca3af; font-style: italic; padding: 4px 0; }
-          .retencao { display: flex; justify-content: space-between; font-size: 14px; font-weight: 700; padding-top: 12px; border-top: 2px solid #111; margin-top: 8px; }
-          .aviso { background: #fffbeb; color: #92400e; border-radius: 6px; padding: 8px 12px; font-size: 12px; margin-top: 16px; }
-          .rodape { margin-top: 32px; font-size: 11px; color: #9ca3af; text-align: center; }
-        </style>
-      </head>
-      <body>
-        <div class="recibo">
-          <div class="logo">${esc(nomeEstudio)}</div>
-          <div class="titulo">Comprovante de Pagamento</div>
-          <div class="icone-ok">✅</div>
-          <div class="valor-destaque">${formatarMoeda(valorPago)}</div>
-          <table>
-            <tr><td>Aluno</td><td>${esc(nomeAluno)}</td></tr>
-            ${planoNome ? `<tr><td>Plano</td><td>${esc(planoNome)}</td></tr>` : ''}
-            ${tipoAula ? `<tr><td>Tipo de Aula</td><td>${esc(TIPO_AULA_LABELS[tipoAula] || tipoAula)}</td></tr>` : ''}
-            <tr><td>Forma de Pagamento</td><td>${esc(FORMA_LABELS[formaPagamento] || formaPagamento || '—')}</td></tr>
-            <tr><td>Data / Hora</td><td>${dataFormatada}</td></tr>
-          </table>
-          <div class="secao-titulo">Repasses a Professores</div>
-          ${resultado.itens?.length > 0
-            ? resultado.itens.map(it => `
-                <div class="repasse-item">
-                  <span>${esc(it.professor_nome) || 'Professor'}${esc(it.modalidade) ? ` (${esc(it.modalidade)})` : ''}</span>
-                  <span>${formatarMoeda(it.valor)}</span>
-                </div>
-              `).join('')
-            : `<div class="sem-repasse">${
-                tipoAula === 'experimental'
-                  ? 'Aula experimental sem professor vinculado.'
-                  : 'Nenhum repasse gerado para esta cobrança.'
-              }</div>`
-          }
-          <div class="retencao">
-            <span>Retenção Casa</span>
-            <span>${formatarMoeda(resultado.retencao_casa)}</span>
+    if (!win) {
+      showToast.error('Não foi possível abrir a janela de impressão. Verifique o bloqueador de pop-ups.');
+      return;
+    }
+
+    try {
+      win.document.write(`
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+        <head>
+          <meta charset="UTF-8" />
+          <title>Comprovante de Pagamento – ${esc(nomeEstudio)}</title>
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body {
+              font-family: 'Segoe UI', system-ui, sans-serif;
+              background: #fff;
+              color: #111;
+              padding: 32px;
+            }
+            .recibo { max-width: 400px; margin: 0 auto; }
+            .logo { font-size: 22px; font-weight: 900; color: #ca8a04; letter-spacing: -0.5px; margin-bottom: 4px; }
+            .titulo { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; margin-bottom: 24px; }
+            .icone-ok { font-size: 28px; margin-bottom: 12px; }
+            .valor-destaque { font-size: 36px; font-weight: 900; margin: 8px 0 24px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+            td { padding: 8px 0; font-size: 14px; border-bottom: 1px solid #f3f4f6; }
+            td:first-child { color: #6b7280; }
+            td:last-child { text-align: right; font-weight: 600; }
+            .secao-titulo { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin: 20px 0 8px; }
+            .repasse-item { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; }
+            .sem-repasse { font-size: 12px; color: #9ca3af; font-style: italic; padding: 4px 0; }
+            .retencao { display: flex; justify-content: space-between; font-size: 14px; font-weight: 700; padding-top: 12px; border-top: 2px solid #111; margin-top: 8px; }
+            .aviso { background: #fffbeb; color: #92400e; border-radius: 6px; padding: 8px 12px; font-size: 12px; margin-top: 16px; }
+            .rodape { margin-top: 32px; font-size: 11px; color: #9ca3af; text-align: center; }
+          </style>
+        </head>
+        <body>
+          <div class="recibo">
+            <div class="logo">${esc(nomeEstudio)}</div>
+            <div class="titulo">Comprovante de Pagamento</div>
+            <div class="icone-ok">✅</div>
+            <div class="valor-destaque">${formatarMoeda(valorPago)}</div>
+            <table>
+              <tr><td>Aluno</td><td>${esc(nomeAluno)}</td></tr>
+              ${planoNome ? `<tr><td>Plano</td><td>${esc(planoNome)}</td></tr>` : ''}
+              ${tipoAula ? `<tr><td>Tipo de Aula</td><td>${esc(TIPO_AULA_LABELS[tipoAula] || tipoAula)}</td></tr>` : ''}
+              <tr><td>Forma de Pagamento</td><td>${esc(FORMA_LABELS[formaPagamento] || formaPagamento || '—')}</td></tr>
+              <tr><td>Data / Hora</td><td>${dataFormatada}</td></tr>
+            </table>
+            <div class="secao-titulo">Repasses a Professores</div>
+            ${resultado.itens?.length > 0
+              ? resultado.itens.map(it => `
+                  <div class="repasse-item">
+                    <span>${esc(it.professor_nome) || 'Professor'}${esc(it.modalidade) ? ` (${esc(it.modalidade)})` : ''}</span>
+                    <span>${formatarMoeda(it.valor)}</span>
+                  </div>
+                `).join('')
+              : `<div class="sem-repasse">${
+                  tipoAula === 'experimental'
+                    ? 'Aula experimental sem professor vinculado.'
+                    : 'Nenhum repasse gerado para esta cobrança.'
+                }</div>`
+            }
+            <div class="retencao">
+              <span>Retenção Casa</span>
+              <span>${formatarMoeda(resultado.retencao_casa)}</span>
+            </div>
+            ${resultado.avisos?.length > 0 ? `
+              <div class="aviso">${resultado.avisos.map(a => `⚠ ${esc(a)}`).join('<br/>')}</div>
+            ` : ''}
+            <div class="rodape">Gerado em ${dataFormatada} · ${esc(nomeEstudio)}</div>
           </div>
-          ${resultado.avisos?.length > 0 ? `
-            <div class="aviso">${resultado.avisos.map(a => `⚠ ${esc(a)}`).join('<br/>')}</div>
-          ` : ''}
-          <div class="rodape">Gerado em ${dataFormatada} · ${esc(nomeEstudio)}</div>
-        </div>
-      </body>
-      </html>
-    `);
-    win.document.close();
-    win.focus();
-    setTimeout(() => win.print(), 400);
+        </body>
+        </html>
+      `);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 400);
+    } catch (error) {
+      console.error('[RepasseAlunoCard] Erro ao gerar comprovante para impressão:', error);
+      showToast.error('Não foi possível gerar o comprovante para impressão.');
+      win.close();
+    }
   };
 
   return (

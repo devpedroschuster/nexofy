@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
+import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, isValid } from 'date-fns';
 import {
   buildPresencasIndex, buildFixosIndex, buildFaltasFixosIndex,
   expandirRecorrencia, expandirEventoUnico, gerarEventosFeriados
@@ -36,17 +36,31 @@ export function useEventosCalendario({ aulas, feriados, presencasCalendario, mat
   }, [aulas, filtroProf, filtroEspaco]);
 
   const limitesVisiveis = useMemo(() => {
+    // Guard defensivo: se currentDate vier null/undefined/inválido do estado do
+    // componente pai, date-fns lançaria exceção dentro deste useMemo e quebraria
+    // a renderização inteira do calendário (não um card isolado). Recuamos para
+    // "hoje" e avisamos em dev em vez de propagar o crash.
+    const dataBase = currentDate instanceof Date && isValid(currentDate) ? currentDate : new Date();
+    if (currentDate && dataBase !== currentDate && process.env.NODE_ENV !== 'production') {
+      console.warn('[useEventosCalendario] currentDate inválido recebido, usando data atual como fallback', currentDate);
+    }
+
     if (currentView === 'day') {
-      return { inicio: currentDate, fim: currentDate };
+      return { inicio: dataBase, fim: dataBase };
     } else if (currentView === 'week') {
       return {
-        inicio: startOfWeek(currentDate, { weekStartsOn: 0 }),
-        fim: endOfWeek(currentDate, { weekStartsOn: 0 })
+        inicio: startOfWeek(dataBase, { weekStartsOn: 0 }),
+        fim: endOfWeek(dataBase, { weekStartsOn: 0 })
       };
     } else {
+      // Fallback explícito: qualquer view desconhecida (ex: uma futura 'agenda')
+      // cai aqui silenciosamente sem isso — deixamos o aviso em dev registrado.
+      if (currentView !== 'month' && process.env.NODE_ENV !== 'production') {
+        console.warn('[useEventosCalendario] currentView desconhecida, usando range de mês como fallback', currentView);
+      }
       return {
-        inicio: startOfWeek(startOfMonth(currentDate), { weekStartsOn: 0 }),
-        fim: endOfWeek(endOfMonth(currentDate), { weekStartsOn: 0 })
+        inicio: startOfWeek(startOfMonth(dataBase), { weekStartsOn: 0 }),
+        fim: endOfWeek(endOfMonth(dataBase), { weekStartsOn: 0 })
       };
     }
   }, [currentDate, currentView]);

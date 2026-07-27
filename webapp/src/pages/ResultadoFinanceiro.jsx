@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { dreService } from '../services/dreService';
+import { useAuth } from '../hooks/useAuth';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, Legend, Cell,
@@ -126,6 +127,7 @@ function CustomTooltip({ active, payload, label }) {
 
 // ── Página principal ──────────────────────────────────────────────────────────
 export default function ResultadoFinanceiro() {
+  const { estudioId } = useAuth();
   const agora = new Date();
   const [mesRef, setMesRef] = useState(new Date(agora.getFullYear(), agora.getMonth(), 1));
 
@@ -137,15 +139,26 @@ export default function ResultadoFinanceiro() {
   const ehMesAtual  = mes === agora.getMonth() && ano === agora.getFullYear();
 
   // ── Queries ────────────────────────────────────────────────────────────────
-  const { data: dre, isLoading: loadingDRE } = useQuery({
-    queryKey: ['dre', mes, ano],
-    queryFn: () => dreService.obterDRE(mes, ano),
+  const {
+    data: dre,
+    isLoading: loadingDRE,
+    isError: errorDRE,
+  } = useQuery({
+    queryKey: ['dre', estudioId, mes, ano], // FIX: estudioId no cache key
+    queryFn: () => dreService.obterDRE(mes, ano, estudioId), // FIX: estudioId propagado
+    enabled: !!estudioId, // FIX: nunca dispara sem tenant resolvido
     staleTime: 1000 * 60 * 5,
+    placeholderData: keepPreviousData, // FIX: evita flash de skeleton ao trocar de mês
   });
 
-  const { data: historico = [], isLoading: loadingHistorico } = useQuery({
-    queryKey: ['dre-historico'],
-    queryFn: () => dreService.obterHistorico(6),
+  const {
+    data: historico = [],
+    isLoading: loadingHistorico,
+    isError: errorHistorico,
+  } = useQuery({
+    queryKey: ['dre-historico', estudioId], // FIX
+    queryFn: () => dreService.obterHistorico(6, estudioId), // FIX
+    enabled: !!estudioId, // FIX
     staleTime: 1000 * 60 * 10,
   });
 
@@ -164,10 +177,10 @@ export default function ResultadoFinanceiro() {
   // ── Dados para gráfico de barras agrupadas ─────────────────────────────────
   const dadosBarras = historico.map(h => ({
     mes: h.mes,
-    'Receita': parseFloat(h.receita.toFixed(2)),
-    'Despesas': parseFloat(h.despesa.toFixed(2)),
-    'Comissões': parseFloat(h.comissao.toFixed(2)),
-    'Lucro': parseFloat(h.lucro.toFixed(2)),
+    'Receita':   parseFloat((h.receita  ?? 0).toFixed(2)),  // FIX: defensivo contra undefined
+    'Despesas':  parseFloat((h.despesa  ?? 0).toFixed(2)),  // FIX
+    'Comissões': parseFloat((h.comissao ?? 0).toFixed(2)),  // FIX
+    'Lucro':     parseFloat((h.lucro    ?? 0).toFixed(2)),  // FIX
   }));
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -208,6 +221,15 @@ export default function ResultadoFinanceiro() {
           </button>
         </div>
       </div>
+
+      {(errorDRE || errorHistorico) && (
+        <div className="flex items-center gap-2 p-4 rounded-2xl bg-destructive-soft border border-destructive/20">
+          <AlertCircle size={16} className="text-destructive shrink-0" />
+          <p className="text-sm font-bold text-destructive">
+            Não foi possível carregar o resultado financeiro. Tente atualizar a página.
+          </p>
+        </div>
+      )}
 
       {/* KPIs principais */}
       {loadingDRE ? (

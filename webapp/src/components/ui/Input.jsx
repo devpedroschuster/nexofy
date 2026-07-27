@@ -5,20 +5,19 @@
 //   - Estados: default, focus (ring), disabled, error
 //   - Suporta ícone à esquerda e à direita (leftIcon / rightIcon)
 //   - Pode ser renderizado como <input> ou <textarea> via prop `as`
+//   - rightIcon é INTENCIONALMENTE clicável (sem pointer-events-none), pois é
+//     usado para ações como toggle de "mostrar senha". Não adicionar
+//     pointer-events-none aqui sem revisar os usos existentes de rightIcon.
 //
-// Label:
-//   - Tipografia muted pequena, uppercase tracking — padrão Midnight Indigo
-//   - Suporte a `required` (asterisco destructive)
-//   - Suporte a `hint` (texto auxiliar inline)
-//
-// FormField:
-//   - Wrapper conveniente: Label + Input + ErrorMessage
+// Label / ErrorMessage / FormField:
+//   - FormField é o padrão recomendado para novos formulários (garante
+//     aria-describedby e ids consistentes). Preferir FormField a montar
+//     Label + Input + ErrorMessage manualmente.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React from 'react';
+import React, { useId } from 'react';
 import { cn } from '../../lib/cn';
 
-/* ── Base compartilhada ─────────────────────────────────────────────────────── */
 export const inputBaseClass = cn(
   'w-full rounded-xl border border-input bg-background text-foreground',
   'placeholder:text-muted-foreground',
@@ -30,16 +29,17 @@ export const inputBaseClass = cn(
 
 const inputErrorClass = 'border-destructive focus-visible:ring-destructive';
 
-/* ── Input ──────────────────────────────────────────────────────────────────── */
 const Input = React.forwardRef(function Input(
   {
     as = 'input',
     leftIcon,
     rightIcon,
     error,
+    errorId,
     className,
     wrapperClassName,
     rows,
+    'aria-describedby': ariaDescribedBy,
     ...rest
   },
   ref
@@ -57,8 +57,13 @@ const Input = React.forwardRef(function Input(
 
   const extraProps = as === 'textarea' ? { rows: rows ?? 4 } : {};
 
+  const a11yProps = {
+    'aria-invalid': error ? true : undefined,
+    'aria-describedby': error && errorId ? errorId : ariaDescribedBy,
+  };
+
   if (!leftIcon && !rightIcon) {
-    return <Tag ref={ref} className={classes} {...extraProps} {...rest} />;
+    return <Tag ref={ref} className={classes} {...extraProps} {...a11yProps} {...rest} />;
   }
 
   return (
@@ -68,8 +73,9 @@ const Input = React.forwardRef(function Input(
           {leftIcon}
         </span>
       )}
-      <Tag ref={ref} className={classes} {...extraProps} {...rest} />
+      <Tag ref={ref} className={classes} {...extraProps} {...a11yProps} {...rest} />
       {rightIcon && (
+        // Sem pointer-events-none de propósito — ver comentário no topo do arquivo.
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground [&_svg]:size-4">
           {rightIcon}
         </span>
@@ -80,7 +86,6 @@ const Input = React.forwardRef(function Input(
 
 export default Input;
 
-/* ── Label ──────────────────────────────────────────────────────────────────── */
 export function Label({ children, htmlFor, className, required, hint }) {
   return (
     <label
@@ -102,17 +107,16 @@ export function Label({ children, htmlFor, className, required, hint }) {
   );
 }
 
-/* ── ErrorMessage ───────────────────────────────────────────────────────────── */
-export function ErrorMessage({ children, className }) {
+export function ErrorMessage({ children, className, id }) {
   if (!children) return null;
   return (
-    <p className={cn('mt-1.5 text-xs font-medium text-destructive', className)}>
+    <p id={id} className={cn('mt-1.5 text-xs font-medium text-destructive', className)} role="alert">
       {children}
     </p>
   );
 }
 
-/* ── FormField — wrapper completo ───────────────────────────────────────────── */
+/* FormField agora gera e conecta os ids automaticamente (Label ⇄ Input ⇄ ErrorMessage) */
 export function FormField({
   label,
   htmlFor,
@@ -122,15 +126,27 @@ export function FormField({
   children,
   className,
 }) {
+  const generatedId = useId();
+  const fieldId = htmlFor || generatedId;
+  const errorId = error ? `${fieldId}-error` : undefined;
+
+  const enhancedChildren = React.isValidElement(children)
+    ? React.cloneElement(children, {
+        id: children.props.id || fieldId,
+        error: children.props.error ?? Boolean(error),
+        errorId: children.props.errorId || errorId,
+      })
+    : children;
+
   return (
     <div className={cn('space-y-0', className)}>
       {label && (
-        <Label htmlFor={htmlFor} required={required} hint={hint}>
+        <Label htmlFor={fieldId} required={required} hint={hint}>
           {label}
         </Label>
       )}
-      {children}
-      <ErrorMessage>{error}</ErrorMessage>
+      {enhancedChildren}
+      <ErrorMessage id={errorId}>{error}</ErrorMessage>
     </div>
   );
 }

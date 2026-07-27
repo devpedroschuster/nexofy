@@ -8,30 +8,22 @@ import { showToast } from './shared/Toast';
 import { useAuth } from '../hooks/useAuth';
 import { User, DollarSign, Calendar, BookOpen, GraduationCap, Package, CreditCard, LayoutList, Loader2 } from 'lucide-react';
 
-/**
- * Traduz erros técnicos do Supabase/Postgres para mensagens humanas.
- */
-function traduzirErroRegistro(error, nomeAluno) {
+function traduzirErroRegistro(error) {
   const msg = error?.message || '';
   const code = error?.code || '';
 
-  // Pagamento duplicado (unique constraint)
   if (code === '23505' || msg.includes('duplicate key') || msg.includes('unique constraint')) {
     return 'Esse aluno já tem um pagamento registrado para este mês.';
   }
-  // Foreign key — aluno ou plano não existe mais
   if (code === '23503' || msg.includes('foreign key')) {
     return 'O aluno ou plano selecionado não foi encontrado. Atualize a página e tente de novo.';
   }
-  // Sem permissão
   if (code === '42501' || msg.includes('permission denied')) {
     return 'Você não tem permissão para registrar este pagamento.';
   }
-  // Valor inválido
   if (msg.includes('invalid input') || msg.includes('numeric')) {
     return 'O valor informado é inválido. Verifique e tente de novo.';
   }
-  // Fallback genérico — sem expor stack técnica
   return 'Não foi possível registrar o pagamento. Verifique os dados e tente de novo.';
 }
 
@@ -41,6 +33,7 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
   const [planos, setPlanos] = useState([]);
   const [professores, setProfessores] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [carregandoDados, setCarregandoDados] = useState(false);
   const [isVisitante, setIsVisitante] = useState(false);
 
   const initialForm = {
@@ -64,39 +57,58 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
       setForm(initialForm);
       setIsVisitante(false);
     }
-  }, [isOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, estudioId]);
 
   async function carregarDados() {
-    const { data: a } = await supabase.from('alunos').select('id, nome_completo, plano_id').order('nome_completo');
-    const { data: p } = await supabase.from('planos').select('id, nome, preco');
-    const { data: profs } = await supabase.from('professores').select('id, nome');
-    if (a) setAlunos(a);
-    if (p) setPlanos(p);
-    if (profs) setProfessores(profs);
+    if (!estudioId) return;
+    setCarregandoDados(true);
+    try {
+      const [{ data: a, error: ea }, { data: p, error: ep }, { data: profs, error: eprofs }] = await Promise.all([
+        supabase.from('alunos').select('id, nome_completo, plano_id').eq('estudio_id', estudioId).order('nome_completo'),
+        supabase.from('planos').select('id, nome, preco').eq('estudio_id', estudioId),
+        supabase.from('professores').select('id, nome').eq('estudio_id', estudioId),
+      ]);
+      if (ea || ep || eprofs) throw ea || ep || eprofs;
+      setAlunos(a ?? []);
+      setPlanos(p ?? []);
+      setProfessores(profs ?? []);
+    } catch (error) {
+      console.error('[ModalAdicionarPagamentoManual] Falha ao carregar dados:', error);
+      showToast.error('Não foi possível carregar alunos/planos/professores. Tente novamente.');
+    } finally {
+      setCarregandoDados(false);
+    }
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
- 
+
     if (!estudioId) {
       showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
       return;
     }
- 
+
+    const valorPago = Number(form.valor_pago);
+    if (!valorPago || valorPago <= 0) {
+      showToast.error('Informe um valor válido maior que zero.');
+      return;
+    }
+
     setLoading(true);
- 
+
     try {
       const payload = {
         aluno_id: isVisitante ? null : form.aluno_id,
         nome_visitante: isVisitante ? form.nome_visitante : null,
         tipo_aula: form.tipo_aula,
-        valor_pago: Number(form.valor_pago),
+        valor_pago: valorPago,
         forma_pagamento: form.forma_pagamento,
         data_vencimento: form.data_vencimento,
         status: 'pago',
         data_pagamento: form.data_pagamento,
       };
- 
+
       if (form.tipo_aula === 'regular' && form.plano_id) {
         payload.plano_id = form.plano_id;
       }
@@ -104,10 +116,9 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
         payload.professor_id = form.professor_id;
         payload.modalidade_nome = form.modalidade_nome;
       }
- 
+
       const resultado = await financeiroService.adicionarPagamentoManual(payload, estudioId);
 
-      // Toast contextual de sucesso
       const nomeExibicao = isVisitante
         ? form.nome_visitante
         : alunos.find(a => a.id === form.aluno_id)?.nome_completo?.split(' ')[0] || 'Aluno';
@@ -115,15 +126,13 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
       showToast.success(`✅ Pagamento de ${nomeExibicao} registrado com sucesso!`);
 
       if (resultado._avisoRepasse) {
-        // Aviso em toast separado — não substitui a confirmação de sucesso
         setTimeout(() => showToast.warning(`⚠️ ${resultado._avisoRepasse}`), 600);
       }
 
       onSucesso();
       onClose();
     } catch (error) {
-      const nomeAluno = alunos.find(a => a.id === form.aluno_id)?.nome_completo || '';
-      showToast.error(traduzirErroRegistro(error, nomeAluno));
+      showToast.error(traduzirErroRegistro(error));
     } finally {
       setLoading(false);
     }

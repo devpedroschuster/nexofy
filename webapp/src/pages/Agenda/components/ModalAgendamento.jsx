@@ -2,7 +2,7 @@ import React from 'react';
 import { UserCheck, RefreshCw, MessageCircle } from 'lucide-react';
 import { ModalConfirmacao } from '../../../components/ui/Modal';
 import Button from '../../../components/ui/Button';
-import Input, { Label } from '../../../components/ui/Input';
+import Input from '../../../components/ui/Input'; // ✅ removido `Label` não utilizado
 
 // Configuração do modal de aviso conforme o tipo de bloqueio.
 function resolverConfigModal(tipo, msg) {
@@ -22,11 +22,30 @@ function resolverConfigModal(tipo, msg) {
 }
 
 export default function ModalAgendamento({
-  agendamentoForm, setAgendamentoForm, aulas, listaAlunos, handleAgendarAluno,
+  agendamentoForm, setAgendamentoForm,
+  aulas = [], listaAlunos = [],           // ✅ Bug #1: defaults seguros
+  handleAgendarAluno,
   savingAgendamento, infoVaga, verificandoVaga,
   modalLotacao, confirmarAgendamentoLotado, cancelarAgendamentoLotado
 }) {
   const configModal = resolverConfigModal(modalLotacao?.tipo, modalLotacao?.msg);
+
+  // ✅ Bug #3: se a aula selecionada sair da lista (ex: refetch em background
+  // remove/altera a grade), limpa a seleção em vez de deixar o form com um
+  // aula_id que não corresponde mais ao que o <select> exibe.
+  React.useEffect(() => {
+    if (agendamentoForm.aula_id && !aulas.some(a => a.id === agendamentoForm.aula_id)) {
+      setAgendamentoForm(f => ({ ...f, aula_id: '', _nomeAtividade: '' }));
+    }
+  }, [aulas]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ✅ Bug #3: mesmo raciocínio para o aluno selecionado.
+  React.useEffect(() => {
+    if (agendamentoForm.tipo === 'cadastrado' && agendamentoForm.aluno_id &&
+        !listaAlunos.some(a => a.id === agendamentoForm.aluno_id)) {
+      setAgendamentoForm(f => ({ ...f, aluno_id: '', _nomeAluno: '' }));
+    }
+  }, [listaAlunos]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>
@@ -117,6 +136,7 @@ export default function ModalAgendamento({
         <Input
           type="date"
           required
+          min={new Date().toISOString().split('T')[0]}
           value={agendamentoForm.data_aula}
           onChange={e => setAgendamentoForm({ ...agendamentoForm, data_aula: e.target.value })}
         />

@@ -12,8 +12,24 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error("Erro capturado pelo ErrorBoundary:", error, errorInfo);
+    console.error('Erro capturado pelo ErrorBoundary:', error, errorInfo);
+
+    const isChunkError = /Failed to fetch dynamically imported module|Loading chunk .* failed/i.test(
+      error?.message || ''
+    );
+    if (isChunkError) {
+      window.location.reload();
+      return;
+    }
+
+    if (!import.meta.env.DEV && typeof window.Sentry?.captureException === 'function') {
+      window.Sentry.captureException(error, { extra: errorInfo });
+    }
   }
+
+  handleReset = () => {
+    this.setState({ hasError: false, error: null });
+  };
 
   render() {
     if (this.state.hasError) {
@@ -28,20 +44,20 @@ class ErrorBoundary extends React.Component {
               O sistema encontrou uma instabilidade inesperada. Não se preocupe, seus dados estão seguros.
             </p>
             <div className="flex flex-col gap-3">
-              <button 
-                onClick={() => window.location.reload()}
+              <button
+                onClick={this.handleReset}
                 className="bg-primary text-primary-foreground px-6 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-all"
               >
                 <RefreshCw size={18} /> Tentar novamente
               </button>
-              <button 
-                onClick={() => window.location.href = '/dashboard'}
-                className="text-gray-500 font-bold py-2 hover:text-gray-800 transition-colors"
+              <button
+                onClick={() => (window.location.href = '/')}
+                className="text-gray-500 font-bold py-2 hover:text-gray-800 transition-colors flex items-center justify-center gap-2"
               >
-                Voltar para o Início
+                <Home size={16} /> Voltar para o Início
               </button>
             </div>
-            {process.env.NODE_ENV === 'development' && (
+            {import.meta.env.DEV && (
               <div className="mt-8 p-4 bg-gray-50 rounded-xl text-left overflow-auto max-h-40">
                 <p className="text-[10px] font-mono text-red-400">{this.state.error?.toString()}</p>
               </div>

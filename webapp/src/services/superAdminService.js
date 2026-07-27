@@ -70,10 +70,16 @@ async function metricasGlobais() {
 
 // ── SUSPENDER / REATIVAR ─────────────────────────────────────────────────────
 
+const STATUS_VALIDOS = ['ativo', 'suspenso'];
+
 /**
  * Alterna o status de um estúdio entre 'ativo' e 'suspenso'.
  */
 async function alterarStatusEstudio(estudioId, novoStatus) {
+ if (!STATUS_VALIDOS.includes(novoStatus)) {
+    throw new Error(`Status inválido: "${novoStatus}". Valores aceitos: ${STATUS_VALIDOS.join(', ')}.`);
+  }
+
   const { error } = await supabase
     .from('estudios')
     .update({ status: novoStatus })

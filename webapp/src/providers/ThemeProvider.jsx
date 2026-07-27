@@ -1,56 +1,40 @@
 // src/providers/ThemeProvider.jsx
-// ─── Midnight Indigo · ThemeProvider ─────────────────────────────────────────
-//
-// Suporta três modos: 'light' | 'dark' | 'system'
-// - Persiste em localStorage sob a chave 'midnight-theme'
-// - Aplica a classe 'dark' no <html> conforme o tema resolvido
-// - Respeita prefers-color-scheme quando em modo 'system'
-// - Escuta mudanças do sistema em tempo real (ex: usuário muda o SO p/ dark)
-//
-// Uso:
-//   const { theme, setTheme, resolvedTheme } = useTheme();
-//   theme          → 'light' | 'dark' | 'system'  (preferência salva)
-//   resolvedTheme  → 'light' | 'dark'              (tema efetivo aplicado)
-// ─────────────────────────────────────────────────────────────────────────────
-
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 
-const STORAGE_KEY  = 'midnight-theme';
-const DEFAULT_THEME = 'dark'; // Midnight Indigo nasce escuro
+const STORAGE_KEY   = 'midnight-theme';
+const DEFAULT_THEME  = 'dark';
 
 const ThemeContext = createContext(null);
 
+function safeGetStoredTheme(fallback) {
+  try {
+    return localStorage.getItem(STORAGE_KEY) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function getSystemTheme() {
+  if (typeof window === 'undefined' || !window.matchMedia) return 'light';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 function resolveTheme(theme) {
-  if (theme === 'system') return getSystemTheme();
-  return theme;
+  return theme === 'system' ? getSystemTheme() : theme;
 }
 
 export function ThemeProvider({ children, defaultTheme = DEFAULT_THEME }) {
-  const [theme, setThemeState] = useState(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY) ?? defaultTheme;
-    } catch {
-      return defaultTheme;
-    }
-  });
+  const [theme, setThemeState] = useState(() => safeGetStoredTheme(defaultTheme));
+  const [resolvedTheme, setResolvedTheme] = useState(() => resolveTheme(safeGetStoredTheme(defaultTheme)));
 
-  const [resolvedTheme, setResolvedTheme] = useState(() =>
-    resolveTheme(localStorage.getItem(STORAGE_KEY) ?? defaultTheme)
-  );
-
-  /* Aplica a classe 'dark' no <html> e atualiza resolvedTheme */
   useEffect(() => {
     const resolved = resolveTheme(theme);
     setResolvedTheme(resolved);
     document.documentElement.classList.toggle('dark', resolved === 'dark');
   }, [theme]);
 
-  /* Escuta mudanças de tema do sistema (apenas quando em modo 'system') */
   useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
 
     const handler = () => {
@@ -68,7 +52,7 @@ export function ThemeProvider({ children, defaultTheme = DEFAULT_THEME }) {
   const setTheme = useCallback((next) => {
     try {
       localStorage.setItem(STORAGE_KEY, next);
-    } catch { /* safari private */ }
+    } catch { /* safari private mode */ }
     setThemeState(next);
   }, []);
 

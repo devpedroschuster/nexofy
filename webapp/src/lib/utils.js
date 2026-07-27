@@ -1,71 +1,96 @@
 export const formatarMoeda = (valor) => {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
-    currency: 'BRL'
-  }).format(valor || 0);
+    currency: 'BRL',
+  }).format(Number.isFinite(valor) ? valor : 0);
 };
 
-export const formatarData = (data, comHora = false) => {
+/**
+ * Formata uma data para exibição em pt-BR.
+ * Aceita: string ISO "YYYY-MM-DD", string ISO com timestamp completo,
+ * ou um objeto Date. Retorna '-' para valores ausentes/inválidos.
+ *
+ * @param {string|Date} data
+ * @param {boolean} comHora   - inclui hora:minuto
+ * @param {boolean} mesCurto  - mês por extenso abreviado (ex: "jan") em vez de "01"
+ */
+export const formatarData = (data, comHora = false, mesCurto = false) => {
   if (!data) return '-';
+
   const options = {
     day: '2-digit',
-    month: '2-digit',
+    month: mesCurto ? 'short' : '2-digit',
     year: 'numeric',
-    timeZone: 'America/Sao_Paulo'
+    timeZone: 'America/Sao_Paulo',
   };
   if (comHora) {
     options.hour = '2-digit';
     options.minute = '2-digit';
   }
-  const dataSegura = typeof data === 'string' && data.length === 10
-    ? data + 'T12:00:00'
-    : data;
-  return new Intl.DateTimeFormat('pt-BR', options).format(new Date(dataSegura));
+
+  const somenteData = typeof data === 'string' ? data.split('T')[0] : null;
+  const ehDataPura = somenteData && /^\d{4}-\d{2}-\d{2}$/.test(somenteData);
+  const dataSegura = ehDataPura ? `${somenteData}T12:00:00` : data;
+
+  const dataObj = new Date(dataSegura);
+  if (Number.isNaN(dataObj.getTime())) return '-';
+
+  return new Intl.DateTimeFormat('pt-BR', options).format(dataObj);
 };
+
+/** Formata data + hora, ex: "15/01/2025, 14:30". Usa formatarData internamente. */
+export const formatarDataHora = (data) => formatarData(data, true);
 
 export const paraUTC = (ano, mes, dia = 1) => {
   return new Date(Date.UTC(ano, mes, dia)).toISOString().split('T')[0];
 };
 
 export const validarEmail = (email) => {
-  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return regex.test(email);
+  if (typeof email !== 'string') return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 };
 
 export const validarCPF = (cpf) => {
-  cpf = cpf.replace(/[^\d]/g, '');
-  if (cpf.length !== 11 || /^(\d)\1+$/.test(cpf)) return false;
+  if (typeof cpf !== 'string') return false;
+  const n = cpf.replace(/\D/g, '');
+  if (n.length !== 11 || /^(\d)\1+$/.test(n)) return false;
+
   let soma = 0;
-  let resto;
-  for (let i = 1; i <= 9; i++) {
-    soma += parseInt(cpf.substring(i - 1, i)) * (11 - i);
-  }
-  resto = (soma * 10) % 11;
+  for (let i = 1; i <= 9; i++) soma += parseInt(n[i - 1], 10) * (11 - i);
+  let resto = (soma * 10) % 11;
   if (resto === 10 || resto === 11) resto = 0;
-  if (resto !== parseInt(cpf.substring(9, 10))) return false;
+  if (resto !== parseInt(n[9], 10)) return false;
+
   soma = 0;
-  for (let i = 1; i <= 10; i++) {
-    soma += parseInt(cpf.substring(i - 1, i)) * (12 - i);
-  }
+  for (let i = 1; i <= 10; i++) soma += parseInt(n[i - 1], 10) * (12 - i);
   resto = (soma * 10) % 11;
   if (resto === 10 || resto === 11) resto = 0;
-  if (resto !== parseInt(cpf.substring(10, 11))) return false;
+  if (resto !== parseInt(n[10], 10)) return false;
+
   return true;
 };
 
+/**
+ * Formata CPF progressivamente — funciona tanto para exibir um CPF
+ * completo já salvo quanto como máscara de digitação em tempo real
+ * (formata parcialmente conforme o usuário digita).
+ */
 export const formatarCPF = (cpf) => {
   if (!cpf) return '';
-  cpf = cpf.replace(/\D/g, '');
-  return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  const n = String(cpf).replace(/\D/g, '').slice(0, 11);
+  if (n.length <= 3) return n;
+  if (n.length <= 6) return `${n.slice(0, 3)}.${n.slice(3)}`;
+  if (n.length <= 9) return `${n.slice(0, 3)}.${n.slice(3, 6)}.${n.slice(6)}`;
+  return `${n.slice(0, 3)}.${n.slice(3, 6)}.${n.slice(6, 9)}-${n.slice(9)}`;
 };
 
 export const formatarTelefone = (telefone) => {
   if (!telefone) return '';
-  telefone = telefone.replace(/\D/g, '');
-  if (telefone.length === 11) {
-    return telefone.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+  const n = String(telefone).replace(/\D/g, '');
+  if (n.length === 11) {
+    return n.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
   }
-  return telefone.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3');
+  return n.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3');
 };
 
 export const coresStatus = {

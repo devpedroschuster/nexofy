@@ -5,6 +5,17 @@ export const ICONES_ESPACO = {
 };
 
 export function IconeEspaco({ nome, size = 16 }) {
-  const Icone = ICONES_ESPACO[nome] || MapPin;
+  const chave = typeof nome === 'string' ? nome.trim() : nome;
+  const Icone = ICONES_ESPACO[chave];
+
+  if (!Icone) {
+    if (import.meta.env.DEV && nome) {
+      // Ajuda a pegar espaços com `icone` mal configurado no banco,
+      // já que hoje isso falha 100% silenciosamente em produção.
+      console.warn(`[IconeEspaco] Ícone "${nome}" não encontrado em ICONES_ESPACO — usando MapPin.`);
+    }
+    return <MapPin size={size} />;
+  }
+
   return <Icone size={size} />;
 }

@@ -10,7 +10,7 @@
 // nativo do Supabase Auth sem código extra de envio de e-mail.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, ArrowRight, Sparkles, MailCheck } from 'lucide-react';
 
@@ -20,6 +20,8 @@ import { REGEX, LIMITES } from '../lib/constants';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 
+const NOME_MAX = 120;
+
 export default function Cadastro() {
   const [nome, setNome]     = useState('');
   const [email, setEmail]   = useState('');
@@ -28,6 +30,8 @@ export default function Cadastro() {
   const [enviado, setEnviado] = useState(false);
 
   const navigate = useNavigate();
+  const montadoRef = useRef(true);
+  useEffect(() => () => { montadoRef.current = false; }, []);
 
   function validar() {
     if (!nome.trim()) {
@@ -55,7 +59,7 @@ export default function Cadastro() {
         email: email.trim().toLowerCase(),
         password: senha,
         options: {
-          data: { nome: nome.trim() },
+          data: { nome: nome.trim().slice(0, NOME_MAX) },
           emailRedirectTo: `${window.location.origin}/cadastro/estudio`,
         },
       });
@@ -66,7 +70,6 @@ export default function Cadastro() {
       // já existe e está confirmado — não lança erro, pra evitar enumeração.
       if (data.user && data.user.identities && data.user.identities.length === 0) {
         showToast.error('Este e-mail já está cadastrado. Tente entrar.');
-        setLoading(false);
         return;
       }
 
@@ -77,15 +80,21 @@ export default function Cadastro() {
         return;
       }
 
-      setEnviado(true);
+      if (montadoRef.current) setEnviado(true);
     } catch (err) {
-      if (err.message?.toLowerCase().includes('already registered')) {
+      // Prioriza o código de erro do Supabase (estável entre versões da API);
+      // cai pra checagem de string só como fallback defensivo.
+      const jaExiste =
+        err?.code === 'user_already_exists' ||
+        err?.message?.toLowerCase().includes('already registered');
+
+      if (jaExiste) {
         showToast.error('Este e-mail já está cadastrado. Tente entrar.');
       } else {
         showToast.error('Não foi possível criar sua conta. Tente novamente.');
       }
     } finally {
-      setLoading(false);
+      if (montadoRef.current) setLoading(false);
     }
   }
 
@@ -139,6 +148,7 @@ export default function Cadastro() {
                   aria-label="Nome completo"
                   leftIcon={<User size={16} />}
                   value={nome}
+                  maxLength={NOME_MAX}
                   onChange={(e) => setNome(e.target.value)}
                 />
 

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
-import { Save, RefreshCw, Calculator, Percent, DollarSign, Info, CheckCircle2 } from 'lucide-react';
+import { Save, RefreshCw, Calculator, Percent, DollarSign, Info, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -75,7 +75,7 @@ function DivisaoSimulada({ label, valor, pctProf, pctCasa, pctCasaLabel = '% Cas
 }
 
 export default function ConfiguracoesRepasse() {
-  const { data: configs, isLoading } = useConfiguracoesRepasse();
+  const { data: configs, isLoading, error: erroCarregamento } = useConfiguracoesRepasse();
   const mutation = useSalvarConfiguracoesRepasse();
 
   const {
@@ -154,6 +154,21 @@ export default function ConfiguracoesRepasse() {
     return (
       <div className="h-full w-full flex items-center justify-center p-20">
         <RefreshCw className="animate-spin text-primary" size={40} />
+      </div>
+    );
+  }
+
+  // Falha ao carregar: não deixa o formulário renderizar em branco como se
+  // fosse uma configuração nova — isso mascararia o erro real e arriscaria
+  // o admin "recriar" configurações que só falharam ao carregar.
+  if (erroCarregamento) {
+    return (
+      <div className="h-full w-full flex items-center justify-center p-20">
+        <Surface variant="subtle" className="max-w-md text-center p-6 space-y-3 border border-destructive/20 rounded-2xl">
+          <AlertTriangle className="mx-auto text-destructive" size={32} />
+          <p className="font-black text-foreground">Não foi possível carregar as configurações de repasse.</p>
+          <p className="text-sm text-muted-foreground">Tente recarregar a página. Se o problema persistir, contate o suporte.</p>
+        </Surface>
       </div>
     );
   }

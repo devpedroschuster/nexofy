@@ -1,24 +1,34 @@
-// webapp/src/hooks/useAuth.js
+// webapp/src/contexts/AuthContext.jsx  (novo arquivo)
 //
-// PATCH: adicionado suporte ao role 'super_admin'.
+// Fonte única de verdade para sessão/perfil do usuário.
+// Substitui o antigo hook `useAuth` "solto" (sem Provider), que fazia
+// cada componente consumidor rodar sua própria cópia da lógica de
+// resolução de sessão/perfil — múltiplas queries redundantes a
+// estudio_membros/professores e múltiplos listeners de auth por página.
 //
-// Mudanças mínimas em relação à versão anterior:
-//  - `estudio_membros` com role 'super_admin' → setPerfil('super_admin')
-//  - Nenhuma outra lógica alterada; compatibilidade total com admin/professor/aluno.
-//
-// O super_admin não tem estudio_id próprio (atua cross-tenant).
-// Por isso setEstudioId(null) é correto para ele.
+// Uso: <AuthProvider> uma única vez em App.jsx, no topo da árvore.
+// A API pública de useAuth() é idêntica à anterior — nenhum consumidor
+// existente precisa mudar.
 
-import { useState, useEffect, useRef } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { supabase } from '../lib/supabase';
 
-export function useAuth() {
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
   const [sessao, setSessao] = useState(null);
   const [perfil, setPerfil] = useState(null);
   const [professorId, setProfessorId] = useState(null);
   const [nomeUsuario, setNomeUsuario] = useState(null);
   const [estudioId, setEstudioId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [erroPerfil, setErroPerfil] = useState(null); // novo: expõe falhas ao consumidor
 
   const perfilJaCarregado = useRef(false);
   const perfilCarregadoParaId = useRef(null);
@@ -36,6 +46,7 @@ export function useAuth() {
           setProfessorId(null);
           setNomeUsuario(null);
           setEstudioId(null);
+          setErroPerfil(null);
           setLoading(false);
         }
         return;
@@ -52,24 +63,25 @@ export function useAuth() {
       const authId = session.user.id;
 
       try {
-        const { data: membro, error: errMembro } = await supabase
+        const { data: membros, error: errMembro } = await supabase
   .from('estudio_membros')
   .select('estudio_id, role')
-  .eq('user_id', authId)
-  .maybeSingle();
+  .eq('user_id', authId);
 
-        if (errMembro && errMembro.code !== 'PGRST116') {
-          console.error('Erro ao buscar estudio_membros:', errMembro);
-        }
+if (errMembro) {
+  console.error('Erro ao buscar estudio_membros:', errMembro);
+}
 
-        if (cancelled) return;
+if (cancelled) return;
+
+// Prioriza super_admin caso existam múltiplos vínculos
+const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ?? null;
 
         if (membro) {
           perfilJaCarregado.current = true;
           perfilCarregadoParaId.current = authId;
+          setErroPerfil(null);
 
-          // ── SUPER ADMIN ────────────────────────────────────────────────────
-          // Não tem estudio_id próprio — atua cross-tenant.
           if (membro.role === 'super_admin') {
             setPerfil('super_admin');
             setEstudioId(null);
@@ -78,7 +90,6 @@ export function useAuth() {
             setLoading(false);
             return;
           }
-          // ──────────────────────────────────────────────────────────────────
 
           setEstudioId(membro.estudio_id);
 
@@ -104,13 +115,16 @@ export function useAuth() {
             if (cancelled) return;
 
             setPerfil('professor');
-            setProfessorId(professor?.id ?? membro.referencia_id ?? null);
+            // Fallback via membro.referencia_id removido: o campo nunca era
+            // selecionado na query de estudio_membros (sempre undefined).
+            // Se o vínculo professores.auth_id existir, use-o; senão, null
+            // explícito — mais seguro que um fallback que nunca funcionou.
+            setProfessorId(professor?.id ?? null);
             setNomeUsuario(professor?.nome ?? null);
             setLoading(false);
             return;
           }
 
-          // Papel 'aluno' ou qualquer outro papel futuro
           setPerfil(membro.role ?? 'aluno');
           setProfessorId(null);
           setNomeUsuario(null);
@@ -128,6 +142,7 @@ export function useAuth() {
         if (usuario) {
           perfilJaCarregado.current = true;
           perfilCarregadoParaId.current = authId;
+          setErroPerfil(null);
           setPerfil(usuario.role === 'admin' ? 'admin' : 'aluno');
           setProfessorId(null);
           setNomeUsuario(null);
@@ -144,6 +159,7 @@ export function useAuth() {
         if (professor) {
           perfilJaCarregado.current = true;
           perfilCarregadoParaId.current = authId;
+          setErroPerfil(null);
           setPerfil('professor');
           setProfessorId(professor.id);
           setNomeUsuario(professor.nome ?? null);
@@ -161,8 +177,10 @@ export function useAuth() {
       } catch (error) {
         console.error('Erro fatal ao carregar perfil:', error);
         if (cancelled) return;
-        perfilJaCarregado.current = true;
-        perfilCarregadoParaId.current = authId;
+        // Não trava mais o usuário permanentemente: em erro transitório,
+        // NÃO marca perfilJaCarregado — permite nova tentativa no próximo
+        // evento de auth (ex.: reconexão) em vez de exigir reload manual.
+        setErroPerfil(error);
         setPerfil(null);
         setProfessorId(null);
         setNomeUsuario(null);
@@ -189,6 +207,7 @@ export function useAuth() {
         setProfessorId(null);
         setNomeUsuario(null);
         setEstudioId(null);
+        setErroPerfil(null);
         setLoading(false);
 
       } else if (event === 'SIGNED_IN') {
@@ -213,7 +232,17 @@ export function useAuth() {
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, []); // roda uma única vez — agora para a aplicação inteira, não por componente
 
-  return { sessao, perfil, professorId, estudioId, nomeUsuario, loading };
+  const value = { sessao, perfil, professorId, estudioId, nomeUsuario, loading, erroPerfil };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error('useAuth deve ser usado dentro de <AuthProvider>');
+  }
+  return ctx;
 }

@@ -70,14 +70,26 @@ export async function gerarRepassesMensais(mes, ano, estudioId) {
  * Lista os repasses de um professor em um determinado mês/ano.
  * Usado na página de comissões do professor e pelo admin.
  *
- * Mantido sem estudioId no filtro client-side: a leitura passa pelo client
- * normal (não service role), então o isolamento é garantido pelo RLS de
- * repasses_lancamentos (tenant_select + professor_self_repasses).
+ * FIX (defesa em profundidade): antes a query confiava exclusivamente na RLS
+ * de `repasses_lancamentos` (tenant_select + professor_self_repasses) para o
+ * isolamento entre estúdios, sem nenhum filtro client-side. Alinhando com o
+ * padrão do resto do projeto (leadsService, presencaService etc.), agora
+ * `estudioId` é obrigatório e filtrado explicitamente também no client —
+ * a RLS continua sendo a barreira principal, isso é só uma segunda camada
+ * caso uma policy futura seja alterada/afrouxada por engano.
  *
  * @param {string} professorId
- * @param {string} mesAno - formato 'YYYY-MM'
+ * @param {string} mesAno    - formato 'YYYY-MM'
+ * @param {string} estudioId - UUID do estúdio (obrigatório)
  */
-export async function listarRepassesProfessor(professorId, mesAno) {
+export async function listarRepassesProfessor(professorId, mesAno, estudioId) {
+  if (!estudioId) {
+    throw new Error('listarRepassesProfessor: estudioId é obrigatório.');
+  }
+  if (!/^\d{4}-\d{2}$/.test(mesAno)) {
+    throw new Error(`listarRepassesProfessor: mesAno inválido "${mesAno}" (esperado "AAAA-MM").`);
+  }
+
   const inicio = `${mesAno}-01`;
   const [ano, mes] = mesAno.split('-').map(Number);
   const ultimoDia = new Date(ano, mes, 0).getDate();
@@ -89,6 +101,7 @@ export async function listarRepassesProfessor(professorId, mesAno) {
     .from('repasses_lancamentos')
     .select('id, valor, tipo_aula, modalidade, data_referencia, status, pago_em, alunos(nome_completo)')
     .eq('professor_id', professorId)
+    .eq('estudio_id', estudioId) // defesa em profundidade, além da RLS
     .gte('data_referencia', inicio)
     .lte('data_referencia', fim)
     .order('data_referencia', { ascending: false });

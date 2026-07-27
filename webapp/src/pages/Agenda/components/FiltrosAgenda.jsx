@@ -11,13 +11,21 @@ export default function FiltrosAgenda({
   setFiltroEspaco,
   filtroProf,
   setFiltroProf,
-  professores,
+  professores = [],       // ✅ Bug #1: default seguro, evita crash se ainda não carregou
   isAdmin,
   espacos = [],
   espacosDisponiveis,
 }) {
   const espacosVisiveis = espacosDisponiveis
-    ? espacos.filter(e => espacosDisponiveis.has(e.slug))
+    ? espacos.filter(e =>
+        // ✅ Bug #2: aceita Set (formato esperado) ou array (defensivo),
+        // e nunca deixa o componente quebrar por um tipo inesperado.
+        espacosDisponiveis instanceof Set
+          ? espacosDisponiveis.has(e.slug)
+          : Array.isArray(espacosDisponiveis)
+            ? espacosDisponiveis.includes(e.slug)
+            : true
+      )
     : espacos;
 
   // Se o filtro ativo saiu da lista (professor não leciona mais naquele espaço),
@@ -26,6 +34,7 @@ export default function FiltrosAgenda({
     if (filtroEspaco !== 'todos' && !espacosVisiveis.some(e => e.slug === filtroEspaco)) {
       setFiltroEspaco('todos');
     }
+    // setFiltroEspaco é estável (setState do pai) — seguro omitir das deps.
   }, [espacosVisiveis, filtroEspaco]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

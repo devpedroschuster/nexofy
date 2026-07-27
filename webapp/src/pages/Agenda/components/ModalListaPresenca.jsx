@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { RefreshCw, Trash2 } from 'lucide-react';
 import { ModalConfirmacao } from '../../../components/ui/Modal';
 import Button from '../../../components/ui/Button';
@@ -9,29 +9,46 @@ const ROTULO_STATUS = {
   falta_nao_avisada: 'Não Apareceu',
 };
 
+const ROTULO_STATUS_FALLBACK = 'Falta';
+
 const EH_FALTA = (status) => status === 'falta_justificada' || status === 'falta_nao_avisada';
 
-// BUG #7 fix: removido `refreshKey` da desestruturação — useListaPresenca
-// não exporta mais esse estado bruto; o hook expõe `triggerRefresh` (função)
-// para quem precisar disparar reload manualmente.
 export default function ModalListaPresenca({
   aulaParaLista, dataLista, setDataLista, listaPresenca, loadingLista, erroLista,
   handleRegistrarFalta, handleDesfazerFalta,
   alunoParaRemover, solicitarRemocao, confirmarRemocao, cancelarRemocao,
+  removendoId,
   triggerRefresh,
   isAdmin,
 }) {
+  // Fix: os cliques em "Avisou" / "Não Veio" / "Desfazer Falta" não tinham
+  // nenhum estado de loading — um clique duplo disparava duas chamadas
+  // concorrentes (upsert) para o mesmo registro, com risco de a segunda
+  // sobrescrever a intenção da primeira antes do refresh do cache chegar.
+  const [processandoId, setProcessandoId] = useState(null);
+
+  const executarAcaoUnica = async (id, acao) => {
+    if (processandoId) return; // já existe uma ação em voo; ignora clique
+    setProcessandoId(id);
+    try {
+      await acao();
+    } finally {
+      setProcessandoId(null);
+    }
+  };
+
   if (!aulaParaLista) return null;
+
   return (
     <div className="space-y-4 pt-2 min-h-[300px]">
       <div className="bg-muted p-4 rounded-xl border border-border">
         <h4 className="font-black text-foreground">{aulaParaLista.atividade}</h4>
         <div className="mt-3">
           <Label className="block text-[10px] font-black text-muted-foreground uppercase mb-1">Data da Aula</Label>
-          <Input 
-            type="date" 
-            value={dataLista} 
-            onChange={e => setDataLista(e.target.value)} 
+          <Input
+            type="date"
+            value={dataLista}
+            onChange={e => setDataLista(e.target.value)}
             className="bg-card"
           />
         </div>
@@ -42,7 +59,7 @@ export default function ModalListaPresenca({
         </div>
         {loadingLista ? (
           <div className="flex justify-center p-6"><RefreshCw className="animate-spin text-muted-foreground" size={24} /></div>
-          ) : erroLista ? (
+        ) : erroLista ? (
           <div className="text-sm text-destructive bg-destructive-soft p-3 rounded-xl">
             {erroLista}
           </div>
@@ -53,12 +70,8 @@ export default function ModalListaPresenca({
         ) : (
           <ul className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
             {listaPresenca.map((aluno, idx) => {
-              // Bug #10 fix: key estável em ordem de preferência.
-              // id_relacao é sempre preenchido pelo presencaService:
-              //   - fixos sem registro do dia → f.id (UUID da agenda_fixa)
-              //   - fixos com registro do dia → id da linha presenca
-              //   - avulsos/leads → id da linha presenca
-              // O fallback com idx é apenas defesa contra dados inesperados.
+              // Key estável em ordem de preferência (id_relacao cobre fixos
+              // com/sem registro do dia e avulsos/leads; idx é só defesa).
               const itemKey = aluno.id_relacao
                 ?? aluno.aluno_id
                 ?? aluno.lead_id
@@ -69,6 +82,9 @@ export default function ModalListaPresenca({
               }
 
               const emFalta = EH_FALTA(aluno.status);
+              const estaProcessando = processandoId === itemKey;
+              const estaRemovendo = removendoId === aluno.id_relacao;
+
               return (
                 <li key={itemKey} className={`p-3 border rounded-xl flex justify-between items-center transition-all ${emFalta ? 'bg-destructive-soft border-destructive/30 opacity-70' : 'bg-card border-border shadow-sm'}`}>
                   <div>
@@ -78,11 +94,10 @@ export default function ModalListaPresenca({
                     <div className="flex flex-wrap gap-2 mt-1">
                       {aluno.tipo === 'fixo' && <span className="text-[9px] bg-purple-soft text-purple px-2 py-0.5 rounded font-black uppercase tracking-wider">Fixo</span>}
                       {aluno.tipo === 'avulso' && <span className="text-[9px] bg-info-soft text-info px-2 py-0.5 rounded font-black uppercase tracking-wider">Avulso</span>}
-                      {aluno.tipo === 'experimental' && ( <span className="ml-1.5 text-[10px] font-black bg-warning/20 text-warning px-1.5 py-0.5 rounded-full border border-warning/30">LEAD</span>
-)}
+                      {aluno.tipo === 'experimental' && (<span className="ml-1.5 text-[10px] font-black bg-warning/20 text-warning px-1.5 py-0.5 rounded-full border border-warning/30">LEAD</span>)}
                       {emFalta && (
                         <span className="text-[9px] bg-destructive-soft text-destructive px-2 py-0.5 rounded font-black uppercase tracking-wider">
-                          {ROTULO_STATUS[aluno.status]}
+                          {ROTULO_STATUS[aluno.status] ?? ROTULO_STATUS_FALLBACK}
                         </span>
                       )}
                     </div>
@@ -90,15 +105,27 @@ export default function ModalListaPresenca({
                   <div className="ml-2 flex gap-1.5">
                     {aluno.tipo === 'fixo' ? (
                       emFalta ? (
-                        <Button variant="secondary" size="sm" onClick={() => handleDesfazerFalta(aluno)}>
-                          Desfazer Falta
+                        <Button
+                          variant="secondary" size="sm"
+                          disabled={estaProcessando}
+                          onClick={() => executarAcaoUnica(itemKey, () => handleDesfazerFalta(aluno))}
+                        >
+                          {estaProcessando ? 'Aguarde...' : 'Desfazer Falta'}
                         </Button>
                       ) : (
                         <>
-                          <Button variant="outline" size="sm" onClick={() => handleRegistrarFalta(aluno, 'justificada')}>
+                          <Button
+                            variant="outline" size="sm"
+                            disabled={estaProcessando}
+                            onClick={() => executarAcaoUnica(itemKey, () => handleRegistrarFalta(aluno, 'justificada'))}
+                          >
                             Avisou
                           </Button>
-                          <Button variant="destructive" size="sm" onClick={() => handleRegistrarFalta(aluno, 'nao_avisada')}>
+                          <Button
+                            variant="destructive" size="sm"
+                            disabled={estaProcessando}
+                            onClick={() => executarAcaoUnica(itemKey, () => handleRegistrarFalta(aluno, 'nao_avisada'))}
+                          >
                             Não Veio
                           </Button>
                         </>
@@ -108,9 +135,10 @@ export default function ModalListaPresenca({
                         variant="destructive"
                         size="sm"
                         leftIcon={<Trash2 size={14} />}
+                        disabled={estaRemovendo}
                         onClick={() => solicitarRemocao(aluno.id_relacao)}
                       >
-                        Remover
+                        {estaRemovendo ? 'Removendo...' : 'Remover'}
                       </Button>
                     ) : null}
                   </div>

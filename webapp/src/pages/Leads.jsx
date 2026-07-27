@@ -17,6 +17,7 @@ import Badge   from '../components/ui/Badge';
 import Button  from '../components/ui/Button';
 import Surface from '../components/ui/Surface';
 import EmptyState from '../components/ui/EmptyState';
+import { formatarData, formatarDataHora } from '../lib/utils';
 
 // Média histórica de referência para comparação (pode ser ajustada conforme o negócio)
 const MEDIA_HISTORICA = 0.55;
@@ -171,7 +172,7 @@ export default function Leads() {
   const [confirmandoId, setConfirmandoId] = useState(null);
 
   const { data: estudio } = useEstudio();
-  const nomeEstudio = estudio?.nome;
+const nomeEstudio = estudio?.nome || 'nosso estúdio'; // FIX: evita "Aqui é do undefined!" no WhatsApp
 
   // ── Período selecionado em cada visão (independentes) ────────────────────
   // 'todos' ou uma chave 'AAAA-MM'
@@ -186,9 +187,9 @@ export default function Leads() {
   const [anoAcao, mesAcao] = usandoFiltroAcao ? periodoAcao.split('-').map(Number) : [0, 0];
 
   const {
-    data: leadsPendentesMes = [],
-    isLoading: loadingPendentesMes,
-  } = useLeadsPendentesPorMes(anoAcao, mesAcao);
+  data: leadsPendentesMes = [],
+  isLoading: loadingPendentesMes,
+} = useLeadsPendentesPorMes(anoAcao, mesAcao, usandoFiltroAcao); // FIX: não dispara query "vazia" (0,0)
 
   const leadsPendentes = usandoFiltroAcao ? leadsPendentesMes : leadsPendentesTodos;
   const loadingPendentes = usandoFiltroAcao ? loadingPendentesMes : loadingPendentesTodos;
@@ -207,10 +208,10 @@ export default function Leads() {
   const usandoFiltroHistorico = periodoHistorico !== TODOS_PERIODOS;
   const [anoHistorico, mesHistorico] = usandoFiltroHistorico ? periodoHistorico.split('-').map(Number) : [0, 0];
 
-  const {
-    data: historicoMes = [],
-    isLoading: loadingHistoricoMes,
-  } = useHistoricoLeadsPorMes(anoHistorico, mesHistorico);
+const {
+  data: historicoMes = [],
+  isLoading: loadingHistoricoMes,
+} = useHistoricoLeadsPorMes(anoHistorico, mesHistorico, usandoFiltroHistorico); // FIX: idem
 
   const mutationStatus = useAtualizarStatusLead();
   const mutationObservacao = useAtualizarObservacaoLead();
@@ -274,19 +275,6 @@ export default function Leads() {
   function marcarComoPerdido(leadId) {
     setConfirmandoId(null);
     alterarStatus(leadId, 'perdido');
-  }
-
-  function formatarData(dataIso) {
-    if (!dataIso) return '';
-    const dataSegura = typeof dataIso === 'string' && dataIso.length === 10
-      ? dataIso + 'T12:00:00'
-      : dataIso;
-    return new Date(dataSegura).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  }
-
-  function formatarDataHora(dataIso) {
-    if (!dataIso) return '';
-    return new Date(dataIso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
 
   function contatarWhatsApp(lead) {
@@ -498,7 +486,9 @@ export default function Leads() {
                       {lead.agenda?.atividade}
                     </Badge>
                     <h3 className="font-black text-foreground text-xl leading-tight">{lead.nome_visitante}</h3>
-                    <p className="text-xs font-bold text-muted-foreground mt-1">Realizou em: {formatarData(lead.data_checkin)}</p>
+<p className="text-xs font-bold text-muted-foreground mt-1">
+  Realizou em: {formatarData(lead.data_visita)} {/* FIX: era lead.data_checkin */}
+</p>
                   </div>
                   <Surface variant="muted" padding="sm" className="mb-6 flex items-center gap-3 rounded-xl border border-border">
                     <MessageCircle size={18} className={lead.telefone_visitante ? "text-success" : "text-muted-foreground"} />
@@ -606,7 +596,9 @@ export default function Leads() {
                 <tbody className="divide-y divide-border">
                   {leadsHistorico.map(lead => (
                     <tr key={lead.id} className="hover:bg-muted/50 transition-colors">
-                      <td className="p-4 text-sm font-bold text-muted-foreground whitespace-nowrap">{formatarDataHora(lead.data_checkin)}</td>
+                      <td className="p-4 text-sm font-bold text-muted-foreground whitespace-nowrap">
+  {formatarDataHora(lead.data_visita)} {/* FIX: era lead.data_checkin */}
+</td>
                       <td className="p-4 text-sm font-black text-foreground">{lead.nome_visitante}</td>
                       <td className="p-4 text-sm font-medium text-muted-foreground whitespace-nowrap">{lead.telefone_visitante || '-'}</td>
                       <td className="p-4">

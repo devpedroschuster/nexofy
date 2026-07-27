@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { 
-  Plus, Trash2, Edit2, DollarSign, Calendar, 
+import {
+  Plus, Trash2, Edit2, DollarSign, Calendar,
   TrendingDown, AlertCircle, Filter, Download,
   Zap, Droplet, Wifi, Users, Wrench, ShoppingCart,
   Home, CreditCard, FileText, RefreshCw, Tag
@@ -18,6 +18,8 @@ import Badge from '../components/ui/Badge';
 import Surface from '../components/ui/Surface';
 import EmptyState from '../components/ui/EmptyState';
 import Modal, { useModal, ModalConfirmacao } from '../components/ui/Modal';
+import { useAuth } from '../hooks/useAuth';
+import { useImpersonation } from '../context/ImpersonationContext';
 
 const CATEGORIAS_DESPESA = [
   { valor: 'energia',      label: 'Energia Elétrica',    icone: <Zap size={16} /> },
@@ -39,58 +41,58 @@ const STATUS_DESPESA = [
 ];
 
 export default function Despesas() {
+  // CR1 FIX: tenant scoping — mesmo padrão do restante do app
+  const { estudioId } = useAuth();
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
+
   const [despesas, setDespesas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [processandoAcao, setProcessandoAcao] = useState(false);
 
-  const [metricas, setMetricas] = useState({
-    totalMes: 0,
-    pendentes: 0,
-    porCategoria: []
-  });
-
+  const [metricas, setMetricas] = useState({ totalMes: 0, pendentes: 0, porCategoria: [] });
   const [filtros, setFiltros] = useState({
     mes: new Date().getMonth() + 1,
     ano: new Date().getFullYear(),
     categoria: 'todas',
-    status: 'todos'
+    status: 'todos',
   });
-
   const [formDespesa, setFormDespesa] = useState({
-    id: null,
-    descricao: '',
-    categoria: 'outros',
-    valor: '',
-    data_vencimento: '',
-    status: 'pendente',
-    recorrente: false,
-    observacoes: ''
+    id: null, descricao: '', categoria: 'outros', valor: '',
+    data_vencimento: '', status: 'pendente', recorrente: false, observacoes: '',
   });
-
   const [despesaEditando, setDespesaEditando] = useState(null);
   const [despesaExcluir, setDespesaExcluir] = useState(null);
 
   const modalNova    = useModal();
   const modalExcluir = useModal();
 
+  // CR2 FIX: guarda contra corrida (respostas fora de ordem) + espera o tenant
   useEffect(() => {
-    fetchDespesas();
-  }, [filtros.mes, filtros.ano]);
+    if (!idEfetivo) return;
+    let cancelado = false;
 
-  async function fetchDespesas() {
-    setLoading(true);
-    try {
-      await despesasService.replicarRecorrentes(filtros.mes, filtros.ano);
-      const dados = await despesasService.listar(filtros.mes, filtros.ano);
-      setDespesas(dados || []);
-      calcularMetricas(dados || []);
-    } catch (err) {
-      showToast.error("Erro ao carregar despesas.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    (async () => {
+      setLoading(true);
+      try {
+        await despesasService.replicarRecorrentes(filtros.mes, filtros.ano, idEfetivo);
+        const dados = await despesasService.listar(filtros.mes, filtros.ano, idEfetivo);
+        if (cancelado) return;
+        setDespesas(dados || []);
+        calcularMetricas(dados || []);
+      } catch (err) {
+        if (!cancelado) {
+          console.error('[Despesas] fetchDespesas falhou:', err);
+          showToast.error("Erro ao carregar despesas.");
+        }
+      } finally {
+        if (!cancelado) setLoading(false);
+      }
+    })();
+
+    return () => { cancelado = true; };
+  }, [filtros.mes, filtros.ano, idEfetivo]);
 
   function calcularMetricas(dados) {
     const totalMes = dados
@@ -111,18 +113,19 @@ export default function Despesas() {
     setMetricas({ totalMes, pendentes, porCategoria });
   }
 
-  async function salvarDespesa(e) {
+   async function salvarDespesa(e) {
     e.preventDefault();
     if (salvando) return;
     setSalvando(true);
     try {
-      const despesaData = { ...formDespesa, valor: Number(formDespesa.valor) };
-      await despesasService.salvar(despesaData);
+      const despesaData = { ...formDespesa, valor: Number(formDespesa.valor) || 0 };
+      await despesasService.salvar(despesaData, idEfetivo); // CR1 FIX
       showToast.success(formDespesa.id ? "Despesa atualizada!" : "Despesa cadastrada!");
       modalNova.fechar();
       resetForm();
-      fetchDespesas();
+      recarregar();
     } catch (err) {
+      console.error('[Despesas] salvarDespesa falhou:', err);
       showToast.error("Erro ao salvar despesa.");
     } finally {
       setSalvando(false);
@@ -133,12 +136,13 @@ export default function Despesas() {
     if (processandoAcao || !despesaExcluir) return;
     setProcessandoAcao(true);
     try {
-      await despesasService.excluir(despesaExcluir.id);
+      await despesasService.excluir(despesaExcluir.id, idEfetivo); // CR1 FIX
       showToast.success("Despesa excluída!");
       modalExcluir.fechar();
       setDespesaExcluir(null);
-      fetchDespesas();
+      recarregar();
     } catch (err) {
+      console.error('[Despesas] excluirDespesa falhou:', err);
       showToast.error("Erro ao excluir despesa.");
     } finally {
       setProcessandoAcao(false);
@@ -149,13 +153,25 @@ export default function Despesas() {
     if (processandoAcao) return;
     setProcessandoAcao(true);
     try {
-      await despesasService.registrarPagamento(despesa.id);
+      await despesasService.registrarPagamento(despesa.id, idEfetivo); // CR1 FIX
       showToast.success("Despesa marcada como paga!");
-      fetchDespesas();
+      recarregar();
     } catch (err) {
+      console.error('[Despesas] marcarComoPago falhou:', err);
       showToast.error("Erro ao atualizar status.");
     } finally {
       setProcessandoAcao(false);
+    }
+  }
+
+  async function recarregar() {
+    try {
+      const dados = await despesasService.listar(filtros.mes, filtros.ano, idEfetivo);
+      setDespesas(dados || []);
+      calcularMetricas(dados || []);
+    } catch (err) {
+      console.error('[Despesas] recarregar falhou:', err);
+      showToast.error("Erro ao atualizar a lista.");
     }
   }
 
@@ -193,23 +209,31 @@ export default function Despesas() {
       showToast.error("Não há dados para exportar com os filtros atuais.");
       return;
     }
-    const dadosExport = despesasFiltradas.map(d => ({
-      'Descrição': d.descricao,
-      'Categoria': CATEGORIAS_DESPESA.find(c => c.valor === d.categoria)?.label || 'Outros',
-      'Valor': `R$ ${Number(d.valor).toFixed(2).replace('.', ',')}`,
-      'Vencimento': new Date(d.data_vencimento + 'T12:00:00').toLocaleDateString('pt-BR'),
-      'Status': d.status.toUpperCase(),
-      'Data Pagamento': d.data_pagamento ? new Date(d.data_pagamento + 'T12:00:00').toLocaleDateString('pt-BR') : '-',
-      'Recorrente': d.recorrente ? 'SIM' : 'NÃO',
-      'Observações': d.observacoes || '-'
-    }));
-    const ws = XLSX.utils.json_to_sheet(dadosExport);
-    ws['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 30 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Despesas');
-    const nomeMes = new Date(0, filtros.mes - 1).toLocaleString('pt-BR', { month: 'long' });
-    XLSX.writeFile(wb, `Despesas_${nomeMes}_${filtros.ano}.xlsx`);
-    showToast.success("Relatório exportado com sucesso!");
+    try {
+      const dadosExport = despesasFiltradas.map(d => ({
+        'Descrição': d.descricao,
+        'Categoria': CATEGORIAS_DESPESA.find(c => c.valor === d.categoria)?.label || 'Outros',
+        'Valor': `R$ ${Number(d.valor).toFixed(2).replace('.', ',')}`,
+        // CR FIX: guarda contra data nula
+        'Vencimento': d.data_vencimento
+          ? new Date(d.data_vencimento + 'T12:00:00').toLocaleDateString('pt-BR')
+          : '-',
+        'Status': (d.status || 'pendente').toUpperCase(), // CR FIX: guarda contra status nulo
+        'Data Pagamento': d.data_pagamento ? new Date(d.data_pagamento + 'T12:00:00').toLocaleDateString('pt-BR') : '-',
+        'Recorrente': d.recorrente ? 'SIM' : 'NÃO',
+        'Observações': d.observacoes || '-',
+      }));
+      const ws = XLSX.utils.json_to_sheet(dadosExport);
+      ws['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 30 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Despesas');
+      const nomeMes = new Date(0, filtros.mes - 1).toLocaleString('pt-BR', { month: 'long' });
+      XLSX.writeFile(wb, `Despesas_${nomeMes}_${filtros.ano}.xlsx`);
+      showToast.success("Relatório exportado com sucesso!");
+    } catch (err) {
+      console.error('[Despesas] exportarRelatorio falhou:', err); // CR FIX: try/catch adicionado
+      showToast.error("Erro ao gerar o relatório.");
+    }
   }
 
   const despesasFiltradas = despesas.filter(d => {

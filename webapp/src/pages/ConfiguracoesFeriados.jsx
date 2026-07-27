@@ -1,27 +1,89 @@
-import React, { useState } from 'react';
+// webapp/src/pages/ConfiguracoesFeriados.jsx
+import React, { useState, useRef, useEffect } from 'react';
 import { Calendar, DownloadCloud, AlertCircle, CheckCircle } from 'lucide-react';
 import { feriadosService } from '../services/feriadosService';
+import { useAuth } from '../hooks/useAuth';
+import { useImpersonation } from '../context/ImpersonationContext';
 import { showToast } from '../components/shared/Toast';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Surface from '../components/ui/Surface';
 
+const ANOS_DISPONIVEIS = [2024, 2025, 2026, 2027, 2028];
+const TIMEOUT_BRASIL_API_MS = 15000;
+
 export default function ConfiguracoesFeriados() {
+  const { estudioId, perfil } = useAuth();
+  // CR1 FIX: em modo impersonation, useAuth().estudioId é null — o estúdio
+  // "ativo" para o super_admin vem do ImpersonationContext (mesmo padrão
+  // usado em ConfiguracoesEstudio.jsx).
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
+
+  const podeImportar = perfil === 'admin' || perfil === 'super_admin';
+
   const [ano, setAno] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(false);
   const [feriadosImportados, setFeriadosImportados] = useState([]);
 
+  // Evita atualizar estado se o componente desmontar durante o fetch/import.
+  const montadoRef = useRef(true);
+  useEffect(() => {
+    montadoRef.current = true;
+    return () => { montadoRef.current = false; };
+  }, []);
+
   const importarDaBrasilAPI = async () => {
+    // CR1 FIX: nunca chama o service sem um estudioId válido — é ele que
+    // grava a coluna estudio_id de cada feriado, e sem isso os registros
+    // ficam órfãos/colidem entre estúdios diferentes.
+    if (!idEfetivo) {
+      showToast.error('Não foi possível identificar o estúdio. Recarregue a página.');
+      return;
+    }
+    if (!podeImportar) {
+      showToast.error('Você não tem permissão para importar feriados.');
+      return;
+    }
+
+    // CR2 FIX: normaliza e valida o ano antes de montar a URL/consultar o banco.
+    const anoNumerico = Number(ano);
+    if (!ANOS_DISPONIVEIS.includes(anoNumerico)) {
+      showToast.error('Selecione um ano válido.');
+      return;
+    }
+
     setLoading(true);
     try {
-      const feriadosInseridos = await feriadosService.importarFeriadosNacionais(ano);
-      setFeriadosImportados(feriadosInseridos);
-      showToast.success(`${feriadosInseridos.length} feriados nacionais de ${ano} importados para a agenda!`);
+      const feriadosInseridos = await feriadosService.importarFeriadosNacionais(
+        anoNumerico,
+        idEfetivo,
+      );
+
+      if (!montadoRef.current) return;
+
+      const novos = feriadosInseridos ?? [];
+      setFeriadosImportados(novos);
+
+      if (novos.length === 0) {
+        // Distingue "já estava tudo importado" de "deu erro".
+        showToast.success(`Os feriados nacionais de ${anoNumerico} já estavam importados na agenda.`);
+      } else {
+        showToast.success(`${novos.length} feriados nacionais de ${anoNumerico} importados para a agenda!`);
+      }
     } catch (error) {
-      console.error(error);
-      showToast.error('Não foi possível importar os feriados. Tente novamente.');
+      console.error('[ConfiguracoesFeriados] Erro ao importar feriados:', error);
+      if (!montadoRef.current) return;
+
+      if (error?.message === 'Falha ao buscar na Brasil API') {
+        showToast.error('A Brasil API está indisponível no momento. Tente novamente em instantes.');
+      } else if (error?.code === '42501' || error?.status === 403) {
+        showToast.error('Sem permissão para importar feriados neste estúdio.');
+      } else {
+        showToast.error('Não foi possível importar os feriados. Tente novamente.');
+      }
     } finally {
-      setLoading(false);
+      if (montadoRef.current) setLoading(false);
     }
   };
 
@@ -57,10 +119,11 @@ export default function ConfiguracoesFeriados() {
             <Input
               as="select"
               value={ano}
-              onChange={(e) => setAno(e.target.value)}
+              onChange={(e) => setAno(Number(e.target.value))}
               className="w-32 font-bold"
+              disabled={!podeImportar}
             >
-              {[2024, 2025, 2026, 2027, 2028].map(y => (
+              {ANOS_DISPONIVEIS.map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </Input>
@@ -70,11 +133,18 @@ export default function ConfiguracoesFeriados() {
               size="lg"
               onClick={importarDaBrasilAPI}
               loading={loading}
+              disabled={!podeImportar || loading}
               leftIcon={<DownloadCloud size={20} />}
             >
               {loading ? 'Buscando...' : `Importar Feriados de ${ano}`}
             </Button>
           </div>
+
+          {!podeImportar && (
+            <p className="text-xs text-muted-foreground font-medium">
+              Apenas administradores do estúdio podem importar feriados.
+            </p>
+          )}
         </div>
 
         {/* Coluna direita */}
@@ -107,21 +177,26 @@ export default function ConfiguracoesFeriados() {
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <tbody className="divide-y divide-border">
-                {feriadosImportados.map((f, i) => (
-                  <tr key={i} className="hover:bg-muted/50 transition-colors">
-                    <td className="p-4 pl-6 font-bold text-foreground w-32">
-                      {new Date(f.data + 'T00:00:00').toLocaleDateString('pt-BR')}
-                    </td>
-                    <td className="p-4 font-medium text-muted-foreground">
-                      {f.descricao}
-                    </td>
-                    <td className="p-4 pr-6 text-right">
-                      <span className="bg-muted text-muted-foreground text-[10px] font-black uppercase px-3 py-1 rounded-full border border-border">
-                        Bloqueio Nacional
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {feriadosImportados.map((f) => {
+                  const dataValida = f?.data && !Number.isNaN(new Date(`${f.data}T00:00:00`).getTime());
+                  return (
+                    <tr key={f.id ?? `${f.data}-${f.descricao}`} className="hover:bg-muted/50 transition-colors">
+                      <td className="p-4 pl-6 font-bold text-foreground w-32">
+                        {dataValida
+                          ? new Date(`${f.data}T00:00:00`).toLocaleDateString('pt-BR')
+                          : '—'}
+                      </td>
+                      <td className="p-4 font-medium text-muted-foreground">
+                        {f.descricao ?? '—'}
+                      </td>
+                      <td className="p-4 pr-6 text-right">
+                        <span className="bg-muted text-muted-foreground text-[10px] font-black uppercase px-3 py-1 rounded-full border border-border">
+                          Bloqueio Nacional
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

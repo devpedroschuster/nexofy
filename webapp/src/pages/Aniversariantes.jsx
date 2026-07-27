@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { alunosService } from '../services/alunosService';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
@@ -15,69 +16,76 @@ const MESES = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
+// Regex simples para validar YYYY-MM-DD antes de tentar parsear
+const REGEX_DATA_ISO = /^\d{4}-\d{2}-\d{2}/;
+
 export default function Aniversariantes() {
   const { nomeEstudio } = useEstudio();
   const { estudioId } = useAuth();
-  const [alunos, setAlunos] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth());
 
-  useEffect(() => {
-    if (!estudioId) return;
-    async function fetchAniversariantes() {
-      try {
-        const data = await alunosService.listarAniversariantes(estudioId);
-        setAlunos(data || []);
-      } catch (error) {
-        console.error('Erro ao buscar aniversariantes', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchAniversariantes();
-  }, [estudioId]);
+  // useQuery: cache automático por estúdio, sem race condition ao trocar
+  // de estudioId (impersonation), sem estado "loading" desatualizado.
+  const {
+    data: alunos = [],
+    isLoading: loading,
+    isError,
+  } = useQuery({
+    queryKey: ['alunos', estudioId, 'aniversariantes'],
+    queryFn: () => alunosService.listarAniversariantes(estudioId),
+    enabled: !!estudioId,
+    staleTime: 1000 * 60 * 5,
+  });
 
   const alunosProcessados = useMemo(() => {
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
 
-    return alunos.map(aluno => {
-      const [ano, mes, dia] = aluno.data_nascimento.split('-');
-      const dataNasc = new Date(ano, mes - 1, dia);
+    return alunos
+      // Descarta registros com data ausente ou em formato inesperado,
+      // evitando "Invalid Date" silencioso quebrando ordenação/render.
+      .filter(a => a.data_nascimento && REGEX_DATA_ISO.test(a.data_nascimento))
+      .map(aluno => {
+        const [ano, mes, dia] = aluno.data_nascimento.split('-').map(Number);
+        const dataNasc = new Date(ano, mes - 1, dia);
+        if (isNaN(dataNasc.getTime())) return null;
 
-      const mesNasc = dataNasc.getMonth();
-      const diaNasc = dataNasc.getDate();
+        const mesNasc = dataNasc.getMonth();
+        const diaNasc = dataNasc.getDate();
 
-      let anosFazendo = hoje.getFullYear() - dataNasc.getFullYear();
-      let dataNiverEsteAno = new Date(hoje.getFullYear(), mesNasc, diaNasc);
+        let anosFazendo = hoje.getFullYear() - dataNasc.getFullYear();
+        const dataNiverEsteAno = new Date(hoje.getFullYear(), mesNasc, diaNasc);
 
-      let niverJaPassou = false;
-      if (dataNiverEsteAno < hoje) {
-        niverJaPassou = true;
-        dataNiverEsteAno.setFullYear(hoje.getFullYear() + 1);
-        anosFazendo += 1;
-      }
+        let niverJaPassou = false;
+        if (dataNiverEsteAno < hoje) {
+          niverJaPassou = true;
+          dataNiverEsteAno.setFullYear(hoje.getFullYear() + 1);
+          anosFazendo += 1;
+        }
 
-      const diffTime = dataNiverEsteAno - hoje;
-      const diasFaltando = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const diffTime = dataNiverEsteAno - hoje;
+        const diasFaltando = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-      return {
-        ...aluno,
-        mesNasc,
-        diaNasc,
-        anosFazendo,
-        diasFaltando,
-        niverJaPassou,
-        isHoje: diasFaltando === 0,
-        diaMesFormatado: `${String(diaNasc).padStart(2, '0')}/${String(mesNasc + 1).padStart(2, '0')}`,
-      };
-    }).sort((a, b) => a.diaNasc - b.diaNasc);
+        return {
+          ...aluno,
+          mesNasc,
+          diaNasc,
+          anosFazendo,
+          diasFaltando,
+          niverJaPassou,
+          isHoje: diasFaltando === 0,
+          diaMesFormatado: `${String(diaNasc).padStart(2, '0')}/${String(mesNasc + 1).padStart(2, '0')}`,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.diaNasc - b.diaNasc);
   }, [alunos]);
 
   const aniversariantesFiltrados = alunosProcessados.filter(a => {
     const matchMes = a.mesNasc === mesSelecionado;
-    const matchBusca = a.nome_completo.toLowerCase().includes(busca.toLowerCase());
+    const nome = a.nome_completo ?? '';
+    const matchBusca = nome.toLowerCase().includes(busca.toLowerCase());
     return matchMes && matchBusca;
   });
 
@@ -88,10 +96,15 @@ export default function Aniversariantes() {
   const abrirWhatsApp = (telefone, nome) => {
     if (!telefone) return;
     const numeroLimpo = telefone.replace(/\D/g, '');
+    if (numeroLimpo.length < 10) return; // evita link inválido do WhatsApp
+
+    const primeiroNome = (nome ?? '').split(' ')[0] || 'aluno(a)';
     const mensagem = encodeURIComponent(
-      `Olá ${nome.split(' ')[0]}! Aqui é do ${nomeEstudio}. Passando para te desejar um Feliz Aniversário! 🎉🎈 Que o seu dia seja repleto de alegria e movimento!`
+      `Olá ${primeiroNome}! Aqui é do ${nomeEstudio}. Passando para te desejar um Feliz Aniversário! 🎉🎈 Que o seu dia seja repleto de alegria e movimento!`
     );
-    window.open(`https://wa.me/55${numeroLimpo}?text=${mensagem}`, '_blank');
+    // numeroLimpo já pode incluir DDI 55; evita duplicar
+    const numeroComDDI = numeroLimpo.startsWith('55') ? numeroLimpo : `55${numeroLimpo}`;
+    window.open(`https://wa.me/${numeroComDDI}?text=${mensagem}`, '_blank');
   };
 
   return (
@@ -103,6 +116,12 @@ export default function Aniversariantes() {
         </h1>
         <p className="text-muted-foreground">Acompanhe as datas comemorativas e fidelize seus alunos.</p>
       </div>
+
+      {isError && (
+        <div className="bg-danger/10 border border-danger/30 text-danger rounded-2xl p-4 text-sm font-medium">
+          Não foi possível carregar os aniversariantes. Tente novamente em instantes.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 

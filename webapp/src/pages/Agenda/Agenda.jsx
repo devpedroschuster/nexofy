@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Ban, UserCheck } from 'lucide-react';
+import { Plus, Ban, UserCheck, CalendarX } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useQuery } from '@tanstack/react-query';
@@ -19,6 +19,7 @@ import { useEventosCalendario } from './hooks/useEventosCalendario';
 import { useAgendamento } from './hooks/useAgendamento';
 import { useListaPresenca } from './hooks/useListaPresenca';
 import { useFeriados } from './hooks/useFeriados';
+import { useEspacos } from './hooks/useEspacos';
 
 import FiltrosAgenda from './components/FiltrosAgenda';
 import CalendarioGrade from './components/CalendarioGrade';
@@ -28,10 +29,9 @@ import ModalListaPresenca from './components/ModalListaPresenca';
 import ModalFeriados from './components/ModalFeriados';
 import ModalAcoesEvento from './components/ModalAcoesEvento';
 import EmptyState from '../../components/ui/EmptyState';
-import { CalendarX } from 'lucide-react';
-import { useEspacos } from './hooks/useEspacos';
 import { IconeEspaco } from '../../lib/iconesEspaco';
 import { useMemo } from 'react';
+import { LIMITES } from '../../lib/constants';
 
 const INITIAL_FORM_STATE = {
   id: null,
@@ -40,7 +40,7 @@ const INITIAL_FORM_STATE = {
   professorId: '',
   diaSemana: 'segunda-feira',
   horario: '',
-  capacidade: 15,
+  capacidade: LIMITES.CAPACIDADE_AULA_PADRAO,
   ehRecorrente: true,
   dataEspecifica: '',
   espaco: 'funcional',
@@ -50,19 +50,21 @@ const INITIAL_FORM_STATE = {
 };
 
 export default function Agenda() {
-  // Bug #13: perfil e professorId agora vêm de useAgendaPage — remove a chamada
-  // duplicada a useOutletContext que existia aqui.
   const { perfil, professorId: professorIdLogado, ...pageState } = useAgendaPage();
   const { estudioId } = useAuth();
   const isAdmin = perfil === 'admin';
 
-  const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
+const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
   const [eventoSelecionado, setEventoSelecionado] = useState(null);
   const [aulaParaLista, setAulaParaLista] = useState(null);
   const [dataLista, setDataLista] = useState(new Date().toISOString().split('T')[0]);
 
   const { aulas, feriados, loading, isError, refetch } = useAgenda();
-  const { data: espacos = [] } = useEspacos(estudioId);
+  const {
+  data: espacos = [],
+  isLoading: espacosLoading,
+  isError: espacosError,
+} = useEspacos(estudioId);
 
   const { data: listaAlunos = [] } = useQuery({
     queryKey: ['alunos', estudioId, 'ativos-agendamento'],
@@ -71,51 +73,53 @@ export default function Agenda() {
     staleTime: 1000 * 60 * 5,
   });
 
-  // Bug #1: passa estudioId e inclui na queryKey para cache isolado por estúdio
-  const { data: professores = [] } = useQuery({
+  const {
+    data: professores = [],
+    isError: errorProfessores,
+  } = useQuery({
     queryKey: ['professores', estudioId],
     queryFn: () => gradeService.listarProfessores(estudioId),
     staleTime: 1000 * 60 * 5,
     enabled: isAdmin && !!estudioId,
   });
 
-  // Bug #1: passa estudioId e inclui na queryKey para cache isolado por estúdio
-  const { data: modalidades = [] } = useQuery({
+  const {
+    data: modalidades = [],
+    isError: errorModalidades,
+  } = useQuery({
     queryKey: ['modalidades', estudioId],
     queryFn: () => gradeService.listarModalidades(estudioId),
     staleTime: 1000 * 60 * 5,
     enabled: isAdmin && !!estudioId,
   });
 
-  // Bug #8 fix: memoizar idsAulas evita novo array a cada render e permite
-  // incluí-lo na queryKey, garantindo re-execução automática quando as aulas
-  // mudarem (sem depender de invalidateQueries manual).
-  const idsAulas = useMemo(
-    () => (aulas || []).map(a => a.id),
-    [aulas]
-  );
+  React.useEffect(() => {
+    if (errorProfessores) showToast.error('Erro ao carregar professores.');
+    if (errorModalidades) showToast.error('Erro ao carregar modalidades.');
+    if (espacosError) showToast.error('Erro ao carregar espaços.');
+  }, [errorProfessores, errorModalidades, espacosError]);
 
-  const { data: matriculasFixas = [] } = useQuery({
-    // Bug #11: estudioId incluído na key — isola o cache por tenant.
-    // Bug #1: admin e professor usam o mesmo caminho (filtra via aulasIds),
-    //         eliminando o vazamento cross-studio do caminho admin anterior.
-    // Bug #8 fix: idsAulas incluído na key para invalidação automática.
+  const idsAulas = useMemo(() => (aulas || []).map(a => a.id), [aulas]);
+
+   const { data: matriculasFixas = [] } = useQuery({
     queryKey: ['matriculas-fixas', estudioId, idsAulas],
     queryFn: () => {
       if (idsAulas.length === 0) return [];
       return gradeService.listarMatriculasFixas(idsAulas);
     },
     staleTime: 1000 * 60 * 5,
-    enabled: idsAulas.length > 0, // aguarda aulas (filtradas por estudioId) carregarem
+    enabled: idsAulas.length > 0,
   });
 
   const dadosIniciais = { professores, modalidades, matriculasFixas };
 
   const espacosDisponiveis = useMemo(() => {
     if (isAdmin || !aulas?.length) return undefined;
-    const set = new Set(aulas.map(a => a.espaco || espacos[0]?.slug));
+    const set = new Set(
+      aulas.map(a => a.espaco).filter(Boolean)
+    );
     return set;
-  }, [isAdmin, aulas, espacos]);
+  }, [isAdmin, aulas]);
 
   const emptyStateEspaco = useMemo(() => {
     if (pageState.filtroEspaco === 'todos') return null;

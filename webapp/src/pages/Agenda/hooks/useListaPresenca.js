@@ -11,6 +11,7 @@ export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) 
   const queryClient = useQueryClient();
   const [loadingLista, setLoadingLista] = useState(false);
   const [removendoId, setRemovendoId] = useState(null);
+  const [processandoFaltaId, setProcessandoFaltaId] = useState(null);
   const [alunoParaRemover, setAlunoParaRemover] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [erroLista, setErroLista] = useState(null);
@@ -37,6 +38,7 @@ export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) 
           }
         } catch (err) {
           if (!cancelado) {
+            console.error('[useListaPresenca] erro ao carregar lista', err);
             setErroLista('Não foi possível carregar a lista. Tente novamente.');
             setListaPresenca([]);
           }
@@ -71,14 +73,15 @@ export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) 
   // que nunca têm uma linha "removível" — o botão correspondente para
   // fixos é Informar/Desfazer Falta, tratado abaixo).
   const confirmarRemocao = async () => {
-    if (!alunoParaRemover) return;
+    if (alunoParaRemover === null) return;
     setRemovendoId(alunoParaRemover);
     try {
       await presencaService.cancelarAgendamento(alunoParaRemover, estudioId);
       showToast.success("Aluno removido da lista!");
       invalidarTudo();
     } catch (err) {
-      showToast.error("Erro ao remover: " + err.message);
+      console.error('[useListaPresenca] erro ao remover agendamento', err);
+      showToast.error("Erro ao remover. Tente novamente.");
     } finally {
       setRemovendoId(null);
       setAlunoParaRemover(null);
@@ -87,13 +90,20 @@ export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) 
 
   // tipoFalta: 'justificada' | 'nao_avisada'
   const handleRegistrarFalta = async (aluno, tipoFalta = 'justificada') => {
+    if (processandoFaltaId === aluno.id_relacao) return; // guard duplo-clique
+    // Usa dataListaDebounced, não dataLista bruto: a lista exibida (e o aluno
+    // clicado) correspondem sempre à data debounced. Usar dataLista aqui
+    // podia gravar a falta contra uma data diferente da que está na tela,
+    // caso o usuário tivesse acabado de digitar uma nova data no input.
+    if (!dataListaDebounced) return;
+    setProcessandoFaltaId(aluno.id_relacao);
     try {
       await presencaService.registrarFalta(
         {
           presencaId: aluno.registroExiste ? aluno.id_relacao : null,
           alunoId: aluno.aluno_id,
           aulaId: aulaParaLista.id,
-          dataAula: dataLista,
+          dataAula: dataListaDebounced,
           origem: aluno.tipo === 'fixo' ? 'fixo' : 'avulso',
         },
         tipoFalta,
@@ -103,22 +113,31 @@ export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) 
       showToast.success("Falta informada.");
       invalidarTudo();
     } catch (err) {
+      console.error('[useListaPresenca] erro ao registrar falta', err);
       showToast.error("Erro ao registrar falta.");
+    } finally {
+      setProcessandoFaltaId(null);
     }
   };
 
   const handleDesfazerFalta = async (aluno) => {
+    if (processandoFaltaId === aluno.id_relacao) return; // guard duplo-clique
+    setProcessandoFaltaId(aluno.id_relacao);
     try {
       await presencaService.removerFalta(aluno.id_relacao, estudioId);
       showToast.success("Falta removida.");
       invalidarTudo();
     } catch (err) {
+      console.error('[useListaPresenca] erro ao remover falta', err);
       showToast.error("Erro ao remover falta.");
+    } finally {
+      setProcessandoFaltaId(null);
     }
   };
 
   return {
     listaPresenca, loadingLista, erroLista, removendoId,
+    processandoFaltaId,
     handleRegistrarFalta, handleDesfazerFalta,
     alunoParaRemover, solicitarRemocao, confirmarRemocao, cancelarRemocao,
     triggerRefresh, // BUG #8: era refreshKey (estado bruto) — agora só a função

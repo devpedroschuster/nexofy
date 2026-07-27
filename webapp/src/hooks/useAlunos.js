@@ -1,4 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+// webapp/src/hooks/useAlunos.js
+import { useEffect } from 'react';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { alunosService } from '../services/alunosService';
 import { showToast } from '../components/shared/Toast';
 import { useAuth } from './useAuth';
@@ -17,29 +19,32 @@ export const PAGE_SIZE = 25;
  *  - totalPaginas  → ceil(total / PAGE_SIZE)
  *  - temAnterior   → boolean
  *  - temProximo    → boolean
- *  - loading / error / refetch
+ *  - loading / fetching / error / refetch
  */
-
 export function useAlunos(filtros = {}, pagina = 1) {
   const { estudioId } = useAuth();
 
   const query = useQuery({
     queryKey: ['alunos', estudioId, filtros, pagina],
-    queryFn: async () => {
-      try {
-        return await alunosService.listar(filtros, {
-          pagina,
-          tamanho: PAGE_SIZE,
-        }, estudioId);
-      } catch (err) {
-        showToast.error('Erro ao carregar lista de alunos');
-        throw err;
-      }
-    },
+    // Sem try/catch aqui: deixa o React Query gerenciar o ciclo de retry
+    // normalmente. O toast de erro é tratado uma única vez, fora do
+    // ciclo de tentativas — ver useEffect abaixo.
+    queryFn: () => alunosService.listar(filtros, { pagina, tamanho: PAGE_SIZE }, estudioId),
     enabled: !!estudioId,
-    keepPreviousData: true,
+    // Correção: no React Query v5, keepPreviousData (booleano) não existe mais.
+    // O equivalente é placeholderData: keepPreviousData — mantém os dados da
+    // página anterior visíveis enquanto a próxima carrega.
+    placeholderData: keepPreviousData,
     staleTime: 1000 * 60 * 5,
   });
+
+  // Notifica o erro uma única vez por falha definitiva (após esgotar os
+  // retries do QueryClient), não a cada tentativa individual.
+  useEffect(() => {
+    if (query.isError) {
+      showToast.error('Erro ao carregar lista de alunos');
+    }
+  }, [query.isError]);
 
   const dados        = query.data?.data  ?? [];
   const total        = query.data?.count ?? 0;

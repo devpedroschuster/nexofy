@@ -12,35 +12,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { alunosService } from '../services/alunosService';
 import { alunoSchema } from '../lib/validation';
+import { formatarCPF, validarCPF } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
 import { showToast } from '../components/shared/Toast';
-import Modal from '../components/shared/Modal';
-
-// CPF helpers
-function formatarCPF(value) {
-  const n = value.replace(/\D/g, '').slice(0, 11);
-  if (n.length <= 3) return n;
-  if (n.length <= 6) return `${n.slice(0, 3)}.${n.slice(3)}`;
-  if (n.length <= 9) return `${n.slice(0, 3)}.${n.slice(3, 6)}.${n.slice(6)}`;
-  return `${n.slice(0, 3)}.${n.slice(3, 6)}.${n.slice(6, 9)}-${n.slice(9)}`;
-}
-
-function validarCPF(cpf) {
-  const n = cpf.replace(/\D/g, '');
-  if (n.length !== 11 || /^(\d)\1+$/.test(n)) return false;
-  let soma = 0;
-  for (let i = 0; i < 9; i++) soma += parseInt(n[i]) * (10 - i);
-  let r = (soma * 10) % 11;
-  if (r === 10 || r === 11) r = 0;
-  if (r !== parseInt(n[9])) return false;
-  soma = 0;
-  for (let i = 0; i < 10; i++) soma += parseInt(n[i]) * (11 - i);
-  r = (soma * 10) % 11;
-  if (r === 10 || r === 11) r = 0;
-  return r === parseInt(n[10]);
-}
+import Modal from '../components/ui/Modal';
 
 const STEPS = [
   { id: 1, label: 'Pessoal',   icon: User     },
@@ -237,18 +214,36 @@ const nomeEstudio = estudio?.nome;
 
   useEffect(() => {
     async function carregarDados() {
-      const { data: planosData } = await supabase.from('planos').select('*').order('nome');
-      setPlanos(planosData || []);
-      const { data: modData } = await supabase
-        .from('modalidades').select('id, nome, area').order('area').order('nome');
-      setModalidades(modData || []);
+      // FIX: sem .eq('estudio_id', estudioId) esta busca trazia planos e
+      // modalidades de TODOS os estúdios do sistema para o formulário.
+      if (!estudioId) return;
+      try {
+        const { data: planosData, error: errPlanos } = await supabase
+          .from('planos').select('*').eq('estudio_id', estudioId).order('nome');
+        if (errPlanos) throw errPlanos;
+        setPlanos(planosData || []);
+
+        const { data: modData, error: errMod } = await supabase
+          .from('modalidades').select('id, nome, area').eq('estudio_id', estudioId)
+          .order('area').order('nome');
+        if (errMod) throw errMod;
+        setModalidades(modData || []);
+      } catch (error) {
+        console.error('Erro ao carregar planos/modalidades:', error);
+        showToast.error('Erro ao carregar planos e modalidades.');
+      }
     }
     carregarDados();
 
     async function carregarFichaCompleta() {
       if (alunoParaEditar?.id) {
+        // FIX: filtro de tenant também na busca da ficha completa do aluno
         const { data: aluno, error } = await supabase
-          .from('alunos').select('*').eq('id', alunoParaEditar.id).single();
+          .from('alunos').select('*').eq('id', alunoParaEditar.id).eq('estudio_id', estudioId).single();
+        if (error) {
+          console.error('Erro ao carregar ficha do aluno:', error);
+          showToast.error('Não foi possível carregar os dados deste aluno.');
+        }
         if (aluno && !error) {
           reset({
             nome_completo:    aluno.nome_completo    || '',
@@ -280,7 +275,7 @@ const nomeEstudio = estudio?.nome;
       }
     }
     carregarFichaCompleta();
-  }, [alunoParaEditar, reset]);
+  }, [alunoParaEditar, reset, estudioId]);
 
   useEffect(() => {
     if (abaAtiva === 'agenda' && alunoParaEditar) carregarAgendaFixa();
@@ -290,8 +285,11 @@ const nomeEstudio = estudio?.nome;
   async function carregarAgendaFixa() {
     setLoadingAgenda(true);
     try {
+      // FIX: sem filtro de estudio_id, esta busca trazia a grade de aulas de
+      // TODOS os estúdios, permitindo matricular o aluno numa turma de outro tenant.
       const { data: aulas } = await supabase
-        .from('agenda').select('*, modalidades(id, nome)').eq('eh_recorrente', true);
+        .from('agenda').select('*, modalidades(id, nome)')
+        .eq('estudio_id', estudioId).eq('eh_recorrente', true);
       const diasOrdem = {
         'Domingo': 0, 'Segunda-feira': 1, 'Terça-feira': 2,
         'Quarta-feira': 3, 'Quinta-feira': 4, 'Sexta-feira': 5, 'Sábado': 6,
@@ -398,22 +396,32 @@ const nomeEstudio = estudio?.nome;
 
   async function executarMatricula(aula) {
     try {
+      // FIX: estudio_id incluído por defesa em profundidade — agora que
+      // carregarAgendaFixa só traz aulas do tenant certo, aula.id já vem
+      // seguro, mas gravar o estudio_id aqui também evita que uma futura
+      // regressão volte a permitir matrícula cruzada de tenant.
       const { error } = await supabase.from('agenda_fixa')
-        .insert({ aluno_id: alunoParaEditar.id, aula_id: aula.id });
+        .insert({ aluno_id: alunoParaEditar.id, aula_id: aula.id, estudio_id: estudioId });
       if (error) throw error;
       showToast.success('Aluno matriculado na turma!');
       carregarAgendaFixa();
-    } catch { showToast.error('Erro ao matricular na turma.'); }
+    } catch (error) {
+      console.error('Erro ao matricular na turma:', error);
+      showToast.error('Erro ao matricular na turma.');
+    }
   }
 
   async function executarRemocao(aula) {
     try {
       const { error } = await supabase.from('agenda_fixa')
-        .delete().match({ aluno_id: alunoParaEditar.id, aula_id: aula.id });
+        .delete().match({ aluno_id: alunoParaEditar.id, aula_id: aula.id, estudio_id: estudioId });
       if (error) throw error;
       showToast.success('Aluno removido da turma.');
       carregarAgendaFixa();
-    } catch { showToast.error('Erro ao remover da turma.'); }
+    } catch (error) {
+      console.error('Erro ao remover da turma:', error);
+      showToast.error('Erro ao remover da turma.');
+    }
   }
 
   function toggleMatriculaFixa(aula) {
@@ -493,37 +501,40 @@ const nomeEstudio = estudio?.nome;
       }
 
       // CREATE MODE
+      // FIX: busca de professor por e-mail agora é escopada ao estúdio atual.
+      // Sem o filtro de estudio_id, um professor de OUTRO estúdio com o mesmo
+      // e-mail seria encontrado e o novo aluno herdaria o auth_id dele — dando
+      // a esse professor de outro tenant acesso como aluno neste estúdio.
       const { data: profExistente } = await supabase
-        .from('professores').select('auth_id').eq('email', data.email.trim()).maybeSingle();
+        .from('professores').select('auth_id').eq('email', data.email.trim())
+        .eq('estudio_id', estudioId).maybeSingle();
 
       let novoAlunoId = null;
 
       if (profExistente) {
         // Existing professor → link immediately (no new auth needed)
-        const { data: alunoInserido, error } = await supabase
-          .from('alunos')
-          .insert([{
-            ...payloadBase,
-            auth_id:      profExistente.auth_id,
-            nome_completo:data.nome_completo,
-            email:        data.email.trim(),
-          }])
-          .select('id').single();
-        if (error) throw new Error('Erro ao criar vínculo de aluno.');
+        // FIX: usa alunosService.criar (allowlist de campos + estudio_id
+        // automático) em vez de insert cru; o único campo extra necessário
+        // aqui é auth_id, que não faz parte da allowlist e por isso é
+        // adicionado depois via update escopado por tenant.
+        const alunoInserido = await alunosService.criar(
+          { ...payloadBase, nome_completo: data.nome_completo, email: data.email.trim() },
+          estudioId
+        );
+        const { error: errVinculo } = await supabase
+          .from('alunos').update({ auth_id: profExistente.auth_id })
+          .eq('id', alunoInserido.id).eq('estudio_id', estudioId);
+        if (errVinculo) throw new Error('Erro ao criar vínculo de aluno.');
         novoAlunoId = alunoInserido.id;
         showToast.success('Perfil vinculado ao professor com sucesso!');
       } else {
         // New student – persist the record WITHOUT auth (auth_id intentionally null).
         // The admin will create the app login in Phase 2 below.
-        const { data: alunoInserido, error } = await supabase
-          .from('alunos')
-          .insert([{
-            ...payloadBase,
-            nome_completo: data.nome_completo,
-            email:         data.email.trim(),
-          }])
-          .select('id').single();
-        if (error) throw new Error('Erro ao salvar cadastro do aluno.');
+        // FIX: estudio_id agora é sempre gravado, via alunosService.criar.
+        const alunoInserido = await alunosService.criar(
+          { ...payloadBase, nome_completo: data.nome_completo, email: data.email.trim() },
+          estudioId
+        );
         novoAlunoId = alunoInserido.id;
       }
 

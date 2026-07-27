@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { professoresService } from '../services/professoresService';
 import { useDebounce } from '../hooks/useDebounce';
 import { useAuth } from '../hooks/useAuth';
+import { useImpersonation } from '../context/ImpersonationContext';
 
 import { showToast } from '../components/shared/Toast';
 
@@ -16,35 +17,49 @@ import Surface from '../components/ui/Surface';
 import Skeleton from '../components/ui/Skeleton';
 import EmptyState from '../components/ui/EmptyState';
 
+const FORM_VAZIO = { id: null, nome: '', email: '', telefone: '', pix_comissao: '', auth_id: null };
+
 export default function Professores() {
-  const { estudioId } = useAuth();
+  // CR2 FIX: fallback de impersonation, mesmo padrão usado em
+  // ConfiguracoesFeriados.jsx / ConfiguracoesEstudio.jsx. Sem isso,
+  // super_admin em impersonation caía no bug de professoresService listando/
+  // alterando professores de todos os estúdios (filtro condicional).
+  const { estudioId, perfil } = useAuth();
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
+
+  const podeGerenciar = perfil === 'admin' || perfil === 'super_admin';
 
   const [professores, setProfessores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
 
-  const [formProfessor, setFormProfessor] = useState({
-    id: null, nome: '', email: '', telefone: '', pix_comissao: '', auth_id: null,
-  });
+  const [formProfessor, setFormProfessor] = useState(FORM_VAZIO);
   // Guarda o estado original ao abrir edição para detectar mudanças de acesso
   const [acessoOriginal, setAcessoOriginal] = useState({ email: '', auth_id: null });
   const [profSelecionado, setProfSelecionado] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const buscaDebounced = useDebounce(busca, 400);
-  const modalForm   = useModal();
+  const modalForm = useModal();
   const modalStatus = useModal();
 
   useEffect(() => {
     carregarProfessores();
-  }, [buscaDebounced]);
+  }, [buscaDebounced, idEfetivo]);
 
   async function carregarProfessores() {
+    if (!idEfetivo) {
+      setProfessores([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const data = await professoresService.listar(buscaDebounced, estudioId);
+      const data = await professoresService.listar(buscaDebounced, idEfetivo);
       setProfessores(data);
-    } catch {
+    } catch (err) {
+      console.error('[Professores] erro ao carregar lista:', err);
       showToast.error('Erro ao carregar lista.');
     } finally {
       setLoading(false);
@@ -52,7 +67,7 @@ export default function Professores() {
   }
 
   function abrirModalCriar() {
-    setFormProfessor({ id: null, nome: '', email: '', telefone: '', pix_comissao: '', auth_id: null });
+    setFormProfessor(FORM_VAZIO);
     setAcessoOriginal({ email: '', auth_id: null });
     modalForm.abrir();
   }
@@ -72,103 +87,89 @@ export default function Professores() {
 
   async function handleSalvar(e) {
     e.preventDefault();
-    if (saving) return;
+    if (saving || !idEfetivo) return;
     setSaving(true);
 
     try {
-      const emailNovo   = formProfessor.email.trim().toLowerCase();
+      const emailNovo = formProfessor.email.trim().toLowerCase();
       const emailAntigo = acessoOriginal.email.trim().toLowerCase();
       const authIdAtual = acessoOriginal.auth_id;
 
-      // ── Detecta qual operação de acesso é necessária ──────────────────────
-      //
-      //  1. Novo cadastro com email         → criar acesso
-      //  2. Edição: tinha email, limpou      → remover acesso
-      //  3. Edição: tinha email, trocou      → trocar_email
-      //  4. Edição: não tinha, adicionou     → criar acesso
-      //  5. Sem email em nenhum dos dois     → só salva dados do professor
-      //  6. Email não mudou                  → só salva dados do professor
+      const tinhaAcesso = !!authIdAtual;
+      const temEmailNovo = !!emailNovo;
+      const emailMudou = emailNovo !== emailAntigo;
 
-      const isNovoCadastro = !formProfessor.id;
-      const tinhaAcesso    = !!authIdAtual;
-      const temEmailNovo   = !!emailNovo;
-      const emailMudou     = emailNovo !== emailAntigo;
+      // CR1 FIX: salva SEMPRE os dados básicos primeiro (nome/telefone/pix),
+      // preservando email/auth_id atuais. Isso garante um `id` real de
+      // professor antes de chamar a Edge Function — que exige `professor_id`
+      // em toda ação (`criar`, `remover`, `trocar_email`). Antes, o cadastro
+      // de um professor novo com e-mail chamava a função com
+      // `professor_id: null`, o que a função sempre rejeitava com
+      // "email e professor_id são obrigatórios".
+      const dadosBase = {
+        id: formProfessor.id,
+        nome: formProfessor.nome,
+        telefone: formProfessor.telefone,
+        pix_comissao: formProfessor.pix_comissao,
+        email: formProfessor.id ? (acessoOriginal.email || null) : null,
+        auth_id: formProfessor.id ? authIdAtual : null,
+      };
+      const professorSalvo = await professoresService.salvar(dadosBase, idEfetivo);
+      const professorId = professorSalvo.id;
 
       let toastMsg = 'Professor salvo com sucesso!';
 
-      if (isNovoCadastro && temEmailNovo) {
-        // Caso 1 — novo cadastro com email: chama Edge Function e ela já salva auth_id
+      if (temEmailNovo && (!tinhaAcesso || emailMudou)) {
+        // Criar acesso (professor novo, ou existente sem acesso ainda)
+        // OU trocar e-mail de um acesso já existente.
+        const acao = tinhaAcesso && emailMudou ? 'trocar_email' : 'criar';
+
         const { data: funcData, error: funcError } = await supabase.functions.invoke(
           'gerenciar-acesso-professor',
-          { body: { acao: 'criar', professor_id: null, email: emailNovo, nome: formProfessor.nome, estudio_id: estudioId } },
+          {
+            body: {
+              acao,
+              professor_id: professorId,
+              auth_id: authIdAtual,
+              email: emailNovo,
+              nome: formProfessor.nome,
+              estudio_id: idEfetivo,
+            },
+          },
         );
         if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
         if (funcData?.error) throw new Error(funcData.error);
 
-        // Para novo cadastro a função não tem professor_id ainda — salvamos sem auth_id
-        // e atualizamos logo após ter o id retornado pelo insert
-        const professorSalvo = await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id }, estudioId);
-        // A função foi chamada sem professor_id; corrige agora
-        await supabase.from('professores').update({ auth_id: funcData.auth_id }).eq('id', professorSalvo.id);
-        toastMsg = funcData.reutilizado
-          ? 'Professor vinculado ao acesso existente!'
-          : 'Professor cadastrado e acesso criado!';
+        toastMsg = acao === 'criar'
+          ? (funcData.reutilizado
+              ? 'Professor vinculado ao acesso existente!'
+              : 'Professor cadastrado e acesso criado!')
+          : (funcData.reutilizado
+              ? 'E-mail atualizado e vinculado a um acesso existente!'
+              : funcData.auth_antigo_deletado
+                ? 'E-mail atualizado e novo acesso criado!'
+                : 'E-mail atualizado e novo acesso criado. O acesso antigo continua ativo (pertence a outro vínculo) e pode ser removido depois, se necessário.');
 
-      } else if (!isNovoCadastro && tinhaAcesso && !temEmailNovo) {
-        // Caso 2 — removeu o email: exclui acesso
+      } else if (!temEmailNovo && tinhaAcesso) {
+        // Removeu o e-mail: exclui o acesso.
         const { data: funcData, error: funcError } = await supabase.functions.invoke(
           'gerenciar-acesso-professor',
-          { body: { acao: 'remover', professor_id: formProfessor.id, auth_id: authIdAtual, estudio_id: estudioId } },
+          { body: { acao: 'remover', professor_id: professorId, auth_id: authIdAtual, estudio_id: idEfetivo } },
         );
         if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
         if (funcData?.error) throw new Error(funcData.error);
 
-        // Salva o restante dos campos (email e auth_id já foram limpos pela função)
-        await professoresService.salvar({ ...formProfessor, email: null, auth_id: null }, estudioId);
         toastMsg = funcData.user_deletado
           ? 'E-mail removido e acesso excluído.'
           : 'E-mail removido. Acesso mantido pois pertence a um aluno.';
-
-      } else if (!isNovoCadastro && emailMudou && tinhaAcesso && temEmailNovo) {
-        // Caso 3 — trocou o email: deleta antigo, cria novo
-        const { data: funcData, error: funcError } = await supabase.functions.invoke(
-          'gerenciar-acesso-professor',
-          { body: { acao: 'trocar_email', professor_id: formProfessor.id, auth_id: authIdAtual, email: emailNovo, nome: formProfessor.nome, estudio_id: estudioId } },
-        );
-        if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
-        if (funcData?.error) throw new Error(funcData.error);
-
-        await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id }, estudioId);
-
-        toastMsg = funcData.reutilizado
-          ? 'E-mail atualizado e vinculado a um acesso existente!'
-          : funcData.auth_antigo_deletado
-            ? 'E-mail atualizado e novo acesso criado!'
-            : 'E-mail atualizado e novo acesso criado. O acesso antigo continua ativo (pertence a outro vínculo) e pode ser removido depois, se necessário.';
-
-      } else if (!isNovoCadastro && !tinhaAcesso && temEmailNovo) {
-        // Caso 4 — não tinha acesso, adicionou email: cria acesso
-        const { data: funcData, error: funcError } = await supabase.functions.invoke(
-          'gerenciar-acesso-professor',
-          { body: { acao: 'criar', professor_id: formProfessor.id, email: emailNovo, nome: formProfessor.nome, estudio_id: estudioId } },
-        );
-        if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
-        if (funcData?.error) throw new Error(funcData.error);
-
-         await professoresService.salvar({ ...formProfessor, email: emailNovo, auth_id: funcData.auth_id }, estudioId);
-        toastMsg = funcData.reutilizado
-          ? 'Professor vinculado ao acesso existente!'
-          : 'Acesso criado e professor atualizado!';
-
-      } else {
-        // Casos 5 e 6 — sem mudança de acesso, salva só os dados
-        await professoresService.salvar({ ...formProfessor, email: emailNovo || null }, estudioId);
       }
+      // else: sem mudança de acesso — os dados básicos já foram salvos acima.
 
       showToast.success(toastMsg);
       modalForm.fechar();
       carregarProfessores();
     } catch (error) {
+      console.error('[Professores] erro ao salvar:', error);
       showToast.error(error.message || 'Erro ao salvar dados.');
     } finally {
       setSaving(false);
@@ -176,12 +177,14 @@ export default function Professores() {
   }
 
   async function alternarStatus() {
+    if (!profSelecionado || !idEfetivo) return;
     try {
-      await professoresService.alternarStatus(profSelecionado.id, !profSelecionado.ativo, estudioId);
+      await professoresService.alternarStatus(profSelecionado.id, !profSelecionado.ativo, idEfetivo);
       showToast.success(profSelecionado.ativo ? 'Professor desativado.' : 'Professor reativado!');
       modalStatus.fechar();
       carregarProfessores();
-    } catch {
+    } catch (err) {
+      console.error('[Professores] erro ao alterar status:', err);
       showToast.error('Erro ao alterar status.');
     }
   }
@@ -204,9 +207,11 @@ export default function Professores() {
           <h1 className="text-3xl font-black text-foreground">Equipe de Professores</h1>
           <p className="text-muted-foreground">Gerencie os profissionais e seus acessos ao sistema.</p>
         </div>
-        <Button variant="brand" size="lg" leftIcon={<UserPlus size={20} />} onClick={abrirModalCriar}>
-          Novo Professor
-        </Button>
+        {podeGerenciar && (
+          <Button variant="brand" size="lg" leftIcon={<UserPlus size={20} />} onClick={abrirModalCriar}>
+            Novo Professor
+          </Button>
+        )}
       </div>
 
       {/* Barra de busca */}
@@ -231,7 +236,9 @@ export default function Professores() {
                 <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground">Contato</th>
                 <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground">Chave PIX</th>
                 <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground">Status</th>
-                <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground text-right">Ações</th>
+                {podeGerenciar && (
+                  <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-muted-foreground text-right">Ações</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -242,7 +249,7 @@ export default function Professores() {
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 bg-primary-soft rounded-full flex items-center justify-center font-black text-primary">
-                        {prof.nome.charAt(0)}
+                        {prof.nome?.charAt(0)?.toUpperCase() || '?'}
                       </div>
                       <div>
                         <p className="font-bold text-foreground">{prof.nome}</p>
@@ -281,27 +288,29 @@ export default function Professores() {
                   </td>
 
                   {/* Ações */}
-                  <td className="px-8 py-5">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Editar"
-                        onClick={() => abrirModalEditar(prof)}
-                      >
-                        <Edit2 size={16} />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Alterar status"
-                        className="hover:text-primary hover:bg-primary-soft"
-                        onClick={() => { setProfSelecionado(prof); modalStatus.abrir(); }}
-                      >
-                        <ShieldAlert size={16} />
-                      </Button>
-                    </div>
-                  </td>
+                  {podeGerenciar && (
+                    <td className="px-8 py-5">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Editar"
+                          onClick={() => abrirModalEditar(prof)}
+                        >
+                          <Edit2 size={16} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Alterar status"
+                          className="hover:text-primary hover:bg-primary-soft"
+                          onClick={() => { setProfSelecionado(prof); modalStatus.abrir(); }}
+                        >
+                          <ShieldAlert size={16} />
+                        </Button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -311,7 +320,9 @@ export default function Professores() {
             <EmptyState
               icon={<Users size={28} />}
               title="Nenhum professor encontrado"
-              description="Comece cadastrando seu primeiro professor."
+              description={podeGerenciar
+                ? 'Comece cadastrando seu primeiro professor.'
+                : 'Ainda não há professores cadastrados neste estúdio.'}
             />
           </div>
         )}
@@ -369,7 +380,7 @@ export default function Professores() {
             <Button variant="outline" onClick={modalForm.fechar} type="button">
               Cancelar
             </Button>
-            <Button variant="brand" size="lg" loading={saving} fullWidth type="submit">
+            <Button variant="brand" size="lg" loading={saving} fullWidth type="submit" disabled={!idEfetivo}>
               {formProfessor.id ? 'Atualizar Cadastro' : 'Concluir e Criar Acesso'}
             </Button>
           </Modal.Footer>

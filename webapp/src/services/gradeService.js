@@ -26,58 +26,67 @@ export const gradeService = {
    * @param {'admin' | 'professor' | 'aluno'} perfil  — vem do useAuth
    * @param {string | null} professorId                — id do professor logado (se perfil === 'professor')
    * @param {string} estudioId                          — vem do useAuth
+   * @param {Object} janela                             — objeto com propriedades 'inicio' e 'fim' para filtrar o período
    */
-  async listarGrade(perfil, professorId, estudioId) {
-    if (perfil === 'admin') {
-      const { data, error } = await supabase
+async listarGrade(perfil, professorId, estudioId, janela) {
+  const aplicarJanela = (query) =>
+    janela ? query.gte('horario', janela.inicio).lte('horario', janela.fim) : query;
+
+  if (perfil === 'admin') {
+    const { data, error } = await aplicarJanela(
+      supabase
         .from('agenda')
         .select('*, professores(nome), modalidades(id, nome)')
         .eq('estudio_id', estudioId)
-        .order('horario', { ascending: true });
-      if (error) throw error;
-      return data;
-    }
+        .order('horario', { ascending: true })
+    );
+    if (error) throw error;
+    return data;
+  }
 
-    if (perfil !== 'professor' || !professorId) return [];
+  if (perfil !== 'professor' || !professorId) return [];
 
-    const { data: modalidadesDoProf } = await supabase
-      .from('modalidades')
-      .select('id')
-      .eq('estudio_id', estudioId)
-      .eq('professor_id', professorId);
+  const { data: modalidadesDoProf } = await supabase
+    .from('modalidades')
+    .select('id')
+    .eq('estudio_id', estudioId)
+    .eq('professor_id', professorId);
 
-    const idsModsDoProf = modalidadesDoProf?.map((m) => m.id) ?? [];
+  const idsModsDoProf = modalidadesDoProf?.map((m) => m.id) ?? [];
 
-    const [{ data: aulasDiretas, error: errDiretas }, { data: aulasPorMod, error: errMod }] =
-      await Promise.all([
+  const [{ data: aulasDiretas, error: errDiretas }, { data: aulasPorMod, error: errMod }] =
+    await Promise.all([
+      aplicarJanela(
         supabase
           .from('agenda')
           .select('*, professores(nome), modalidades(id, nome)')
           .eq('estudio_id', estudioId)
           .eq('professor_id', professorId)
-          .order('horario', { ascending: true }),
-
-        idsModsDoProf.length > 0
-          ? supabase
+          .order('horario', { ascending: true })
+      ),
+      idsModsDoProf.length > 0
+        ? aplicarJanela(
+            supabase
               .from('agenda')
               .select('*, professores(nome), modalidades(id, nome)')
               .eq('estudio_id', estudioId)
               .is('professor_id', null)
               .in('modalidade_id', idsModsDoProf)
               .order('horario', { ascending: true })
-          : Promise.resolve({ data: [], error: null }),
-      ]);
+          )
+        : Promise.resolve({ data: [], error: null }),
+    ]);
 
-    if (errDiretas) throw errDiretas;
-    if (errMod) throw errMod;
+  if (errDiretas) throw errDiretas;
+  if (errMod) throw errMod;
 
-    const vistas = new Set();
-    return [...(aulasDiretas ?? []), ...(aulasPorMod ?? [])].filter((a) => {
-      if (vistas.has(a.id)) return false;
-      vistas.add(a.id);
-      return true;
-    });
-  },
+  const vistas = new Set();
+  return [...(aulasDiretas ?? []), ...(aulasPorMod ?? [])].filter((a) => {
+    if (vistas.has(a.id)) return false;
+    vistas.add(a.id);
+    return true;
+  });
+},
 
   // Sprint 02: estudioId obrigatório em INSERTs de agenda
   async salvarAula(aula, estudioId) {

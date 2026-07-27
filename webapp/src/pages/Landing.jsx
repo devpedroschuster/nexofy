@@ -33,8 +33,9 @@ export default function Landing() {
           .eq('estudio_id', estudio.id)
           .order('preco', { ascending: true });
         if (!error && data) setPlanos(data);
-      } catch (_) {
-        // Silently fail — seção de planos ficará oculta
+      } catch (err) {
+        console.error('[Landing] Falha ao carregar planos:', err);
+        // Seção de planos ficará oculta (comportamento mantido)
       } finally {
         setPlanosLoading(false);
       }
@@ -74,7 +75,16 @@ export default function Landing() {
 
   async function handleLeadSubmit(e) {
     e.preventDefault();
+    if (!estudio?.id) return; // guarda contra submit antes do estúdio resolver
     if (!leadNome.trim() || !leadTel.trim()) return;
+
+    const telefoneDigits = leadTel.replace(/\D/g, '');
+    if (telefoneDigits.length < 10) {
+      setLeadStatus('err');
+      setLeadErro('Informe um telefone válido com DDD.');
+      return;
+    }
+
     setLeadLoading(true);
     setLeadStatus(null);
     setLeadErro('');
@@ -84,7 +94,7 @@ export default function Landing() {
         .insert([{
           estudio_id: estudio.id,                    // ← isolamento multi-tenant
           nome_visitante: leadNome.trim(),
-          telefone_visitante: leadTel.replace(/\D/g, ''),
+          telefone_visitante: telefoneDigits,
           status_conversao: 'pendente',
         }]);
 
@@ -93,7 +103,7 @@ export default function Landing() {
       setLeadNome('');
       setLeadTel('');
     } catch (err) {
-      console.error(err);
+      console.error('[Landing] Falha ao registrar lead:', err);
       setLeadStatus('err');
       setLeadErro('Não conseguimos registrar agora. Tente novamente ou fale pelo WhatsApp.');
     } finally {
@@ -109,14 +119,14 @@ export default function Landing() {
   };
 
   // ── Dados de contato (Supabase > fallback hardcoded) ─────────────────
-  const nomeEstudio   = estudio?.nome         ?? 'Gestão App';
-  const whatsappNum   = estudio?.whatsapp     ?? '';
-  const WHATSAPP_URL  = whatsappNum
+  const nomeEstudio    = estudio?.nome          ?? 'Gestão App';
+  const whatsappNum    = estudio?.whatsapp      ?? '';
+  const WHATSAPP_URL   = whatsappNum
     ? `https://wa.me/${whatsappNum}?text=Olá!%20Vi%20o%20site%20e%20quero%20saber%20mais.`
     : '#';
-  const INSTAGRAM = estudio?.instagram ?? '#';
-  const MAPS_URL      = estudio?.maps_url      ?? '#';
-  const MAPS_EMBED    = estudio?.maps_embed_url ?? '';
+  const INSTAGRAM_URL  = estudio?.instagram     ?? '#'; // ← antes: `INSTAGRAM` (nunca usado no JSX, causava ReferenceError)
+  const MAPS_URL       = estudio?.maps_url      ?? '#';
+  const MAPS_EMBED     = estudio?.maps_embed_url ?? '';
 
   return (
     <div id="page-landing">
@@ -300,11 +310,9 @@ export default function Landing() {
               <div className="plans-skeleton"></div>
             </div>
           ) : (
-            <div
-              className="plans-grid"
-              style={planos.length === 1 ? { gridTemplateColumns: '1fr', maxWidth: '360px' } :
-                     planos.length === 2 ? { gridTemplateColumns: 'repeat(2,1fr)', maxWidth: '660px' } : {}}
-            >
+            // Grid agora é 100% responsivo via CSS (auto-fit em .plans-grid),
+            // sem depender de style inline condicional por quantidade de planos.
+            <div className="plans-grid">
               {planos.map((plano) => {
                 const featured = isFeatured(plano, planos);
                 const regras = Array.isArray(plano.regras_acesso) ? plano.regras_acesso : [];

@@ -22,13 +22,25 @@ export default function ModalNovaAula({
   const handleModalidadeChange = (e) => {
     const id = e.target.value;
     const mod = modalidades.find(m => m.id === id);
+
+    // Fix: antes o espaço era forçado para um de dois slugs hardcoded
+    // ('funcional' | 'danca'), ignorando a lista dinâmica de espaços do
+    // estúdio. Agora tentamos casar a área da modalidade com um espaço
+    // real cadastrado; se não achar correspondência, preserva o que já
+    // estava selecionado em vez de chutar um valor que pode não existir.
+    const espacoSugerido = espacos.find(
+      esp => esp.nome?.toLowerCase() === mod?.area?.toLowerCase()
+    )?.slug;
+
     setNovaAula({
       ...novaAula,
       modalidadeId: id,
       atividade: mod?.nome ?? novaAula.atividade,
       professorId: mod?.professor_id || '',
-      capacidade: mod?.capacidade_padrao || 15,
-      espaco: mod?.area?.toLowerCase() === 'funcional' ? 'funcional' : 'danca',
+      // Fix: `??` no lugar de `||` — capacidade_padrao = 0 é um valor
+      // válido (turma sob consulta) e não deve cair no fallback de 15.
+      capacidade: mod?.capacidade_padrao ?? 15,
+      espaco: espacoSugerido ?? novaAula.espaco ?? '',
       cor: novaAula.cor || (mod?.area === 'Funcional' ? 'amarelo' : 'roxo'),
     });
   };
@@ -59,8 +71,21 @@ export default function ModalNovaAula({
     }
   };
 
+  // Fix: validação client-side de espaço obrigatório, para dar feedback
+  // imediato em vez de deixar o formulário submeter com espaco vazio/
+  // inexistente (o INSERT/UPDATE em gradeService não valida esse campo).
+  const espacoValido = !!novaAula.espaco && espacos.some(e => e.slug === novaAula.espaco);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!espacoValido) {
+      return; // o required nativo via aria-invalid abaixo já sinaliza visualmente
+    }
+    salvarAula(e);
+  };
+
   return (
-    <form onSubmit={salvarAula} className="space-y-5 pt-2">
+    <form onSubmit={handleSubmit} className="space-y-5 pt-2">
 
       {/* TIPO DE AULA */}
       <div className="flex bg-muted p-1 rounded-2xl border border-border">
@@ -149,7 +174,9 @@ export default function ModalNovaAula({
 
       {/* ESPAÇO */}
       <div>
-        <label className="text-xs font-black text-muted-foreground uppercase mb-2 block">Espaço</label>
+        <label className="text-xs font-black text-muted-foreground uppercase mb-2 block">
+          Espaço {!espacoValido && <span className="text-destructive normal-case font-medium">— selecione um espaço</span>}
+        </label>
         <div className="flex flex-wrap gap-3">
           {espacos.map((espaco) => {
             const cor = PALETA_CORES.find(c => c.id === espaco.cor) || PALETA_CORES[0];
@@ -163,7 +190,7 @@ export default function ModalNovaAula({
                     : 'border-border text-muted-foreground hover:bg-subtle'
                 }`}
               >
-                <input type="radio" name="espaco" value={espaco.slug} className="sr-only"
+                <input type="radio" name="espaco" value={espaco.slug} className="sr-only" required
                   checked={selecionado}
                   onChange={e => setNovaAula({ ...novaAula, espaco: e.target.value })} />
                 <IconeEspaco nome={espaco.icone} size={18} /> <span className="font-bold text-sm">{espaco.nome}</span>

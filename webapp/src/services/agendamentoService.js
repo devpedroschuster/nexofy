@@ -13,15 +13,15 @@ import { supabase } from '../lib/supabase';
 
 export const agendamentoService = {
 
-  async verificarDisponibilidade(aulaId, dataAula, alunoId = null) {
-    if (!aulaId) return null;
-
-    try {
-      const { data, error } = await supabase.rpc('verificar_disponibilidade_v2', {
-        p_aula_id: aulaId,
-        p_data: dataAula,
-        p_aluno_id: alunoId || null
-      });
+  async verificarDisponibilidade(aulaId, dataAula, alunoId = null, estudioId) {
+  if (!aulaId) return null;
+  try {
+    const { data, error } = await supabase.rpc('verificar_disponibilidade_v2', {
+      p_aula_id: aulaId,
+      p_data: dataAula,
+      p_aluno_id: alunoId || null,
+      p_estudio_id: estudioId, // reforça isolamento de tenant, mesmo que a RPC já valide internamente
+    });
 
       if (error) throw error;
       return data;

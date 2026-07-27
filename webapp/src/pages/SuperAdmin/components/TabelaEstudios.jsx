@@ -15,15 +15,9 @@ import { showToast } from '../../../components/shared/Toast';
 import { superAdminService } from '../../../services/superAdminService';
 import { useImpersonation } from '../../../contexts/ImpersonationContext';
 import { useDebounce } from '../../../hooks/useDebounce';
+import { formatarData } from '../../../lib/utils';
 
 const PAGE_SIZE = 50;
-
-function formatarData(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('pt-BR', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  });
-}
 
 const TH = ({ children, className = '' }) => (
   <th className={`py-3 text-[10px] font-black uppercase tracking-widest text-muted-foreground ${className}`}>

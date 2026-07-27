@@ -4,7 +4,7 @@ import { dashboardService } from '../services/dashboardService';
 import {
   AlertCircle, Clock, Cake, MessageCircle,
   CheckCircle2, Bell, Users, CalendarCheck,
-  ChevronRight, Wallet,
+  ChevronRight, Wallet, RefreshCw,
 } from 'lucide-react';
 import { addDays, format, startOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -15,6 +15,8 @@ import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Modal, { useModal } from '../components/ui/Modal';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
+import { useImpersonation } from '../context/ImpersonationContext';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function calcularIdade(dataNasc) {
@@ -59,6 +61,7 @@ function aniversariantesProximos(alunos, dias = 7) {
 
 function gerarLinkWhatsApp(telefone, mensagem) {
   const num = (telefone || '').replace(/\D/g, '');
+  if (!num) return null; // CR FIX: evita link quebrado https://wa.me/55?text=...
   return `https://wa.me/55${num}?text=${encodeURIComponent(mensagem)}`;
 }
 
@@ -109,6 +112,14 @@ function CardAluno({ nome, info, acao, badge }) {
 export default function Dashboard() {
   const modalInadimplencia = useModal();
 
+  // CR1 FIX: sem estudioId/estudioAtivo, todo o dashboard rodava com
+  // estudio_id === undefined nas queries do service — vazamento/quebra
+  // de isolamento multi-tenant. Mesmo padrão usado em
+  // ConfiguracoesEstudio.jsx / ConfiguracoesFeriados.jsx.
+  const { estudioId } = useAuth();
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
+
   const agora        = new Date();
   const hojeIso      = agora.toISOString().split('T')[0];
   const inicioMes    = startOfMonth(agora).toISOString();
@@ -117,16 +128,24 @@ export default function Dashboard() {
   // ── Query única — todas as chamadas rodam em paralelo via Promise.all ─────
   const {
     data: {
-      totalAlunos        = 0,
-      pagamentosMes      = [],
-      listaInadimplentes = [],
+      totalAlunos          = 0,
+      pagamentosMes        = [],
+      listaInadimplentes   = [],
       alunosPlanosVencendo = [],
-      todosAlunos        = [],
+      todosAlunos          = [],
     } = {},
     isLoading,
+    isError,
+    error,
+    refetch,
   } = useQuery({
-    queryKey: ['dashboard', hojeIso, inicioMes, limite7Dias],
-    queryFn:  () => dashboardService.obterTudoDashboard({ hojeIso, inicioMes, limite7Dias }),
+    // CR1 FIX: idEfetivo entra na queryKey para evitar cache cross-tenant
+    // ao trocar de estúdio via impersonation.
+    queryKey: ['dashboard', idEfetivo, hojeIso, inicioMes, limite7Dias],
+    queryFn:  () => dashboardService.obterTudoDashboard({
+      hojeIso, inicioMes, limite7Dias, estudioId: idEfetivo,
+    }),
+    enabled: !!idEfetivo, // CR1 FIX: não dispara a query sem tenant resolvido
     staleTime: 1000 * 60 * 5,
   });
 
@@ -141,28 +160,49 @@ export default function Dashboard() {
     () => pagamentosMes.reduce((acc, m) => acc + Number(m.valor_pago), 0),
     [pagamentosMes]
   );
-
   const inadimplenciaTotal = useMemo(
     () => listaInadimplentes.reduce((acc, m) => acc + Number(m.valor_pago), 0),
     [listaInadimplentes]
   );
-
-  const aniversariantesHoje     = useMemo(() => aniversariantesDoDia(todosAlunos), [todosAlunos]);
-  const aniversariantesEmBreve  = useMemo(() => aniversariantesProximos(todosAlunos, 7), [todosAlunos]);
+  const aniversariantesHoje    = useMemo(() => aniversariantesDoDia(todosAlunos), [todosAlunos]);
+  const aniversariantesEmBreve = useMemo(() => aniversariantesProximos(todosAlunos, 7), [todosAlunos]);
 
   const nomesMes = format(agora, 'MMMM', { locale: ptBR });
   const nomesMesCapitalizado = nomesMes.charAt(0).toUpperCase() + nomesMes.slice(1);
 
-  const handleCobranca = (aluno, vencimento, valor) => {
-    const data = format(new Date(vencimento + 'T12:00:00'), 'dd/MM/yyyy');
-    const msg  = `Olá, ${aluno?.nome_completo?.split(' ')[0]}! Seu pagamento de ${formatarMoeda(valor)}, com vencimento em ${data}, ainda está em aberto. Podemos verificar juntos? 🙏`;
-    window.open(gerarLinkWhatsApp(aluno?.telefone, msg), '_blank');
+   const handleCobranca = (aluno, vencimento, valor) => {
+    const link = gerarLinkWhatsApp(
+      aluno?.telefone,
+      `Olá, ${aluno?.nome_completo?.split(' ')[0]}! Seu pagamento de ${formatarMoeda(valor)}, com vencimento em ${format(new Date(vencimento + 'T12:00:00'), 'dd/MM/yyyy')}, ainda está em aberto. Podemos verificar juntos? 🙏`
+    );
+    if (link) window.open(link, '_blank');
   };
 
   const handleParabens = (aluno) => {
-    const msg = `Feliz aniversário, ${aluno.nome_completo?.split(' ')[0]}! 🎂 Toda a equipe do espaço deseja a você um dia incrível!`;
-    window.open(gerarLinkWhatsApp(aluno.telefone, msg), '_blank');
+    const link = gerarLinkWhatsApp(
+      aluno.telefone,
+      `Feliz aniversário, ${aluno.nome_completo?.split(' ')[0]}! 🎂 Toda a equipe do espaço deseja a você um dia incrível!`
+    );
+    if (link) window.open(link, '_blank');
   };
+
+  if (isError) {
+    return (
+      <div className="p-6 md:p-8">
+        <SecaoAviso tipo="danger" icone={<AlertCircle size={18} />} titulo="Não foi possível carregar o painel">
+          <p className="text-sm text-destructive mb-3">
+            {error?.message ?? 'Ocorreu um erro ao buscar os dados. Tente novamente.'}
+          </p>
+          <button
+            onClick={() => refetch()}
+            className="text-xs font-bold flex items-center gap-1.5 text-destructive hover:underline"
+          >
+            <RefreshCw size={13} /> Tentar novamente
+          </button>
+        </SecaoAviso>
+      </div>
+    );
+  }
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (

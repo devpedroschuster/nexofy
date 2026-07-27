@@ -4,27 +4,43 @@
  * Extrai o slug do estúdio a partir do hostname atual.
  *
  * Exemplos:
- *   iluminus.gestao.app    → "iluminus"
- *   abc-dance.gestao.app   → "abc-dance"
- *   localhost              → VITE_DEV_SLUG (dev local) ou null
- *   gestao.app             → null  (raiz sem subdomínio)
+ *   iluminus.gestao.app       → "iluminus"
+ *   abc-dance.gestao.com.br   → "abc-dance"
+ *   localhost                 → VITE_DEV_SLUG (dev local) ou null
+ *   gestao.app                → null  (raiz sem subdomínio)
+ *   gestao.com.br             → null  (raiz sem subdomínio, TLD composto)
+ *
+ * VITE_ROOT_DOMAINS: lista separada por vírgula dos domínios raiz da
+ * aplicação (sem subdomínio de tenant), ex: "gestao.app,gestao.com.br".
+ * Evita depender de contagem de partes do hostname, que quebra em
+ * TLDs compostos (.com.br, .co.uk etc).
  *
  * Aceita `hostname` como parâmetro para facilitar testes sem depender de window.
  */
+const ROOT_DOMAINS = (import.meta.env.VITE_ROOT_DOMAINS || 'gestao.app')
+  .split(',')
+  .map((d) => d.trim())
+  .filter(Boolean);
+
 export function getSlugFromHostname(hostname = window.location.hostname) {
-  // Dev local: usa variável de ambiente para simular um estúdio específico
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return import.meta.env.VITE_DEV_SLUG ?? null;
   }
 
-  const parts = hostname.split('.');
+  const dominioRaiz = ROOT_DOMAINS.find(
+    (raiz) => hostname === raiz || hostname.endsWith(`.${raiz}`)
+  );
 
-  // Precisa de pelo menos 3 partes: slug.dominio.tld
-  if (parts.length < 3) return null;
+  // Hostname não bate com nenhum domínio raiz conhecido — configuração
+  // inesperada, melhor não adivinhar um slug.
+  if (!dominioRaiz) return null;
 
-  const slug = parts[0];
+  // hostname === raiz → acesso direto ao domínio, sem subdomínio de tenant
+  if (hostname === dominioRaiz) return null;
 
-  // Slug vazio ou "www" não é um estúdio
+  const prefixo = hostname.slice(0, hostname.length - dominioRaiz.length - 1); // remove ".dominioRaiz"
+  const slug = prefixo.split('.')[0]; // pega só o primeiro nível (ignora subdomínios extras tipo "preview.")
+
   if (!slug || slug === 'www') return null;
 
   return slug;

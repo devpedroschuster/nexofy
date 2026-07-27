@@ -7,6 +7,19 @@
 //
 // Design: 100% tokens Midnight Indigo. Zero hardcodes de cor.
 // Indicador de força: usa tokens semânticos (destructive, warning, success).
+//
+// FIX (auditoria): resolução de rota pós-senha agora usa `estudio_membros`
+// como fonte de verdade (mesmo mecanismo de useAuth/destinoPosAuth), com
+// fallback para alunos/professores legados. Antes, admin/super_admin caíam
+// sempre em rotaPorPerfil(null) = '/login', dependendo do redirect de login
+// para acertar a rota — funcional, mas incorreto/duplicado.
+// FIX (auditoria): updates de `primeiro_acesso` agora checam `error` e logam
+// falhas em vez de ignorá-las silenciosamente.
+// FIX (auditoria): listener de onAuthStateChange é registrado ANTES de
+// getSession() para eliminar a janela de corrida em que o evento
+// PASSWORD_RECOVERY pode disparar antes da subscription existir.
+// FIX (auditoria): mensagens de erro do Supabase mapeadas para texto
+// amigável em vez de expor err.message cru ao usuário.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState, useMemo, useEffect } from 'react';
@@ -22,6 +35,7 @@ import Button from '../components/ui/Button';
 import { cn } from '../lib/cn';
 
 const SENHA_MIN = LIMITES.SENHA_MIN;
+const TIMEOUT_SESSAO_MS = 6000;
 
 /* ── Lógica de força de senha ───────────────────────────────────────────────── */
 function calcularForca(senha) {
@@ -101,6 +115,97 @@ function IndicadorForca({ senha }) {
   );
 }
 
+/* ── Mapeamento de erros do Supabase Auth para texto amigável ────────────────── */
+function mensagemErroAmigavel(err) {
+  const code = err?.code || err?.error_code;
+  const msg  = (err?.message || '').toLowerCase();
+
+  if (code === 'same_password' || msg.includes('different from the old password')) {
+    return 'A nova senha precisa ser diferente da senha atual.';
+  }
+  if (code === 'weak_password' || msg.includes('weak')) {
+    return 'Senha considerada fraca pelo servidor. Tente uma combinação mais forte.';
+  }
+  if (code === 'over_request_rate_limit' || msg.includes('rate limit')) {
+    return 'Muitas tentativas em pouco tempo. Aguarde alguns instantes e tente novamente.';
+  }
+  if (msg.includes('session') || msg.includes('token')) {
+    return 'Sua sessão de redefinição expirou. Solicite um novo link.';
+  }
+  return 'Não foi possível salvar a nova senha. Tente novamente.';
+}
+
+/* ── Resolução de rota pós-senha ──────────────────────────────────────────────
+ * Fonte de verdade: estudio_membros (mesmo mecanismo usado por useAuth /
+ * destinoPosAuth no restante do app). Fallback para alunos/professores
+ * cobre contas legadas que ainda não têm linha em estudio_membros.
+ * Também zera `primeiro_acesso` na tabela correspondente, logando (sem
+ * bloquear o fluxo) se a escrita falhar.
+ * ────────────────────────────────────────────────────────────────────────── */
+async function resolverRotaPosSenha(userId) {
+  const { data: membro, error: membroErr } = await supabase
+    .from('estudio_membros')
+    .select('role')
+    .eq('auth_id', userId)
+    .maybeSingle();
+
+  if (membroErr) {
+    console.error('[RedefinirSenha] Falha ao consultar estudio_membros:', membroErr);
+  }
+
+  if (membro?.role) {
+    return rotaPorPerfil(membro.role);
+  }
+
+  // Fallback legado: aluno
+  const { data: alunoData, error: alunoErr } = await supabase
+    .from('alunos')
+    .select('role')
+    .eq('auth_id', userId)
+    .maybeSingle();
+
+  if (alunoErr) {
+    console.error('[RedefinirSenha] Falha ao consultar alunos:', alunoErr);
+  }
+
+  if (alunoData) {
+    const { error: updateErr } = await supabase
+      .from('alunos')
+      .update({ primeiro_acesso: false })
+      .eq('auth_id', userId);
+    if (updateErr) {
+      console.error('[RedefinirSenha] Falha ao zerar primeiro_acesso (aluno):', updateErr);
+    }
+    return rotaPorPerfil(alunoData.role);
+  }
+
+  // Fallback legado: professor
+  const { data: profData, error: profErr } = await supabase
+    .from('professores')
+    .select('id')
+    .eq('auth_id', userId)
+    .maybeSingle();
+
+  if (profErr) {
+    console.error('[RedefinirSenha] Falha ao consultar professores:', profErr);
+  }
+
+  if (profData) {
+    const { error: updateErr } = await supabase
+      .from('professores')
+      .update({ primeiro_acesso: false })
+      .eq('auth_id', userId);
+    if (updateErr) {
+      console.error('[RedefinirSenha] Falha ao zerar primeiro_acesso (professor):', updateErr);
+    }
+    return rotaPorPerfil('professor');
+  }
+
+  // Nenhum vínculo encontrado — /login resolve corretamente via
+  // destinoPosAuth (sessão ativa + perfil null → /cadastro/estudio).
+  return '/login';
+}
+
 /* ── Componente principal ───────────────────────────────────────────────────── */
 export default function RedefinirSenha() {
   const [novaSenha, setNovaSenha]         = useState('');
@@ -119,37 +224,43 @@ export default function RedefinirSenha() {
   const senhasCoincidem = !confirmarSenha || novaSenha === confirmarSenha;
 
   /* ── Validação de sessão ─────────────────────────────────────────────────── */
-  // O link de redefinição popula a sessão via fragmento de URL; getSession()
-  // pode retornar null antes do evento PASSWORD_RECOVERY chegar no primeiro render.
+  // O link de redefinição popula a sessão via fragmento de URL. O client do
+  // Supabase processa esse fragmento na própria inicialização, ou seja, o
+  // evento PASSWORD_RECOVERY pode disparar ANTES deste componente montar.
+  // Por isso o listener é registrado primeiro, e só depois consultamos
+  // getSession() para cobrir o caso em que o evento já foi processado.
   useEffect(() => {
-    let sub = null;
+    let resolvido = false;
     let timer = null;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, sess) => {
+      if (resolvido) return;
+      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && sess)) {
+        resolvido = true;
         setSessaoValida(true);
-        return;
+        clearTimeout(timer);
       }
-
-      const { data } = supabase.auth.onAuthStateChange((event, sess) => {
-        if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && sess)) {
-          setSessaoValida(true);
-          sub?.unsubscribe();
-          clearTimeout(timer);
-        }
-      });
-      sub = data.subscription;
-
-      // Timeout de segurança: link expirado ou inválido
-      timer = setTimeout(() => {
-        sub?.unsubscribe();
-        showToast.error('Link expirado ou inválido. Solicite um novo.');
-        navigate('/login');
-      }, 6000);
     });
 
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session && !resolvido) {
+        resolvido = true;
+        setSessaoValida(true);
+        clearTimeout(timer);
+      }
+    });
+
+    // Timeout de segurança: link expirado ou inválido
+    timer = setTimeout(() => {
+      if (!resolvido) {
+        subscription.unsubscribe();
+        showToast.error('Link expirado ou inválido. Solicite um novo.');
+        navigate('/login');
+      }
+    }, TIMEOUT_SESSAO_MS);
+
     return () => {
-      sub?.unsubscribe();
+      subscription.unsubscribe();
       clearTimeout(timer);
     };
   }, [navigate]);
@@ -176,45 +287,19 @@ export default function RedefinirSenha() {
       const { error } = await supabase.auth.updateUser({ password: novaSenha });
       if (error) throw error;
 
-      /* Zera primeiro_acesso e descobre rota */
-      const { data: { user } } = await supabase.auth.getUser();
-      let rotaDestino = rotaPorPerfil(null);
-
-      if (user) {
-        const { data: alunoData } = await supabase
-          .from('alunos')
-          .select('role')
-          .eq('auth_id', user.id)
-          .maybeSingle();
-
-        if (alunoData) {
-          await supabase
-            .from('alunos')
-            .update({ primeiro_acesso: false })
-            .eq('auth_id', user.id);
-          rotaDestino = rotaPorPerfil(alunoData.role);
-        } else {
-          const { data: profData } = await supabase
-            .from('professores')
-            .select('id')
-            .eq('auth_id', user.id)
-            .maybeSingle();
-
-          if (profData) {
-            await supabase
-              .from('professores')
-              .update({ primeiro_acesso: false })
-              .eq('auth_id', user.id);
-            rotaDestino = rotaPorPerfil('professor');
-          }
-        }
+      const { data: { user }, error: userErr } = await supabase.auth.getUser();
+      if (userErr) {
+        console.error('[RedefinirSenha] Falha ao obter usuário após updateUser:', userErr);
       }
+
+      const rotaDestino = user ? await resolverRotaPosSenha(user.id) : '/login';
 
       showToast.success('Senha definida! Redirecionando…');
       setTimeout(() => navigate(rotaDestino), 1000);
 
     } catch (err) {
-      showToast.error('Erro ao salvar: ' + err.message);
+      console.error('[RedefinirSenha] Erro ao salvar nova senha:', err);
+      showToast.error(mensagemErroAmigavel(err));
     } finally {
       setLoading(false);
     }

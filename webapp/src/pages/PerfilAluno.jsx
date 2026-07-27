@@ -106,7 +106,7 @@ function BotaoWhatsApp({ aluno, nomeEstudio = 'Estúdio' }) {
 // ─────────────────────────────────────────────────────────────
 // Modal Editar Cadastro
 // ─────────────────────────────────────────────────────────────
-function ModalEditarCadastro({ aluno, alunoId, queryClient, onClose }) {
+function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }) {
   const [salvando, setSalvando] = useState(false);
   const [form, setForm] = useState({
     nome_completo:      aluno?.nome_completo      ?? '',
@@ -168,7 +168,9 @@ function ModalEditarCadastro({ aluno, alunoId, queryClient, onClose }) {
           cidade: data.localidade || f.cidade,
         }));
       }
-    } catch {}
+    } catch (error) {
+      console.error('[PerfilAluno] Erro ao buscar CEP:', error);
+    }
   };
   const labelClass = 'text-[10px] uppercase font-black text-muted-foreground tracking-widest block mb-1.5';
   const inputClass = 'w-full border border-border rounded-xl px-4 py-2.5 text-sm font-medium text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground';
@@ -488,7 +490,7 @@ function HeatmapFrequencia({ frequencia, planoAtivo }) {
 // ─────────────────────────────────────────────────────────────
 // Aba Anamnese
 // ─────────────────────────────────────────────────────────────
-function AbaAnamnese({ aluno, alunoId, queryClient, observacoesMedicas, setObservacoesMedicas, salvandoMedico, setSalvandoMedico }) {
+function AbaAnamnese({ aluno, alunoId, estudioId, queryClient, observacoesMedicas, setObservacoesMedicas, salvandoMedico, setSalvandoMedico }) {
   const [editandoLink, setEditandoLink] = useState(false);
   const [novoLink, setNovoLink]         = useState(aluno?.link_anamnese ?? '');
   const [salvandoLink, setSalvandoLink] = useState(false);
@@ -610,7 +612,7 @@ function AbaAnamnese({ aluno, alunoId, queryClient, observacoesMedicas, setObser
 // ─────────────────────────────────────────────────────────────
 // Aba Modalidades
 // ─────────────────────────────────────────────────────────────
-function AbaModalidades({ aluno, alunoId, queryClient }) {
+function AbaModalidades({ aluno, alunoId, estudioId, queryClient }) {
   const [modalidades, setModalidades] = useState([]);
   const [modalidadesSelecionadas, setModalidadesSelecionadas] = useState(
     aluno?.modalidades_selecionadas || []
@@ -619,9 +621,20 @@ function AbaModalidades({ aluno, alunoId, queryClient }) {
   const regrasPlano = aluno?.planos?.regras_acesso || [];
 
   React.useEffect(() => {
-    supabase.from('modalidades').select('id, nome, area').order('area').order('nome')
-      .then(({ data }) => setModalidades(data || []));
-  }, []);
+    // FIX: sem .eq('estudio_id', estudioId) esta busca trazia modalidades de
+    // TODOS os estúdios do sistema para dentro do perfil do aluno.
+    if (!estudioId) return;
+    supabase.from('modalidades').select('id, nome, area').eq('estudio_id', estudioId)
+      .order('area').order('nome')
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('[AbaModalidades] Erro ao carregar modalidades:', error);
+          showToast.error('Erro ao carregar modalidades.');
+          return;
+        }
+        setModalidades(data || []);
+      });
+  }, [estudioId]);
 
   React.useEffect(() => {
     setModalidadesSelecionadas(aluno?.modalidades_selecionadas || []);
@@ -802,7 +815,7 @@ function AbaModalidades({ aluno, alunoId, queryClient }) {
 // ─────────────────────────────────────────────────────────────
 // Aba Agenda Fixa
 // ─────────────────────────────────────────────────────────────
-function AbaAgendaFixa({ aluno, alunoId }) {
+function AbaAgendaFixa({ aluno, alunoId, estudioId }) {
   const [aulasGrade, setAulasGrade]         = useState([]);
   const [matriculasAluno, setMatriculasAluno] = useState([]);
   const [loading, setLoading]               = useState(true);
@@ -815,7 +828,7 @@ function AbaAgendaFixa({ aluno, alunoId }) {
 
   React.useEffect(() => {
     carregarAgendaFixa();
-  }, [alunoId]);
+  }, [alunoId, estudioId]);
 
   async function carregarAgendaFixa() {
     setLoading(true);
@@ -824,9 +837,11 @@ function AbaAgendaFixa({ aluno, alunoId }) {
         'Domingo': 0, 'Segunda-feira': 1, 'Terça-feira': 2,
         'Quarta-feira': 3, 'Quinta-feira': 4, 'Sexta-feira': 5, 'Sábado': 6,
       };
+      // FIX: filtro de estudio_id — antes trazia a grade de TODOS os estúdios.
       const { data: aulas } = await supabase
         .from('agenda')
         .select('*, modalidades(id, nome)')
+        .eq('estudio_id', estudioId)
         .eq('eh_recorrente', true);
       setAulasGrade(
         (aulas || []).sort((a, b) => {
@@ -840,7 +855,8 @@ function AbaAgendaFixa({ aluno, alunoId }) {
         .select('aula_id')
         .eq('aluno_id', alunoId);
       setMatriculasAluno(matriculas?.map(m => m.aula_id) || []);
-    } catch {
+    } catch (error) {
+      console.error('[AbaAgendaFixa] Erro ao carregar grade fixa:', error);
       showToast.error('Erro ao carregar grade fixa.');
     } finally {
       setLoading(false);
@@ -858,22 +874,29 @@ function AbaAgendaFixa({ aluno, alunoId }) {
 
   async function executarMatricula(aula) {
     try {
+      // FIX: estudio_id gravado por defesa em profundidade
       const { error } = await supabase.from('agenda_fixa')
-        .insert({ aluno_id: alunoId, aula_id: aula.id });
+        .insert({ aluno_id: alunoId, aula_id: aula.id, estudio_id: estudioId });
       if (error) throw error;
       showToast.success('Aluno matriculado na turma!');
       carregarAgendaFixa();
-    } catch { showToast.error('Erro ao matricular na turma.'); }
+    } catch (error) {
+      console.error('[AbaAgendaFixa] Erro ao matricular:', error);
+      showToast.error('Erro ao matricular na turma.');
+    }
   }
 
   async function executarRemocao(aula) {
     try {
       const { error } = await supabase.from('agenda_fixa')
-        .delete().match({ aluno_id: alunoId, aula_id: aula.id });
+        .delete().match({ aluno_id: alunoId, aula_id: aula.id, estudio_id: estudioId });
       if (error) throw error;
       showToast.success('Aluno removido da turma.');
       carregarAgendaFixa();
-    } catch { showToast.error('Erro ao remover da turma.'); }
+    } catch (error) {
+      console.error('[AbaAgendaFixa] Erro ao remover:', error);
+      showToast.error('Erro ao remover da turma.');
+    }
   }
 
   function toggleMatriculaFixa(aula) {
@@ -1037,6 +1060,7 @@ export default function PerfilAluno() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { estudioId } = useAuth();
   const [abaAtiva, setAbaAtiva] = useState('resumo');
   const [modalRenovarAberto, setModalRenovarAberto] = useState(false);
   const [modalEditarAberto, setModalEditarAberto] = useState(false);
@@ -1052,21 +1076,21 @@ export default function PerfilAluno() {
 
   const { data: aluno, isLoading: loadingAluno } = useQuery({
     queryKey: ['aluno', id],
-    queryFn: () => alunosService.buscarPerfilCompleto(id),
+    queryFn: () => alunosService.buscarPerfilCompleto(id, estudioId),
+      enabled: !!estudioId,
   });
   const { data: planos } = useQuery({
     queryKey: ['aluno-planos', id],
-    queryFn: () => alunosService.buscarHistoricoPlanos(id),
+    queryFn: () => alunosService.buscarHistoricoPlanos(id, estudioId),
     enabled: !!aluno,
   });
   const { data: frequencia } = useQuery({
     queryKey: ['aluno-frequencia', id],
-    queryFn: () => alunosService.buscarHistoricoFrequencia(id),
+    queryFn: () => alunosService.buscarHistoricoFrequencia(id, estudioId),
     enabled: !!aluno,
   });
   const { data: estudio } = useEstudio();
-  const { estudioId } = useAuth();
-const nomeEstudio = estudio?.nome;
+  const nomeEstudio = estudio?.nome;
 
   React.useEffect(() => {
     if (aluno?.observacoes_medicas !== undefined) {
@@ -1224,12 +1248,12 @@ const nomeEstudio = estudio?.nome;
 
         {/* ABA: Modalidades */}
         {abaAtiva === 'modalidades' && (
-          <AbaModalidades aluno={aluno} alunoId={id} queryClient={queryClient} />
+          <AbaModalidades aluno={aluno} alunoId={id} estudioId={estudioId} queryClient={queryClient} />
         )}
 
         {/* ABA: Agenda Fixa */}
         {abaAtiva === 'agenda' && (
-          <AbaAgendaFixa aluno={aluno} alunoId={id} />
+          <AbaAgendaFixa aluno={aluno} alunoId={id} estudioId={estudioId} />
         )}
 
         {/* ABA: Frequência */}
@@ -1366,6 +1390,7 @@ const nomeEstudio = estudio?.nome;
           <AbaAnamnese
             aluno={aluno}
             alunoId={id}
+            estudioId={estudioId}
             queryClient={queryClient}
             observacoesMedicas={observacoesMedicas}
             setObservacoesMedicas={setObservacoesMedicas}
@@ -1388,6 +1413,7 @@ const nomeEstudio = estudio?.nome;
         <ModalEditarCadastro
           aluno={aluno}
           alunoId={id}
+          estudioId={estudioId}
           queryClient={queryClient}
           onClose={() => setModalEditarAberto(false)}
         />

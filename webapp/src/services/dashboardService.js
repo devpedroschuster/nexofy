@@ -81,31 +81,26 @@ async obterComissoes(inicioMes, estudioId) {
    * @param {{ hojeIso: string, inicioMes: string, limite7Dias: string, estudioId: string }} params
    */
   async obterTudoDashboard({ hojeIso, inicioMes, limite7Dias, estudioId }) {
-    const { supabase } = await import('../lib/supabase');
+  if (!estudioId) throw new Error('estudioId é obrigatório para carregar o dashboard.');
+  const { supabase } = await import('../lib/supabase');
 
-    const [
-      totalAlunos,
-      pagamentosMes,
-      listaInadimplentes,
-      alunosPlanosVencendo,
-      todosAlunos,
-    ] = await Promise.all([
+  const [totalAlunos, pagamentosMes, listaInadimplentes, alunosPlanosVencendo, todosAlunos] =
+    await Promise.all([
       this.obterTotalAlunos(estudioId),
       this.obterPagamentosMes(inicioMes, estudioId),
       this.obterInadimplentes(hojeIso, estudioId),
       this.obterAlunosPlanosVencendo(hojeIso, limite7Dias, estudioId),
-      supabase
-        .from('alunos')
+      supabase.from('alunos')
         .select('id, nome_completo, data_nascimento, telefone')
         .eq('estudio_id', estudioId)
         .eq('ativo', true)
         .eq('role', 'aluno')
         .not('data_nascimento', 'is', null)
-        .then(({ data }) => data || []),
+        .then(({ data, error }) => { if (error) throw error; return data || []; }),
     ]);
 
-    return { totalAlunos, pagamentosMes, listaInadimplentes, alunosPlanosVencendo, todosAlunos };
-  },
+  return { totalAlunos, pagamentosMes, listaInadimplentes, alunosPlanosVencendo, todosAlunos };
+},
 
   /**
    * Retorna alunos cujo plano vence entre `hojeIso` e `limiteIso` (inclusive).

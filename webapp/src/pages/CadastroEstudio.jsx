@@ -10,10 +10,14 @@
 // Sucesso → recarrega a página em /dashboard (reload completo, não navigate)
 // porque useAuth cacheia o perfil já resolvido por usuário — um navigate
 // simples não dispararia a releitura de estudio_membros.
+//
+// NOTA IMPORTANTE: a validação de erro aqui depende de cadastroService
+// devolver a mensagem real do corpo da Edge Function (não a genérica do
+// supabase-js). Ver correção em cadastroService.criarMeuEstudio.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useState, useId } from 'react';
-import { Building2, Link2, Phone, Instagram, CheckCircle, XCircle } from 'lucide-react';
+import React, { useState, useId, useEffect, useRef } from 'react';
+import { Building2, Link2, Phone, Instagram, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 
 import { cadastroService } from '../services/cadastroService';
 import { showToast } from '../components/shared/Toast';
@@ -21,6 +25,7 @@ import Input, { Label } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 
 const SLUG_RE = /^[a-z0-9-]{3,50}$/;
+const DEBOUNCE_MS = 400;
 
 function slugificar(texto) {
   return texto
@@ -40,8 +45,43 @@ export default function CadastroEstudio() {
   const [slugManual, setSlugManual] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const slugValido = SLUG_RE.test(form.slug);
-  const slugTocado  = form.slug.length > 0;
+  // null = ainda não checado / não aplicável; true/false = resultado da checagem
+  const [slugDisponivel, setSlugDisponivel] = useState(null);
+  const [checandoSlug, setCheckandoSlug] = useState(false);
+  const debounceRef = useRef(null);
+  const checagemAtualRef = useRef(0);
+
+  const slugFormatoValido = SLUG_RE.test(form.slug);
+  const slugTocado = form.slug.length > 0;
+
+  // Checa disponibilidade real do slug (debounced), só quando o formato já é válido.
+  useEffect(() => {
+    if (!slugFormatoValido) {
+      setSlugDisponivel(null);
+      setCheckandoSlug(false);
+      return;
+    }
+
+    setCheckandoSlug(true);
+    const idChecagem = ++checagemAtualRef.current;
+    clearTimeout(debounceRef.current);
+
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const disponivel = await cadastroService.slugDisponivel(form.slug);
+        // Ignora resultado se o usuário já digitou algo novo enquanto isso resolvia
+        if (idChecagem === checagemAtualRef.current) {
+          setSlugDisponivel(disponivel);
+        }
+      } catch {
+        if (idChecagem === checagemAtualRef.current) setSlugDisponivel(null);
+      } finally {
+        if (idChecagem === checagemAtualRef.current) setCheckandoSlug(false);
+      }
+    }, DEBOUNCE_MS);
+
+    return () => clearTimeout(debounceRef.current);
+  }, [form.slug, slugFormatoValido]);
 
   function set(campo, valor) {
     setForm((f) => ({ ...f, [campo]: valor }));
@@ -66,8 +106,12 @@ export default function CadastroEstudio() {
       showToast.error('Digite o nome do seu estúdio.');
       return;
     }
-    if (!slugValido) {
+    if (!slugFormatoValido) {
       showToast.error('Slug inválido. Use letras minúsculas, números e hífens (3–50 chars).');
+      return;
+    }
+    if (slugDisponivel === false) {
+      showToast.error('Esse slug já está em uso. Escolha outro.');
       return;
     }
 
@@ -84,10 +128,32 @@ export default function CadastroEstudio() {
       // Reload completo — useAuth precisa reler estudio_membros do zero.
       window.location.href = '/dashboard';
     } catch (err) {
+      // Mensagem já vem tratada de cadastroService (corpo real da Edge Function,
+      // não o texto genérico do supabase-js para erros HTTP não-2xx).
       showToast.error(err.message || 'Erro ao criar estúdio.');
       setLoading(false);
     }
   }
+
+  const slugIcone = checandoSlug
+    ? <Loader2 size={16} className="animate-spin text-muted-foreground" />
+    : slugTocado
+      ? slugFormatoValido
+        ? slugDisponivel === false
+          ? <XCircle size={16} className="text-destructive" />
+          : <CheckCircle size={16} className="text-success" />
+        : <XCircle size={16} className="text-destructive" />
+      : null;
+
+  const slugHint = !slugTocado
+    ? 'Apenas letras minúsculas, números e hífens · 3–50 caracteres'
+    : !slugFormatoValido
+      ? 'Apenas letras minúsculas, números e hífens · 3–50 caracteres'
+      : checandoSlug
+        ? 'Verificando disponibilidade...'
+        : slugDisponivel === false
+          ? 'Esse slug já está em uso.'
+          : 'Disponível!';
 
   return (
     <div className="relative min-h-screen bg-background flex items-center justify-center p-4 overflow-hidden">
@@ -134,13 +200,7 @@ export default function CadastroEstudio() {
               <Input
                 id={`${uid}-slug`}
                 leftIcon={<Link2 size={16} />}
-                rightIcon={
-                  slugTocado
-                    ? slugValido
-                      ? <CheckCircle size={16} className="text-success" />
-                      : <XCircle size={16} className="text-destructive" />
-                    : null
-                }
+                rightIcon={slugIcone}
                 placeholder="espaco-movimento"
                 value={form.slug}
                 onChange={handleSlugChange}
@@ -148,8 +208,15 @@ export default function CadastroEstudio() {
                 disabled={loading}
                 aria-describedby={`${uid}-slug-hint`}
               />
-              <p id={`${uid}-slug-hint`} className="mt-1 text-[11px] text-muted-foreground">
-                Apenas letras minúsculas, números e hífens · 3–50 caracteres
+              <p
+                id={`${uid}-slug-hint`}
+                className={`mt-1 text-[11px] ${
+                  slugTocado && slugFormatoValido && slugDisponivel === false
+                    ? 'text-destructive'
+                    : 'text-muted-foreground'
+                }`}
+              >
+                {slugHint}
               </p>
             </div>
 
@@ -184,6 +251,7 @@ export default function CadastroEstudio() {
               size="lg"
               fullWidth
               loading={loading}
+              disabled={loading || checandoSlug || slugDisponivel === false}
               leftIcon={<Building2 size={16} />}
             >
               {loading ? 'Criando...' : 'Criar meu estúdio'}

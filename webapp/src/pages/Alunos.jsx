@@ -142,6 +142,14 @@ export default function Alunos() {
   const inicioRegistro = total === 0 ? 0 : (pagina - 1) * PAGE_SIZE + 1;
   const fimRegistro    = Math.min(pagina * PAGE_SIZE, total);
 
+  // Se a página da URL ultrapassar o total real (ex: URL editada manualmente
+  // ou filtro reduziu o resultado), volta para a última página válida.
+  React.useEffect(() => {
+    if (!loading && totalPaginas > 0 && pagina > totalPaginas) {
+      setParam({ pagina: totalPaginas });
+    }
+  }, [loading, totalPaginas, pagina, setParam]);
+
   // ── Ações de aluno ────────────────────────────────────────────────────────
 
   const alternarStatus = useCallback(async () => {
@@ -155,31 +163,39 @@ export default function Alunos() {
       showToast.success(`Aluno ${novoStatus ? 'reativado' : 'desativado'} com sucesso!`);
       modalStatus.fechar();
       refetch();
-    } catch {
+    } catch (err) {
+      console.error('[Alunos.alternarStatus]', err);
       showToast.error('Erro ao alterar status.');
     }
   }, [alunoSelecionado, estudioId, modalStatus, refetch]);
 
   const excluirAluno = useCallback(async () => {
     if (!alunoSelecionado) return;
-    if (confirmacaoNome.trim() !== alunoSelecionado.nome_completo.trim()) {
-      showToast.error('O nome digitado não confere. Exclusão cancelada.');
-      return;
-    }
+    // Comparação movida para dentro do try: nome_completo nulo/indefinido
+    // não deve estourar um erro não tratado — vira um toast normal.
     try {
+      const nomeConfirmacao = confirmacaoNome.trim();
+      const nomeAluno       = (alunoSelecionado.nome_completo ?? '').trim();
+
+      if (!nomeAluno || nomeConfirmacao !== nomeAluno) {
+        showToast.error('O nome digitado não confere. Exclusão cancelada.');
+        return;
+      }
+
       await alunosService.excluir(alunoSelecionado.id, estudioId);
       showToast.success('Aluno excluído permanentemente!');
       modalExcluir.fechar();
       setConfirmacaoNome('');
       refetch();
     } catch (err) {
+      console.error('[Alunos.excluirAluno]', err);
       if (err.message?.includes('violates foreign key constraint')) {
         showToast.error('Não é possível excluir: este aluno possui histórico. Utilize Desativar.');
       } else {
         showToast.error('Erro ao excluir aluno.');
       }
     }
-  }, [alunoSelecionado, confirmacaoNome, modalExcluir, refetch]);
+  }, [alunoSelecionado, confirmacaoNome, estudioId, modalExcluir, refetch]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 

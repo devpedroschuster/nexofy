@@ -1,5 +1,23 @@
 import { supabase } from '../lib/supabase';
 
+// Campos que o cliente pode efetivamente gravar em `alunos` a partir destes
+// dois métodos. `role`, `estudio_id`, `id`, `auth_id` e afins nunca entram
+// por aqui — mudança de papel/tenant deve passar por um fluxo dedicado e
+// autorizado no backend (Edge Function/RPC), nunca por um update genérico.
+const CAMPOS_ATUALIZAVEIS = [
+  'nome_completo', 'email', 'cpf', 'telefone', 'data_nascimento',
+  'plano_id', 'data_inicio_plano', 'data_fim_plano',
+  'modalidades_selecionadas', 'contato_emergencia',
+  'cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade',
+  'link_anamnese', 'observacoes_medicas',
+];
+
+function filtrarCamposPermitidos(dados) {
+  return Object.fromEntries(
+    Object.entries(dados).filter(([chave]) => CAMPOS_ATUALIZAVEIS.includes(chave))
+  );
+}
+
 export const alunosService = {
   async listar(filtros = {}, paginacao = {}, estudioId) {
     try {
@@ -15,11 +33,15 @@ export const alunosService = {
       if (filtros.role && filtros.role !== 'todos')
         query = query.eq('role', filtros.role);
 
-      if (filtros.busca)
-        query = query.or(`nome_completo.ilike.%${filtros.busca}%,email.ilike.%${filtros.busca}%`);
+      if (filtros.busca) {
+  const termo = filtros.busca.replace(/[,()%_]/g, '\\$&');
+  query = query.or(`nome_completo.ilike.%${termo}%,email.ilike.%${termo}%`);
+}
 
-      if (filtros.letraInicial)
-        query = query.ilike('nome_completo', `${filtros.letraInicial}%`);
+      if (filtros.letraInicial) {
+        const letra = filtros.letraInicial.replace(/[,()%_]/g, '\\$&');
+        query = query.ilike('nome_completo', `${letra}%`);
+      }
 
       const { data, error, count } = await query
         .order('nome_completo')
@@ -52,11 +74,14 @@ export const alunosService = {
   },
 
   // Sprint 02: estudioId obrigatório em todos os INSERTs
+  // SEC-01 (defense-in-depth): role, estudio_id, id etc. nunca vêm de `dados` —
+  // só os campos em CAMPOS_ATUALIZAVEIS são gravados; role fica sempre 'aluno'
+  // por padrão do banco, e estudio_id é sempre o do parâmetro autenticado.
   async criar(dados, estudioId) {
     try {
       const { data, error } = await supabase
         .from('alunos')
-        .insert([{ ...dados, estudio_id: estudioId }])
+        .insert([{ ...filtrarCamposPermitidos(dados), estudio_id: estudioId }])
         .select()
         .single();
 
@@ -72,7 +97,7 @@ export const alunosService = {
     try {
       const { data, error } = await supabase
         .from('alunos')
-        .update(dados)
+        .update(filtrarCamposPermitidos(dados))
         .eq('id', id)
         .eq('estudio_id', estudioId) // Bug #4: impede UPDATE cross-tenant
         .select()
@@ -124,56 +149,79 @@ export const alunosService = {
   },
 
   async listarAniversariantes(estudioId) {
-    const { data, error } = await supabase
-      .from('alunos')
-      .select('id, nome_completo, data_nascimento, telefone, planos(nome)')
-      .eq('estudio_id', estudioId)
-      .not('data_nascimento', 'is', null);
+    try {
+      const { data, error } = await supabase
+        .from('alunos')
+        .select('id, nome_completo, data_nascimento, telefone, planos(nome)')
+        .eq('estudio_id', estudioId)
+        .not('data_nascimento', 'is', null);
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('[alunosService.listarAniversariantes]', error);
+      throw error;
+    }
   },
 
-  async buscarPerfilCompleto(alunoId) {
-    const { data, error } = await supabase
-      .from('alunos')
-      .select(`
-        *,
-        planos (nome, regras_acesso)
-      `)
-      .eq('id', alunoId)
-      .single();
+  async buscarPerfilCompleto(alunoId, estudioId) {
+    try {
+      const { data, error } = await supabase
+        .from('alunos')
+        .select(`
+          *,
+          planos (nome, regras_acesso)
+        `)
+        .eq('id', alunoId)
+        .eq('estudio_id', estudioId)
+        .single();
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('[alunosService.buscarPerfilCompleto]', error);
+      throw error;
+    }
   },
 
-  async buscarHistoricoPlanos(alunoId) {
-    const { data, error } = await supabase
-      .from('historico_planos')
-      .select(`
-        *,
-        planos (nome, regras_acesso)
-      `)
-      .eq('aluno_id', alunoId)
-      .order('data_inicio', { ascending: false });
+  async buscarHistoricoPlanos(alunoId, estudioId) {
+    try {
+      const { data, error } = await supabase
+        .from('historico_planos')
+        .select(`
+          *,
+          planos (nome, regras_acesso)
+        `)
+        .eq('aluno_id', alunoId)
+        .eq('estudio_id', estudioId)
+        .order('data_inicio', { ascending: false });
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('[alunosService.buscarHistoricoPlanos]', error);
+      throw error;
+    }
   },
 
-  async buscarHistoricoFrequencia(alunoId) {
-    const { data, error } = await supabase
-      .from('presencas')
-      .select(`
-        *,
-        agenda (atividade)
-      `)
-      .eq('aluno_id', alunoId)
-      .order('data_checkin', { ascending: false });
+  async buscarHistoricoFrequencia(alunoId, estudioId) {
+    try {
+      const { data, error } = await supabase
+        .from('presencas')
+        .select(`
+          *,
+          agenda (atividade)
+        `)
+        .eq('aluno_id', alunoId)
+        .eq('estudio_id', estudioId)
+        .order('data_checkin', { ascending: false });
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('[alunosService.buscarHistoricoFrequencia]', error);
+      throw error;
+    }
   },
 
   // ─────────────────────────────────────────────────────────────
@@ -249,53 +297,60 @@ export const alunosService = {
     }
   },
 
-  async normalizarHistoricoPlanos() {
-    const { data: alunos, error: errAlunos } = await supabase
-      .from('alunos')
-      .select('id, plano_id, data_inicio_plano, data_fim_plano, created_at')
-      .not('plano_id', 'is', null);
+  async normalizarHistoricoPlanos(estudioId) {
+    try {
+      const { data: alunos, error: errAlunos } = await supabase
+        .from('alunos')
+        .select('id, plano_id, data_inicio_plano, data_fim_plano, created_at')
+        .eq('estudio_id', estudioId)
+        .not('plano_id', 'is', null);
 
-    if (errAlunos) throw errAlunos;
-    if (!alunos?.length) return { normalizados: 0, ignorados: 0 };
+      if (errAlunos) throw errAlunos;
+      if (!alunos?.length) return { normalizados: 0, ignorados: 0 };
 
-    const { data: historicosAtivos, error: errHistoricos } = await supabase
-      .from('historico_planos')
-      .select('aluno_id')
-      .eq('status', 'ativo')
-      .in('aluno_id', alunos.map(a => a.id));
+      const { data: historicosAtivos, error: errHistoricos } = await supabase
+        .from('historico_planos')
+        .select('aluno_id')
+        .eq('status', 'ativo')
+        .in('aluno_id', alunos.map(a => a.id));
 
-    if (errHistoricos) throw errHistoricos;
+      if (errHistoricos) throw errHistoricos;
 
-    const comHistorico = new Set(historicosAtivos?.map(h => h.aluno_id));
+      const comHistorico = new Set(historicosAtivos?.map(h => h.aluno_id));
 
-    const hoje = new Date();
-    const calcularDataFimFallback = () => {
-      const fallback = new Date(hoje);
-      fallback.setDate(fallback.getDate() + 30);
-      return fallback.toISOString().split('T')[0];
-    };
+      const hoje = new Date();
+      const calcularDataFimFallback = () => {
+        const fallback = new Date(hoje);
+        fallback.setDate(fallback.getDate() + 30);
+        return fallback.toISOString().split('T')[0];
+      };
 
-    const alunosSemHistorico = alunos.filter(a => !comHistorico.has(a.id));
-    const ignorados = alunos.length - alunosSemHistorico.length;
+      const alunosSemHistorico = alunos.filter(a => !comHistorico.has(a.id));
+      const ignorados = alunos.length - alunosSemHistorico.length;
 
-    if (!alunosSemHistorico.length) {
-      console.info('[normalizarHistoricoPlanos] Nenhum aluno sem histórico ativo.');
-      return { normalizados: 0, ignorados };
+      if (!alunosSemHistorico.length) {
+        console.info('[normalizarHistoricoPlanos] Nenhum aluno sem histórico ativo.');
+        return { normalizados: 0, ignorados };
+      }
+
+      const inserts = alunosSemHistorico.map(a => ({
+        aluno_id:    a.id,
+        plano_id:    a.plano_id,
+        data_inicio: a.data_inicio_plano || a.created_at?.split('T')[0] || hoje.toISOString().split('T')[0],
+        data_fim:    a.data_fim_plano    || calcularDataFimFallback(),
+        status:      'ativo',
+        estudio_id:  estudioId,
+      }));
+
+      const { error: errInsert } = await supabase
+        .from('historico_planos')
+        .insert(inserts);
+
+      if (errInsert) throw errInsert;
+      return { normalizados: inserts.length, ignorados };
+    } catch (error) {
+      console.error('[alunosService.normalizarHistoricoPlanos]', error);
+      throw error;
     }
-
-    const inserts = alunosSemHistorico.map(a => ({
-      aluno_id:    a.id,
-      plano_id:    a.plano_id,
-      data_inicio: a.data_inicio_plano || a.created_at?.split('T')[0] || hoje.toISOString().split('T')[0],
-      data_fim:    a.data_fim_plano    || calcularDataFimFallback(),
-      status:      'ativo',
-    }));
-
-    const { error: errInsert } = await supabase
-      .from('historico_planos')
-      .insert(inserts);
-
-    if (errInsert) throw errInsert;
-    return { normalizados: inserts.length, ignorados };
   },
 };

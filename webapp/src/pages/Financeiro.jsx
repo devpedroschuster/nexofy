@@ -30,12 +30,16 @@ import Badge from '../components/ui/Badge';
  *
  * @returns {{ tipo: 'pago'|'pendente'|'atrasado', diasAtraso: number }}
  */
+
+/** Data local (não UTC) no formato YYYY-MM-DD, para evitar bug de fuso horário. */
+function hojeLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function calcularStatusReal(item) {
   if (item.status === 'pago') return { tipo: 'pago', diasAtraso: 0 };
-  // Usa data local (não UTC) para evitar que pagamentos do dia apareçam como atrasados
-  // em fusos como o do Brasil, onde o UTC já virou para o dia seguinte à noite.
-  const d = new Date();
-  const hoje = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const hoje = hojeLocal();
   if (item.data_vencimento < hoje) {
     const venc = new Date(item.data_vencimento + 'T12:00:00');
     const diasAtraso = Math.max(1, Math.floor((Date.now() - venc.getTime()) / 86_400_000));
@@ -87,12 +91,22 @@ export default function Financeiro() {
   const [totalAtivos, setTotalAtivos] = useState(null);
 
   useEffect(() => {
-    async function carregarProfessores() {
-      const { data } = await supabase.from('professores').select('id, nome').eq('ativo', true);
-      if (data) setProfessores(data);
+  if (!estudioId) return;
+  async function carregarProfessores() {
+    const { data, error } = await supabase
+      .from('professores')
+      .select('id, nome')
+      .eq('ativo', true)
+      .eq('estudio_id', estudioId);
+    if (error) {
+      console.error('[Financeiro] carregarProfessores:', error);
+      showToast.error('Erro ao carregar professores.');
+      return;
     }
-    carregarProfessores();
-  }, []);
+    setProfessores(data || []);
+  }
+  carregarProfessores();
+}, [estudioId]);
 
   const metricas = useMemo(() => {
     if (!mensalidades) return { recebido: 0, pendente: 0, atrasado: 0, total: 0 };
@@ -135,8 +149,12 @@ export default function Financeiro() {
     showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
     return;
   }
+  const valorFormatado = parseFloat(valorPago.replace(/\./g, '').replace(',', '.'));
+  if (Number.isNaN(valorFormatado) || valorFormatado <= 0) {
+    showToast.error('Informe um valor válido.');
+    return;
+  }
   try {
-    const valorFormatado = parseFloat(valorPago.replace(/\./g, '').replace(',', '.'));
     const payload = {
       valor_pago: valorFormatado,
       forma_pagamento: formaPagamento,
@@ -151,13 +169,14 @@ export default function Financeiro() {
     modalPagamento.fechar();
     setResultadoRepasse(res.resultado);
     setDadosPagamento({
-      valor_pago:      valorFormatado,
+      valor_pago: valorFormatado,
       forma_pagamento: formaPagamento,
-      data_pagamento:  dataPagamentoConfirmar,
+      data_pagamento: dataPagamentoConfirmar,
     });
     modalResultado.abrir();
   } catch (error) {
-    showToast.error("Erro ao processar pagamento");
+    console.error('[Financeiro] handleConfirmarPagamento:', error);
+    showToast.error('Erro ao processar pagamento');
   }
 };
 
@@ -180,14 +199,21 @@ export default function Financeiro() {
   };
 
   const handleAbrirGerarMensalidades = async () => {
-    setTotalAtivos(null);
-    modalGerarMensalidades.abrir();
-    const { count } = await supabase
-      .from('alunos')
-      .select('id', { count: 'exact', head: true })
-      .eq('ativo', true);
-    setTotalAtivos(count ?? 0);
-  };
+  setTotalAtivos(null);
+  modalGerarMensalidades.abrir();
+  const { count, error } = await supabase
+    .from('alunos')
+    .select('id', { count: 'exact', head: true })
+    .eq('ativo', true)
+    .eq('estudio_id', estudioId);
+  if (error) {
+    console.error('[Financeiro] handleAbrirGerarMensalidades:', error);
+    showToast.error('Erro ao contar alunos ativos.');
+    modalGerarMensalidades.fechar();
+    return;
+  }
+  setTotalAtivos(count ?? 0);
+};
 
   const handleAbrirEdicao = (item) => {
     setLancamentoEditando(item);
