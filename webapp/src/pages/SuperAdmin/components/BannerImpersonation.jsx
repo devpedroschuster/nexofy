@@ -10,7 +10,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, X, Loader2 } from 'lucide-react';
-import { useImpersonation } from '../../../contexts/ImpersonationContext';
+import { useImpersonation } from '../../../context/ImpersonationContext';
 import { showToast } from '../../../components/shared/Toast';
 
 export default function BannerImpersonation() {

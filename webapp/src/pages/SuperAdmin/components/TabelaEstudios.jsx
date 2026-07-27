@@ -13,7 +13,7 @@ import Skeleton from '../../../components/ui/Skeleton';
 import { ModalConfirmacao } from '../../../components/ui/Modal';
 import { showToast } from '../../../components/shared/Toast';
 import { superAdminService } from '../../../services/superAdminService';
-import { useImpersonation } from '../../../contexts/ImpersonationContext';
+import { useImpersonation } from '../../../context/ImpersonationContext';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { formatarData } from '../../../lib/utils';
 
