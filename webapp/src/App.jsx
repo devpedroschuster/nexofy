@@ -20,7 +20,7 @@ import { PWABanners } from './components/PWABanners';
 import PaginaNaoEncontrada from './components/PaginaNaoEncontrada';
 
 // Impersonation
-import { ImpersonationProvider } from './contexts/ImpersonationContext';
+import { ImpersonationProvider } from './context/ImpersonationContext';
 import BannerImpersonation from './pages/SuperAdmin/components/BannerImpersonation';
 
 // Pages
