@@ -1,4 +1,4 @@
-// webapp/src/contexts/AuthContext.jsx  (novo arquivo)
+// webapp/src/context/AuthContext.jsx  (novo arquivo)
 //
 // Fonte única de verdade para sessão/perfil do usuário.
 // Substitui o antigo hook `useAuth` "solto" (sem Provider), que fazia

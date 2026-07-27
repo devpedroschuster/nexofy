@@ -1,4 +1,4 @@
-// webapp/src/contexts/ImpersonationContext.jsx
+// webapp/src/context/ImpersonationContext.jsx
 //
 // Contexto global de impersonation de estúdio para super_admin.
 //
