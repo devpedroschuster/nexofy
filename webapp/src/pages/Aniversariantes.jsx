@@ -1,12 +1,6 @@
-// ── DIFF: apenas os trechos alterados de webapp/src/pages/Aniversariantes.jsx ──
-// Verificado contra useEstudio.js, useAuth.jsx e Badge.jsx: nenhuma outra
-// função/prop é afetada; useAlunos, useEspacos etc. não são tocados.
- 
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { alunosService } from '../services/alunosService';
-// FIX #1: importar o hook correto, que já existe e faz exatamente o que
-// este componente precisa (nome do estúdio com fallback padronizado).
 import { useNomeEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
 import { Gift, CalendarDays, Search, PartyPopper, Cake, MessageCircle } from 'lucide-react';
@@ -16,40 +10,14 @@ import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import Skeleton from '../components/ui/Skeleton';
 import Surface from '../components/ui/Surface';
- 
+
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
- 
+
 const REGEX_DATA_ISO = /^\d{4}-\d{2}-\d{2}/;
 
-// ── DIFF: apenas os trechos alterados de webapp/src/pages/Aniversariantes.jsx ──
-// Verificado contra useEstudio.js, useAuth.jsx e Badge.jsx: nenhuma outra
-// função/prop é afetada; useAlunos, useEspacos etc. não são tocados.
- 
-import React, { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { alunosService } from '../services/alunosService';
-// FIX #1: importar o hook correto, que já existe e faz exatamente o que
-// este componente precisa (nome do estúdio com fallback padronizado).
-import { useNomeEstudio } from '../hooks/useEstudio';
-import { useAuth } from '../hooks/useAuth';
-import { Gift, CalendarDays, Search, PartyPopper, Cake, MessageCircle } from 'lucide-react';
-import Input from '../components/ui/Input';
-import Button from '../components/ui/Button';
-import Badge from '../components/ui/Badge';
-import EmptyState from '../components/ui/EmptyState';
-import Skeleton from '../components/ui/Skeleton';
-import Surface from '../components/ui/Surface';
- 
-const MESES = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-];
- 
-const REGEX_DATA_ISO = /^\d{4}-\d{2}-\d{2}/;
- 
 export default function Aniversariantes() {
   const { estudioId } = useAuth();
  
