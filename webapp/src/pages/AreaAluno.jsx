@@ -38,14 +38,9 @@ const gerarProximosDias = () => {
 
 export default function AreaAluno() {
   const navigate = useNavigate();
-  const { data: estudio } = useEstudio();
-  const nomeEstudio = estudio?.nome;
   const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
 
-  // FIX: gerar a lista de dias uma única vez e derivar o dia ativo dela,
-  // em vez de chamar gerarProximosDias() duas vezes (evita dessincronia
-  // caso as duas chamadas caiam em lados opostos da virada da meia-noite).
   const proximosDias = useMemo(() => gerarProximosDias(), []);
 
   const [abaAtiva, setAbaAtiva] = useState('schedule');
@@ -61,8 +56,6 @@ export default function AreaAluno() {
     queryFn: async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Não logado');
-      // FIX: maybeSingle() no lugar de single() — permite distinguir
-      // "sem cadastro de aluno" de uma falha real de rede/permissão.
       const { data, error } = await supabase
         .from('alunos')
         .select(`*, planos (nome, preco, regras_acesso)`)
@@ -74,10 +67,13 @@ export default function AreaAluno() {
     },
   });
 
-  // aluno.estudio_id é a fonte de verdade do tenant do próprio aluno logado —
-  // usamos esse valor (e não o estudio do contexto/URL) para filtrar tudo
-  // que pertence a este aluno, evitando vazamento cross-tenant.
   const estudioIdAluno = aluno?.estudio_id;
+
+  // FIX CRÍTICO: usar o estudio_id do próprio aluno (fonte de verdade do tenant),
+  // e não useEstudio() sem argumento — antes disso `estudio` nunca carregava
+  // porque o hook fica com `enabled: false` sem um estudioId.
+  const { data: estudio } = useEstudio(estudioIdAluno);
+  const nomeEstudio = estudio?.nome;
 
   // FIX: filtro explícito de estudio_id + janela de datas correta (local, com limite superior)
   const { data: presencasMes } = useQuery({

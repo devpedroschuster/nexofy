@@ -202,14 +202,15 @@ export default function ModalPreviewRepasses({ isOpen, onClose, mesAno, onConfir
   }, [isOpen, carregarPreview]);
 
   const handleConfirmar = async () => {
-    setConfirmando(true);
-    try {
-      await onConfirm();
-      onClose();
-    } finally {
-      setConfirmando(false);
-    }
-  };
+  setConfirmando(true);
+  try {
+    await onConfirm();
+    onClose();
+  } catch {
+  } finally {
+    setConfirmando(false);
+  }
+};
 
   const label = mesAnoLabel(mesAno);
 

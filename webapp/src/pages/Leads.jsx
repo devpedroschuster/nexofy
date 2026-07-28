@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Phone, CheckCircle, XCircle, Clock, RefreshCw, MessageCircle, LayoutGrid, List, X, ChevronDown, TrendingUp, TrendingDown, Minus, Calendar, MessageSquare } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
 import { useEstudio } from '../hooks/useEstudio';
 import { showToast } from '../components/shared/Toast';
 import {
@@ -171,8 +172,9 @@ export default function Leads() {
   const [visaoAtiva, setVisaoAtiva] = useState('cards');
   const [confirmandoId, setConfirmandoId] = useState(null);
 
-  const { data: estudio } = useEstudio();
-const nomeEstudio = estudio?.nome || 'nosso estúdio'; // FIX: evita "Aqui é do undefined!" no WhatsApp
+  const { estudioId } = useAuth();
+  const { data: estudio } = useEstudio(estudioId); // FIX real: sem isso a query nunca rodava
+  const nomeEstudio = estudio?.nome || 'nosso estúdio';
 
   // ── Período selecionado em cada visão (independentes) ────────────────────
   // 'todos' ou uma chave 'AAAA-MM'

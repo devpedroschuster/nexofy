@@ -1,11 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Plus, Trash2, Edit2, DollarSign, Calendar,
   TrendingDown, AlertCircle, Filter, Download,
   Zap, Droplet, Wifi, Users, Wrench, ShoppingCart,
   Home, CreditCard, FileText, RefreshCw, Tag
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 
 import { despesasService } from '../services/despesasService';
 import { showToast } from '../components/shared/Toast';
@@ -114,23 +113,30 @@ export default function Despesas() {
   }
 
    async function salvarDespesa(e) {
-    e.preventDefault();
-    if (salvando) return;
-    setSalvando(true);
-    try {
-      const despesaData = { ...formDespesa, valor: Number(formDespesa.valor) || 0 };
-      await despesasService.salvar(despesaData, idEfetivo); // CR1 FIX
-      showToast.success(formDespesa.id ? "Despesa atualizada!" : "Despesa cadastrada!");
-      modalNova.fechar();
-      resetForm();
-      recarregar();
-    } catch (err) {
-      console.error('[Despesas] salvarDespesa falhou:', err);
-      showToast.error("Erro ao salvar despesa.");
-    } finally {
-      setSalvando(false);
-    }
+  e.preventDefault();
+  if (salvando) return;
+
+  const valorNumerico = Number(formDespesa.valor);
+  if (!Number.isFinite(valorNumerico) || valorNumerico <= 0) {
+    showToast.error("Informe um valor válido, maior que zero.");
+    return;
   }
+
+  setSalvando(true);
+  try {
+    const despesaData = { ...formDespesa, valor: valorNumerico };
+    await despesasService.salvar(despesaData, idEfetivo);
+    showToast.success(formDespesa.id ? "Despesa atualizada!" : "Despesa cadastrada!");
+    modalNova.fechar();
+    resetForm();
+    recarregar();
+  } catch (err) {
+    console.error('[Despesas] salvarDespesa falhou:', err);
+    showToast.error("Erro ao salvar despesa.");
+  } finally {
+    setSalvando(false);
+  }
+}
 
   async function excluirDespesa() {
     if (processandoAcao || !despesaExcluir) return;
@@ -164,16 +170,22 @@ export default function Despesas() {
     }
   }
 
+  const refetchOpRef = useRef(0);
+
   async function recarregar() {
-    try {
-      const dados = await despesasService.listar(filtros.mes, filtros.ano, idEfetivo);
-      setDespesas(dados || []);
-      calcularMetricas(dados || []);
-    } catch (err) {
+  const op = ++refetchOpRef.current;
+  try {
+    const dados = await despesasService.listar(filtros.mes, filtros.ano, idEfetivo);
+    if (op !== refetchOpRef.current) return; // resposta fora de ordem, descarta
+    setDespesas(dados || []);
+    calcularMetricas(dados || []);
+  } catch (err) {
+    if (op === refetchOpRef.current) {
       console.error('[Despesas] recarregar falhou:', err);
       showToast.error("Erro ao atualizar a lista.");
     }
   }
+}
 
   function abrirEdicao(despesa) {
     setDespesaEditando(despesa);
@@ -204,12 +216,13 @@ export default function Despesas() {
     });
   }
 
-  function exportarRelatorio() {
-    if (despesasFiltradas.length === 0) {
-      showToast.error("Não há dados para exportar com os filtros atuais.");
-      return;
-    }
-    try {
+  async function exportarRelatorio() {
+  if (despesasFiltradas.length === 0) {
+    showToast.error("Não há dados para exportar com os filtros atuais.");
+    return;
+  }
+  try {
+    const XLSX = await import('xlsx');
       const dadosExport = despesasFiltradas.map(d => ({
         'Descrição': d.descricao,
         'Categoria': CATEGORIAS_DESPESA.find(c => c.valor === d.categoria)?.label || 'Outros',
@@ -538,13 +551,14 @@ export default function Despesas() {
             <div>
               <Label required>Valor (R$)</Label>
               <Input
-                required
-                type="number"
-                step="0.01"
-                placeholder="0,00"
-                value={formDespesa.valor}
-                onChange={e => setFormDespesa({ ...formDespesa, valor: e.target.value })}
-              />
+  required
+  type="number"
+  step="0.01"
+  min="0"
+  placeholder="0,00"
+  value={formDespesa.valor}
+  onChange={e => setFormDespesa({ ...formDespesa, valor: e.target.value })}
+/>
             </div>
           </div>
 

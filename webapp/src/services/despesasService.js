@@ -96,32 +96,28 @@ export const despesasService = {
   // Sprint 02: estudioId obrigatório no INSERT de despesas
   async salvar(despesa, estudioId) {
   if (!estudioId) throw new Error('estudioId é obrigatório para salvar despesa.');
-    const payload = { ...despesa };
+  const { id, ...payload } = { ...despesa };
 
-    if (!payload.id) {
-      delete payload.id;
-      payload.estudio_id = estudioId; // Sprint 02: apenas em novos registros
-    }
+  if (!id) {
+    payload.estudio_id = estudioId; // Sprint 02: apenas em novos registros
+    const { data, error } = await supabase
+      .from('despesas')
+      .insert([payload])
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  }
 
-    if (despesa.id) {
-      const { data, error } = await supabase
-        .from('despesas')
-        .update(payload)
-        .eq('id', despesa.id)
-        .eq('estudio_id', estudioId)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    } else {
-      const { data, error } = await supabase
-        .from('despesas')
-        .insert([payload])
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    }
+  const { data, error } = await supabase
+    .from('despesas')
+    .update(payload)
+    .eq('id', id)
+    .eq('estudio_id', estudioId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
   },
 
   async excluir(id, estudioId) {

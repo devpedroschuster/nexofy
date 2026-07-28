@@ -7,8 +7,9 @@ import {
 import { alunosService } from '../services/alunosService';
 import { useDebounce } from '../hooks/useDebounce';
 import { useAlunos, PAGE_SIZE } from '../hooks/useAlunos';
-import { useEstudio } from '../hooks/useEstudio';
+import { useNomeEstudio } from '../hooks/useEstudio'; // FIX: hook correto para o nome
 import { useAuth } from '../hooks/useAuth';
+import { useImpersonation } from '../context/ImpersonationContext'; // FIX: suporte a impersonation
 import Surface from '../components/ui/Surface';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -18,65 +19,44 @@ import { ModalConfirmacao, useModal } from '../components/ui/Modal';
 import { TableSkeleton } from '../components/shared/Loading';
 import EmptyState from '../components/ui/EmptyState';
 
-// ─── Constantes de layout ────────────────────────────────────────────────────
-
 const LETRAS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
-// ─── Mapas de normalização ───────────────────────────────────────────────────
-// Nunca exibe valor bruto do banco. Toda leitura passa por estes mapas.
-
-/** Mapeia o campo booleano `ativo` para rótulo e tom visual. */
 const STATUS_ATIVO = {
   true:  { label: 'Ativo',   tone: 'success'     },
   false: { label: 'Inativo', tone: 'destructive'  },
 };
 
-/** Mapeia o campo `role` para rótulo legível. */
 const ROLE_LABEL = {
   aluno:     'Aluno',
   admin:     'Admin',
   professor: 'Professor',
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Calcula o status de vencimento do plano a partir de data_fim_plano.
- *
- * @param {string|null} dataFim  formato 'YYYY-MM-DD'
- * @returns {{ tone: string, label: string, dias: number|null }}
- */
 function calcularStatusVencimento(dataFim) {
   if (!dataFim) return { tone: 'neutral', label: 'Sem data', dias: null };
-
   const hoje = new Date();
   const hojeUTC = Date.UTC(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
   const [ano, mes, dia] = dataFim.split('-').map(Number);
   const fimUTC = Date.UTC(ano, mes - 1, dia);
   const dias = Math.round((fimUTC - hojeUTC) / (1000 * 60 * 60 * 24));
   const dataFormatada = `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${String(ano).slice(-2)}`;
-
   if (dias < 0)  return { tone: 'destructive', label: dataFormatada, dias };
   if (dias <= 7) return { tone: 'warning',     label: dataFormatada, dias };
   return              { tone: 'success',      label: dataFormatada, dias };
 }
 
-// ─── Componente ──────────────────────────────────────────────────────────────
-
 export default function Alunos() {
   const navigate = useNavigate();
-  const { nomeEstudio } = useEstudio();
-  const { estudioId } = useAuth();
 
-  /**
-   * PROBLEMA 2 — Filtros persistidos na URL.
-   *
-   * Todos os filtros e a página atual vivem em searchParams em vez de useState,
-   * então o botão Voltar restaura exatamente o estado anterior e a URL pode
-   * ser copiada/compartilhada com os filtros já aplicados.
-   *
-   * URL de exemplo: /alunos?role=aluno&letra=M&pagina=2
-   */
+  // FIX Bug 2: mesmo padrão do Dashboard.jsx — resolve o tenant efetivo
+  // considerando impersonation de super_admin.
+  const { estudioId } = useAuth();
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
+
+  // FIX Bug 1: hook correto, agora recebendo o tenant efetivo
+  const { nomeEstudio } = useNomeEstudio(idEfetivo);
+
   const [searchParams, setSearchParams] = useSearchParams();
 
   const busca      = searchParams.get('busca')  ?? '';
@@ -84,7 +64,6 @@ export default function Alunos() {
   const letraAtiva = searchParams.get('letra')  ?? null;
   const pagina     = Math.max(1, parseInt(searchParams.get('pagina') ?? '1', 10));
 
-  // Estado local apenas para modais (não faz sentido persistir na URL)
   const [alunoSelecionado, setAlunoSelecionado] = useState(null);
   const [confirmacaoNome,  setConfirmacaoNome]  = useState('');
   const modalStatus  = useModal();
@@ -92,11 +71,6 @@ export default function Alunos() {
 
   const buscaDebounced = useDebounce(busca, 400);
 
-  /**
-   * Atualiza searchParams de forma imutável.
-   * Valores null ou string vazia removem o param da URL (mantém URL limpa).
-   * `replace: true` evita poluir o histórico a cada keystroke.
-   */
   const setParam = useCallback((updates) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -108,7 +82,6 @@ export default function Alunos() {
     }, { replace: true });
   }, [setSearchParams]);
 
-  // Handlers de filtro — sempre resetam para página 1
   const handleBuscaChange  = (e) => setParam({ busca: e.target.value || null, letra: null,      pagina: null });
   const handleRoleChange   = (e) => setParam({ role: e.target.value,          pagina: null });
   const handleLetraClick   = (l) => {
@@ -116,93 +89,70 @@ export default function Alunos() {
     setParam({ letra: nova, busca: null, pagina: null });
   };
 
-  /**
-   * PROBLEMA 1 — Paginação real server-side.
-   *
-   * `pagina` vem da URL e é passada para o hook, que por sua vez
-   * a repassa para alunosService.listar() → .range(offset, offset+24).
-   * O Supabase retorna `count` exato com { count: 'exact' }, então
-   * `total` e `totalPaginas` são sempre precisos.
-   */
   const {
-    alunos,
-    loading,
-    fetching,
-    refetch,
-    total,
-    totalPaginas,
-    temAnterior,
-    temProximo,
+    alunos, loading, fetching, refetch,
+    total, totalPaginas, temAnterior, temProximo,
   } = useAlunos(
     { role: filtroRole, busca: buscaDebounced, letraInicial: letraAtiva },
     pagina,
+    idEfetivo, // FIX: useAlunos passa a receber o tenant efetivo explicitamente
   );
 
-  // Cálculo do intervalo exibido na barra de paginação
   const inicioRegistro = total === 0 ? 0 : (pagina - 1) * PAGE_SIZE + 1;
   const fimRegistro    = Math.min(pagina * PAGE_SIZE, total);
 
-  // Se a página da URL ultrapassar o total real (ex: URL editada manualmente
-  // ou filtro reduziu o resultado), volta para a última página válida.
   React.useEffect(() => {
     if (!loading && totalPaginas > 0 && pagina > totalPaginas) {
       setParam({ pagina: totalPaginas });
     }
   }, [loading, totalPaginas, pagina, setParam]);
 
-  // ── Ações de aluno ────────────────────────────────────────────────────────
-
+  // FIX Bug 3: erros agora se propagam para o ModalConfirmacao, que só
+  // fecha o modal em caso de sucesso real. O fechamento manual foi removido.
   const alternarStatus = useCallback(async () => {
     if (!alunoSelecionado) return;
+    const novoStatus = !alunoSelecionado.ativo;
     try {
-      const novoStatus = !alunoSelecionado.ativo;
-      // Bug #4: estudioId adicionado como barreira cross-tenant (defense-in-depth).
-      // alterarStatus filtrava apenas por id — um admin de outro estúdio que
-      // conhecesse o UUID do aluno poderia ativar/desativar sem autorização.
-      await alunosService.alterarStatus(alunoSelecionado.id, novoStatus, estudioId);
+      await alunosService.alterarStatus(alunoSelecionado.id, novoStatus, idEfetivo);
       showToast.success(`Aluno ${novoStatus ? 'reativado' : 'desativado'} com sucesso!`);
-      modalStatus.fechar();
       refetch();
     } catch (err) {
       console.error('[Alunos.alternarStatus]', err);
       showToast.error('Erro ao alterar status.');
+      throw err; // deixa o ModalConfirmacao saber que falhou e manter o modal aberto
     }
-  }, [alunoSelecionado, estudioId, modalStatus, refetch]);
+  }, [alunoSelecionado, idEfetivo, refetch]);
 
   const excluirAluno = useCallback(async () => {
     if (!alunoSelecionado) return;
-    // Comparação movida para dentro do try: nome_completo nulo/indefinido
-    // não deve estourar um erro não tratado — vira um toast normal.
+
+    const nomeConfirmacao = confirmacaoNome.trim();
+    const nomeAluno       = (alunoSelecionado.nome_completo ?? '').trim();
+
+    if (!nomeAluno || nomeConfirmacao !== nomeAluno) {
+      showToast.error('O nome digitado não confere. Exclusão cancelada.');
+      throw new Error('CONFIRMACAO_NOME_INVALIDA'); // mantém o modal aberto para o usuário corrigir
+    }
+
     try {
-      const nomeConfirmacao = confirmacaoNome.trim();
-      const nomeAluno       = (alunoSelecionado.nome_completo ?? '').trim();
-
-      if (!nomeAluno || nomeConfirmacao !== nomeAluno) {
-        showToast.error('O nome digitado não confere. Exclusão cancelada.');
-        return;
-      }
-
-      await alunosService.excluir(alunoSelecionado.id, estudioId);
+      await alunosService.excluir(alunoSelecionado.id, idEfetivo);
       showToast.success('Aluno excluído permanentemente!');
-      modalExcluir.fechar();
       setConfirmacaoNome('');
       refetch();
     } catch (err) {
       console.error('[Alunos.excluirAluno]', err);
-      if (err.message?.includes('violates foreign key constraint')) {
+      // FIX: checagem por código do Postgres em vez de string de mensagem
+      if (err.code === '23503' || err.message?.includes('violates foreign key constraint')) {
         showToast.error('Não é possível excluir: este aluno possui histórico. Utilize Desativar.');
       } else {
         showToast.error('Erro ao excluir aluno.');
       }
+      throw err;
     }
-  }, [alunoSelecionado, confirmacaoNome, estudioId, modalExcluir, refetch]);
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  }, [alunoSelecionado, confirmacaoNome, idEfetivo, refetch]);
 
   return (
     <div className="p-4 md:p-8 space-y-6 md:space-y-8 animate-in fade-in duration-500 w-full max-w-full">
-
-      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-black text-foreground tracking-tight">Alunos</h1>
@@ -211,8 +161,7 @@ export default function Alunos() {
           </p>
         </div>
         <Button
-          variant="brand"
-          size="lg"
+          variant="brand" size="lg"
           leftIcon={<UserPlus size={20} />}
           onClick={() => navigate('/alunos/novo')}
           className="w-full md:w-auto rounded-[22px] hover:scale-[1.02]"
@@ -221,9 +170,7 @@ export default function Alunos() {
         </Button>
       </div>
 
-      {/* Filtros */}
       <Surface variant="card" padding="md" className="flex flex-col gap-4 w-full">
-        {/* Busca + role */}
         <div className="flex flex-col md:flex-row gap-4">
           <Input
             wrapperClassName="flex-1 w-full"
@@ -243,7 +190,6 @@ export default function Alunos() {
           </select>
         </div>
 
-        {/* Filtro alfabético */}
         <div className="flex flex-col gap-2">
           <span className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">
             Filtrar por inicial
@@ -267,17 +213,11 @@ export default function Alunos() {
         </div>
       </Surface>
 
-      {/* Tabela */}
       <Surface variant="card" padding="none" className="overflow-hidden">
         {loading ? (
           <TableSkeleton rows={8} cols={5} />
         ) : alunos.length > 0 ? (
           <>
-            {/*
-              Anel de "buscando próxima página" — aparece só durante transições
-              de página (keepPreviousData mantém os dados atuais visíveis,
-              então não há flash de vazio).
-            */}
             {fetching && !loading && (
               <div className="h-0.5 bg-brand/30 overflow-hidden">
                 <div className="h-full bg-brand animate-pulse w-1/2 mx-auto rounded-full" />
@@ -293,8 +233,7 @@ export default function Alunos() {
                     <th className="px-6 md:px-8 py-4 md:py-6 text-left">Status</th>
                     <th className="px-6 md:px-8 py-4 md:py-6 text-left">
                       <span className="flex items-center gap-1.5">
-                        <Calendar size={11} />
-                        Vencimento
+                        <Calendar size={11} /> Vencimento
                       </span>
                     </th>
                     <th className="px-6 md:px-8 py-4 md:py-6 text-right">Ações</th>
@@ -303,29 +242,16 @@ export default function Alunos() {
                 <tbody className="divide-y divide-border">
                   {alunos.map((aluno) => {
                     const vencimento = calcularStatusVencimento(aluno.data_fim_plano);
-
-                    /**
-                     * PROBLEMA 3 — Normalização do status.
-                     *
-                     * Lê o booleano `ativo` via STATUS_ATIVO (mapa com chave string).
-                     * Nunca exibe valor raw do banco. Valores inesperados caem no
-                     * fallback neutro em vez de quebrar silenciosamente.
-                     */
                     const statusInfo = STATUS_ATIVO[String(aluno.ativo)]
                       ?? { label: 'Indefinido', tone: 'neutral' };
 
                     return (
-                      <tr
-                        key={aluno.id}
-                        className="group hover:bg-subtle transition-colors"
-                      >
-                        {/* Nome / email */}
+                      <tr key={aluno.id} className="group hover:bg-subtle transition-colors">
                         <td className="px-6 md:px-8 py-4 md:py-6">
                           <div
                             className="flex items-center gap-3 md:gap-4 cursor-pointer"
                             onClick={() => navigate(`/alunos/${aluno.id}`)}
-                            role="button"
-                            tabIndex={0}
+                            role="button" tabIndex={0}
                             onKeyDown={(e) => e.key === 'Enter' && navigate(`/alunos/${aluno.id}`)}
                           >
                             <div className="w-9 h-9 md:w-10 md:h-10 rounded-2xl bg-brand-soft text-brand font-black text-sm flex items-center justify-center shrink-0 uppercase">
@@ -342,7 +268,6 @@ export default function Alunos() {
                           </div>
                         </td>
 
-                        {/* Plano / Cargo — role normalizado via mapa */}
                         <td className="px-6 md:px-8 py-4 md:py-6">
                           <span className="text-xs font-bold text-foreground block">
                             {aluno.planos?.nome || 'Sem Plano'}
@@ -352,7 +277,6 @@ export default function Alunos() {
                           </span>
                         </td>
 
-                        {/* Status ativo/inativo — via mapa, nunca raw */}
                         <td className="px-6 md:px-8 py-4 md:py-6">
                           <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${
                             statusInfo.tone === 'success'
@@ -366,21 +290,16 @@ export default function Alunos() {
                               : statusInfo.tone === 'destructive' ? 'bg-destructive'
                               : 'bg-muted-foreground'
                             }`} />
-                            <span className="text-[10px] font-black uppercase">
-                              {statusInfo.label}
-                            </span>
+                            <span className="text-[10px] font-black uppercase">{statusInfo.label}</span>
                           </div>
                         </td>
 
-                        {/* Vencimento */}
                         <td className="px-6 md:px-8 py-4 md:py-6">
                           {aluno.role === 'admin' || !aluno.plano_id ? (
                             <Badge tone="neutral" variant="soft">—</Badge>
                           ) : (
                             <div className="flex flex-col gap-0.5">
-                              <Badge tone={vencimento.tone} variant="soft">
-                                {vencimento.label}
-                              </Badge>
+                              <Badge tone={vencimento.tone} variant="soft">{vencimento.label}</Badge>
                               {vencimento.dias !== null && (
                                 <span className={`text-[10px] font-black ${
                                   vencimento.dias < 0  ? 'text-destructive'
@@ -398,21 +317,12 @@ export default function Alunos() {
                           )}
                         </td>
 
-                        {/* Ações */}
                         <td className="px-6 md:px-8 py-4 md:py-6 text-right">
                           <div className="flex items-center justify-end gap-2 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => navigate(`/alunos/${aluno.id}`)}
-                              className="p-2 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary-soft transition-colors"
-                              title="Ver Perfil"
-                            >
+                            <button onClick={() => navigate(`/alunos/${aluno.id}`)} className="p-2 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary-soft transition-colors" title="Ver Perfil">
                               <Eye size={16} />
                             </button>
-                            <button
-                              onClick={() => navigate('/alunos/novo', { state: { alunoParaEditar: aluno } })}
-                              className="p-2 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary-soft transition-colors"
-                              title="Editar"
-                            >
+                            <button onClick={() => navigate('/alunos/novo', { state: { alunoParaEditar: aluno } })} className="p-2 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary-soft transition-colors" title="Editar">
                               <Edit2 size={16} />
                             </button>
                             <button
@@ -426,11 +336,7 @@ export default function Alunos() {
                             >
                               <ShieldAlert size={16} />
                             </button>
-                            <button
-                              onClick={() => { setAlunoSelecionado(aluno); modalExcluir.abrir(); }}
-                              className="p-2 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive-soft transition-colors"
-                              title="Excluir permanentemente"
-                            >
+                            <button onClick={() => { setAlunoSelecionado(aluno); modalExcluir.abrir(); }} className="p-2 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive-soft transition-colors" title="Excluir permanentemente">
                               <Trash2 size={16} />
                             </button>
                           </div>
@@ -442,57 +348,33 @@ export default function Alunos() {
               </table>
             </div>
 
-            {/* ── Barra de paginação ───────────────────────────────────────── */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 md:px-8 py-4 border-t border-border bg-muted/20">
-              {/* Contador "Mostrando X–Y de Z alunos" */}
               <p className="text-xs font-medium text-muted-foreground">
                 {total > 0
                   ? <>Mostrando <strong className="text-foreground">{inicioRegistro}–{fimRegistro}</strong> de <strong className="text-foreground">{total}</strong> aluno{total !== 1 ? 's' : ''}</>
                   : 'Nenhum registro'}
               </p>
 
-              {/* Controles de navegação */}
               {totalPaginas > 1 && (
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setParam({ pagina: pagina - 1 })}
-                    disabled={!temAnterior}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-colors
-                      disabled:opacity-40 disabled:cursor-not-allowed
-                      bg-muted text-muted-foreground hover:bg-subtle hover:text-foreground"
-                  >
-                    <ChevronLeft size={14} />
-                    Anterior
+                  <button onClick={() => setParam({ pagina: pagina - 1 })} disabled={!temAnterior}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-muted text-muted-foreground hover:bg-subtle hover:text-foreground">
+                    <ChevronLeft size={14} /> Anterior
                   </button>
-
-                  <span className="text-xs font-black text-muted-foreground px-2 tabular-nums">
-                    {pagina} / {totalPaginas}
-                  </span>
-
-                  <button
-                    onClick={() => setParam({ pagina: pagina + 1 })}
-                    disabled={!temProximo}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-colors
-                      disabled:opacity-40 disabled:cursor-not-allowed
-                      bg-muted text-muted-foreground hover:bg-subtle hover:text-foreground"
-                  >
-                    Próxima
-                    <ChevronRight size={14} />
+                  <span className="text-xs font-black text-muted-foreground px-2 tabular-nums">{pagina} / {totalPaginas}</span>
+                  <button onClick={() => setParam({ pagina: pagina + 1 })} disabled={!temProximo}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-muted text-muted-foreground hover:bg-subtle hover:text-foreground">
+                    Próxima <ChevronRight size={14} />
                   </button>
                 </div>
               )}
             </div>
           </>
         ) : (
-          <EmptyState
-            icon={<Search size={40} />}
-            title="Nenhum aluno encontrado"
-            description="Tente ajustar os filtros ou cadastre um novo aluno."
-          />
+          <EmptyState icon={<Search size={40} />} title="Nenhum aluno encontrado" description="Tente ajustar os filtros ou cadastre um novo aluno." />
         )}
       </Surface>
 
-      {/* Modal: Alterar Status */}
       <ModalConfirmacao
         aberto={modalStatus.isOpen}
         fechar={modalStatus.fechar}
@@ -507,17 +389,13 @@ export default function Alunos() {
         onConfirm={alternarStatus}
       />
 
-      {/* Modal: Excluir */}
       <ModalConfirmacao
         aberto={modalExcluir.isOpen}
         fechar={() => { modalExcluir.fechar(); setConfirmacaoNome(''); }}
         titulo="Excluir Aluno Permanentemente"
         mensagem={
           <div className="space-y-4">
-            <p>
-              Tem certeza que deseja excluir{' '}
-              <strong>{alunoSelecionado?.nome_completo}</strong>? Esta ação não pode ser desfeita.
-            </p>
+            <p>Tem certeza que deseja excluir <strong>{alunoSelecionado?.nome_completo}</strong>? Esta ação não pode ser desfeita.</p>
             <div className="space-y-1.5">
               <label className="text-xs font-black uppercase text-muted-foreground tracking-widest">
                 Digite o nome do aluno para confirmar

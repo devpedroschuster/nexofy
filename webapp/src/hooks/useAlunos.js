@@ -21,19 +21,14 @@ export const PAGE_SIZE = 25;
  *  - temProximo    → boolean
  *  - loading / fetching / error / refetch
  */
-export function useAlunos(filtros = {}, pagina = 1) {
-  const { estudioId } = useAuth();
+export function useAlunos(filtros = {}, pagina = 1, estudioIdOverride) {
+  const { estudioId: estudioIdAuth } = useAuth();
+  const estudioId = estudioIdOverride ?? estudioIdAuth;
 
   const query = useQuery({
     queryKey: ['alunos', estudioId, filtros, pagina],
-    // Sem try/catch aqui: deixa o React Query gerenciar o ciclo de retry
-    // normalmente. O toast de erro é tratado uma única vez, fora do
-    // ciclo de tentativas — ver useEffect abaixo.
     queryFn: () => alunosService.listar(filtros, { pagina, tamanho: PAGE_SIZE }, estudioId),
     enabled: !!estudioId,
-    // Correção: no React Query v5, keepPreviousData (booleano) não existe mais.
-    // O equivalente é placeholderData: keepPreviousData — mantém os dados da
-    // página anterior visíveis enquanto a próxima carrega.
     placeholderData: keepPreviousData,
     staleTime: 1000 * 60 * 5,
   });

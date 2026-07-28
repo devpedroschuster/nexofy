@@ -82,7 +82,6 @@ async obterComissoes(inicioMes, estudioId) {
    */
   async obterTudoDashboard({ hojeIso, inicioMes, limite7Dias, estudioId }) {
   if (!estudioId) throw new Error('estudioId é obrigatório para carregar o dashboard.');
-  const { supabase } = await import('../lib/supabase');
 
   const [totalAlunos, pagamentosMes, listaInadimplentes, alunosPlanosVencendo, todosAlunos] =
     await Promise.all([

@@ -187,11 +187,12 @@ export default function Dashboard() {
   };
 
   if (isError) {
+    console.error('[Dashboard] Erro ao carregar dados do painel:', error);
     return (
       <div className="p-6 md:p-8">
         <SecaoAviso tipo="danger" icone={<AlertCircle size={18} />} titulo="Não foi possível carregar o painel">
           <p className="text-sm text-destructive mb-3">
-            {error?.message ?? 'Ocorreu um erro ao buscar os dados. Tente novamente.'}
+            Ocorreu um erro ao buscar os dados do painel. Tente novamente em alguns instantes.
           </p>
           <button
             onClick={() => refetch()}

@@ -20,7 +20,10 @@ import { REGEX, LIMITES } from '../lib/constants';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 
-const NOME_MAX = 120;
+// FIX: removido NOME_MAX local (=120) divergente de LIMITES.NOME_MAX (=100).
+// Antes: front permitia até 120 chars enquanto o backend/DB assume 100 como
+// limite de negócio — risco de truncamento silencioso ou erro fora de contexto.
+// Agora LIMITES.NOME_MAX é a única fonte de verdade.
 
 export default function Cadastro() {
   const [nome, setNome]     = useState('');
@@ -34,8 +37,15 @@ export default function Cadastro() {
   useEffect(() => () => { montadoRef.current = false; }, []);
 
   function validar() {
-    if (!nome.trim()) {
+    const nomeLimpo = nome.trim();
+
+    if (!nomeLimpo) {
       showToast.error('Digite seu nome completo.');
+      return false;
+    }
+    // FIX: LIMITES.NOME_MIN nunca era checado — nome de 1 caractere passava.
+    if (nomeLimpo.length < LIMITES.NOME_MIN) {
+      showToast.error(`O nome deve ter no mínimo ${LIMITES.NOME_MIN} caracteres.`);
       return false;
     }
     if (!REGEX.EMAIL.test(email.trim())) {
@@ -59,7 +69,7 @@ export default function Cadastro() {
         email: email.trim().toLowerCase(),
         password: senha,
         options: {
-          data: { nome: nome.trim().slice(0, NOME_MAX) },
+          data: { nome: nome.trim().slice(0, LIMITES.NOME_MAX) },
           emailRedirectTo: `${window.location.origin}/cadastro/estudio`,
         },
       });
@@ -88,9 +98,20 @@ export default function Cadastro() {
         err?.code === 'user_already_exists' ||
         err?.message?.toLowerCase().includes('already registered');
 
+      // FIX: trata explicitamente rate limit do Supabase em vez de cair na
+      // mensagem genérica — usuário entende o que aconteceu e o que fazer.
+      const rateLimited =
+        err?.code === 'over_email_send_rate_limit' || err?.status === 429;
+
       if (jaExiste) {
         showToast.error('Este e-mail já está cadastrado. Tente entrar.');
+      } else if (rateLimited) {
+        showToast.error('Muitas tentativas em sequência. Aguarde alguns minutos e tente novamente.');
       } else {
+        // FIX: antes o catch não logava nada — qualquer erro fora dos dois
+        // casos previstos era invisível em produção. Agora fica rastreável
+        // (console aqui; trocar por Sentry/observabilidade quando disponível).
+        console.error('[Cadastro] Falha ao criar conta:', err);
         showToast.error('Não foi possível criar sua conta. Tente novamente.');
       }
     } finally {
@@ -148,7 +169,7 @@ export default function Cadastro() {
                   aria-label="Nome completo"
                   leftIcon={<User size={16} />}
                   value={nome}
-                  maxLength={NOME_MAX}
+                  maxLength={LIMITES.NOME_MAX}
                   onChange={(e) => setNome(e.target.value)}
                 />
 

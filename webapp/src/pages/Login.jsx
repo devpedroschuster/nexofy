@@ -81,7 +81,15 @@ export default function Login() {
           navigate('/redefinir-senha', {
             state: { primeiroAcesso: true, nome: (profData.nome || '').split(' ')[0] },
           });
+          return;
         }
+
+        // FIX: magic link válido mas o professor já passou pelo primeiro acesso —
+        // antes o usuário ficava "preso" na tela de login sem feedback nenhum,
+        // mesmo já estando autenticado de verdade.
+        const nomeMagicLink = (profData?.nome || '').split(' ')[0];
+        showToast.success(nomeMagicLink ? `Bem-vindo de volta, ${nomeMagicLink}!` : 'Login realizado!');
+        navigate('/agenda');
       }
     );
 

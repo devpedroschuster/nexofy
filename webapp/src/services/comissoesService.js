@@ -136,20 +136,22 @@ async resumoMensal(mesAno, estudioId) {
   // fechamento_comissoes — a mesma que já era usada como onConflict no
   // upsert antigo, então nenhuma migração adicional é necessária.
   async fecharMes(professorId, mesAno, valorTotal, estudioId) {
+    // Defesa em profundidade: garante que o professor pertence ao estúdio
+    // antes de gravar o fechamento, mesmo que a RLS de insert não faça esse join.
+    const { data: prof, error: errProf } = await supabase
+      .from('professores')
+      .select('id')
+      .eq('id', professorId)
+      .eq('estudio_id', estudioId)
+      .maybeSingle();
+    if (errProf) throw errProf;
+    if (!prof) throw new Error('PROFESSOR_FORA_DO_ESTUDIO');
+
     const { error } = await supabase
       .from('fechamento_comissoes')
-      .insert([{
-        professor_id: professorId,
-        estudio_id: estudioId,
-        mes_referencia: `${mesAno}-01`,
-        valor_total: valorTotal,
-        fechado_em: new Date().toISOString(),
-      }]);
-
+      .insert([{ professor_id: professorId, estudio_id: estudioId, mes_referencia: `${mesAno}-01`, valor_total: valorTotal, fechado_em: new Date().toISOString() }]);
     if (error) {
-      if (error.code === '23505') {
-        throw new Error('ALREADY_CLOSED');
-      }
+      if (error.code === '23505') throw new Error('ALREADY_CLOSED');
       throw error;
     }
     return true;

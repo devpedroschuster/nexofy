@@ -57,7 +57,7 @@ export function useHistoricoLeads() {
  * Histórico de leads filtrado por mês/ano específico.
  * `mes` é 0-indexado (0 = Janeiro, 11 = Dezembro).
  */
-export function useHistoricoLeadsPorMes(ano: number, mes: number) {
+export function useHistoricoLeadsPorMes(ano: number, mes: number, enabled = true) {
   const { estudioId } = useAuth();
 
   return useQuery<Lead[]>({
@@ -66,7 +66,7 @@ export function useHistoricoLeadsPorMes(ano: number, mes: number) {
       const data = await leadsService.listarHistoricoLeadsPorMes({ ano, mes, estudioId });
       return data as unknown as Lead[];
     },
-    enabled: !!estudioId,
+    enabled: !!estudioId && enabled, // FIX real: antes o 3º arg passado por Leads.jsx era descartado
     staleTime: 1000 * 60,
   });
 }

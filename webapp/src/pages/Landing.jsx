@@ -1,14 +1,55 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import './landing.css';
 import { useEstudioPublico } from '../hooks/useEstudioPublico';
+import { usePlanosPublicos } from '../hooks/usePlanosPublicos';
+
+// Domínios aceitos para embed do Google Maps — defesa em profundidade contra
+// um iframe apontando pra origem inesperada, caso o campo maps_embed_url
+// venha corrompido/malicioso por qualquer motivo.
+const MAPS_EMBED_HOSTS_PERMITIDOS = ['www.google.com', 'maps.google.com'];
+
+function isMapsEmbedUrlSegura(url) {
+  if (!url) return false;
+  try {
+    const { hostname, protocol } = new URL(url);
+    return protocol === 'https:' && MAPS_EMBED_HOSTS_PERMITIDOS.includes(hostname);
+  } catch {
+    return false;
+  }
+}
+
+// Normaliza o campo "instagram" do estúdio: aceita tanto uma URL completa
+// já salva quanto um @handle solto, e sempre retorna uma URL válida ou null.
+function normalizarInstagramUrl(valor) {
+  if (!valor) return null;
+  const limpo = valor.trim();
+  if (/^https?:\/\//i.test(limpo)) return limpo;
+  const handle = limpo.replace(/^@/, '');
+  return handle ? `https://instagram.com/${handle}` : null;
+}
+
+// Normaliza o número de WhatsApp pra apenas dígitos, do jeito que a API do wa.me espera.
+function normalizarWhatsappDigits(valor) {
+  if (!valor) return null;
+  const digits = String(valor).replace(/\D/g, '');
+  return digits.length >= 10 ? digits : null;
+}
 
 export default function Landing() {
   const navigate = useNavigate();
 
   // ── Dados públicos do estúdio (resolvido pelo subdomínio) ────────────
-  const { data: estudio, isLoading: estudioLoading, slug } = useEstudioPublico();
+  const {
+    data: estudio,
+    isLoading: estudioLoading,
+    isError: estudioError,
+    slug,
+  } = useEstudioPublico();
+
+  // ── Planos (useQuery, com cache — substitui o useEffect manual) ──────
+  const { planos, loading: planosLoading } = usePlanosPublicos(estudio?.id);
 
   // ── Lead form state ─────────────────────────────────────────────────
   const [leadNome, setLeadNome] = useState('');
@@ -16,35 +57,32 @@ export default function Landing() {
   const [leadLoading, setLeadLoading] = useState(false);
   const [leadStatus, setLeadStatus] = useState(null); // 'ok' | 'err' | null
   const [leadErro, setLeadErro] = useState('');
+  // Honeypot simples anti-bot: campo invisível que um usuário humano nunca
+  // preenche. Bots que preenchem todos os inputs de um form caem aqui.
+  const [honeypot, setHoneypot] = useState('');
 
-  // ── Plans from Supabase ──────────────────────────────────────────────
-  const [planos, setPlanos] = useState([]);
-  const [planosLoading, setPlanosLoading] = useState(true);
+  // ── Tela de falha ao resolver o estúdio (rede/RLS/infra) ──────────────
+  // Importante: isso é diferente de "slug não existe no banco" (ver abaixo).
+  // Antes essas duas situações caíam na mesma mensagem de "não encontrado",
+  // o que é enganoso durante uma instabilidade passageira do Supabase.
+  if (!estudioLoading && estudioError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-6 text-center">
+        <div>
+          <p style={{ fontSize: '48px', marginBottom: '16px' }}>⚠️</p>
+          <h1 style={{ fontSize: '24px', fontWeight: 900, color: '#1f2937', marginBottom: '8px' }}>
+            Não foi possível carregar esta página
+          </h1>
+          <p style={{ color: '#6b7280' }}>
+            Tente novamente em alguns instantes.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
-  useEffect(() => {
-    // Só busca planos quando o estúdio estiver resolvido e tiver id
-    if (!estudio?.id) return;
-
-    async function carregarPlanos() {
-      try {
-        const { data, error } = await supabase
-          .from('planos')
-          .select('id, nome, preco, duracao_meses, frequencia_semanal, regras_acesso')
-          .eq('estudio_id', estudio.id)
-          .order('preco', { ascending: true });
-        if (!error && data) setPlanos(data);
-      } catch (err) {
-        console.error('[Landing] Falha ao carregar planos:', err);
-        // Seção de planos ficará oculta (comportamento mantido)
-      } finally {
-        setPlanosLoading(false);
-      }
-    }
-    carregarPlanos();
-  }, [estudio?.id]);
-
-  // ── Tela de erro: slug no hostname mas estúdio não encontrado no banco
-  if (!estudioLoading && slug && !estudio) {
+  // ── Tela de erro: slug no hostname mas estúdio não existe no banco ────
+  if (!estudioLoading && !estudioError && slug && !estudio) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-6 text-center">
         <div>
@@ -77,6 +115,14 @@ export default function Landing() {
     e.preventDefault();
     if (!estudio?.id) return; // guarda contra submit antes do estúdio resolver
     if (!leadNome.trim() || !leadTel.trim()) return;
+
+    // Honeypot preenchido = bot. Finge sucesso pra não dar dica de detecção.
+    if (honeypot) {
+      setLeadStatus('ok');
+      setLeadNome('');
+      setLeadTel('');
+      return;
+    }
 
     const telefoneDigits = leadTel.replace(/\D/g, '');
     if (telefoneDigits.length < 10) {
@@ -119,14 +165,20 @@ export default function Landing() {
   };
 
   // ── Dados de contato (Supabase > fallback hardcoded) ─────────────────
-  const nomeEstudio    = estudio?.nome          ?? 'Gestão App';
-  const whatsappNum    = estudio?.whatsapp      ?? '';
-  const WHATSAPP_URL   = whatsappNum
-    ? `https://wa.me/${whatsappNum}?text=Olá!%20Vi%20o%20site%20e%20quero%20saber%20mais.`
-    : '#';
-  const INSTAGRAM_URL  = estudio?.instagram     ?? '#'; // ← antes: `INSTAGRAM` (nunca usado no JSX, causava ReferenceError)
-  const MAPS_URL       = estudio?.maps_url      ?? '#';
-  const MAPS_EMBED     = estudio?.maps_embed_url ?? '';
+  // Enquanto o estúdio ainda está carregando, não mostramos nome/marca
+  // errados (evita o "flash" de branding genérico antes do real aparecer).
+  const nomeEstudio = estudioLoading ? '' : (estudio?.nome ?? 'Gestão App');
+
+  const whatsappDigits = normalizarWhatsappDigits(estudio?.whatsapp);
+  const WHATSAPP_URL = whatsappDigits
+    ? `https://wa.me/${whatsappDigits}?text=Olá!%20Vi%20o%20site%20e%20quero%20saber%20mais.`
+    : null;
+
+  const INSTAGRAM_URL = normalizarInstagramUrl(estudio?.instagram);
+  const MAPS_URL = estudio?.maps_url || null;
+  const MAPS_EMBED = isMapsEmbedUrlSegura(estudio?.maps_embed_url)
+    ? estudio.maps_embed_url
+    : null;
 
   return (
     <div id="page-landing">
@@ -134,7 +186,7 @@ export default function Landing() {
       {/* ── Navbar ─────────────────────────────────────────────────── */}
       <nav className="navbar">
         <a className="nav-logo" href="/">
-          <div className="logo-mark">{nomeEstudio.charAt(0).toUpperCase()}</div>
+          <div className="logo-mark">{(nomeEstudio || 'G').charAt(0).toUpperCase()}</div>
           <span className="logo-name">{nomeEstudio.toUpperCase()}</span>
         </a>
         <div className="nav-links">
@@ -186,6 +238,17 @@ export default function Landing() {
               </div>
             ) : (
               <form className="hero-form" onSubmit={handleLeadSubmit}>
+                {/* Honeypot: invisível pra humanos, atrai bots que preenchem tudo */}
+                <input
+                  type="text"
+                  name="website"
+                  value={honeypot}
+                  onChange={e => setHoneypot(e.target.value)}
+                  autoComplete="off"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  style={{ position: 'absolute', left: '-9999px', width: 0, height: 0, opacity: 0 }}
+                />
                 <div className="hero-form-fields">
                   <div className="inp-group" style={{ marginBottom: 0 }}>
                     <input
@@ -223,7 +286,7 @@ export default function Landing() {
                   <p className="inp-err" style={{ marginTop: '10px' }}>{leadErro}</p>
                 )}
                 <p className="hero-form-hint">
-                  Gratuito, sem cartão, sem compromisso.{whatsappNum && (
+                  Gratuito, sem cartão, sem compromisso.{WHATSAPP_URL && (
                     <> Ou{' '}
                       <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="hero-form-link">
                         fale direto no WhatsApp →
@@ -292,7 +355,7 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── Planos (Supabase) ──────────────────────────────────────── */}
+      {/* ── Planos (Supabase, via useQuery) ───────────────────────────── */}
       {(planosLoading || planos.length > 0) && (
         <section id="sec-planos" className="section">
           <div className="section-header">
@@ -310,8 +373,6 @@ export default function Landing() {
               <div className="plans-skeleton"></div>
             </div>
           ) : (
-            // Grid agora é 100% responsivo via CSS (auto-fit em .plans-grid),
-            // sem depender de style inline condicional por quantidade de planos.
             <div className="plans-grid">
               {planos.map((plano) => {
                 const featured = isFeatured(plano, planos);
@@ -379,7 +440,7 @@ export default function Landing() {
             >
               Agendar aula grátis
             </button>
-            {whatsappNum && (
+            {WHATSAPP_URL && (
               <a
                 href={WHATSAPP_URL}
                 target="_blank"
@@ -400,7 +461,7 @@ export default function Landing() {
           {/* Brand col */}
           <div>
             <div className="nav-logo" style={{ marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div className="logo-mark">{nomeEstudio.charAt(0).toUpperCase()}</div>
+              <div className="logo-mark">{(nomeEstudio || 'G').charAt(0).toUpperCase()}</div>
               <span className="logo-name">{nomeEstudio.toUpperCase()}</span>
             </div>
             <p style={{ fontSize: '14px', color: 'var(--muted)', lineHeight: '1.75', maxWidth: '260px' }}>
@@ -411,17 +472,17 @@ export default function Landing() {
           {/* Contato col */}
           <div>
             <div className="footer-col-title">Contato</div>
-            {whatsappNum && (
+            {WHATSAPP_URL && (
               <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="footer-link">
                 📱 WhatsApp
               </a>
             )}
-            {INSTAGRAM_URL !== '#' && (
+            {INSTAGRAM_URL && (
               <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" className="footer-link">
                 📷 Instagram
               </a>
             )}
-            {MAPS_URL !== '#' && (
+            {MAPS_URL && (
               <a href={MAPS_URL} target="_blank" rel="noreferrer" className="footer-link">
                 📍 Como chegar
               </a>
@@ -429,7 +490,7 @@ export default function Landing() {
           </div>
 
           {/* Endereço col — só exibe se tiver mapa */}
-          {MAPS_URL !== '#' && (
+          {MAPS_URL && (
             <div>
               <div className="footer-col-title">Localização</div>
               <a
@@ -453,7 +514,7 @@ export default function Landing() {
           </div>
         </div>
 
-        {/* Google Maps embed — só exibe se o estúdio tiver configurado */}
+        {/* Google Maps embed — só exibe se a URL passar na validação de domínio */}
         {MAPS_EMBED && (
           <div className="footer-map">
             <iframe
@@ -471,7 +532,7 @@ export default function Landing() {
 
         <div className="footer-bottom">
           <span className="footer-copy">© {new Date().getFullYear()} {nomeEstudio} · Todos os direitos reservados.</span>
-          {INSTAGRAM_URL !== '#' && (
+          {INSTAGRAM_URL && (
             <span className="footer-copy">
               <a href={INSTAGRAM_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--pri)', fontWeight: 700, textDecoration: 'none' }}>
                 Instagram

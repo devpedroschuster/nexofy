@@ -14,6 +14,7 @@ import {
   useComissoesProfessor,
   useResumoMensal,
   useInvalidarComissoes,
+  useBuscarDetalhesFrescos,
 } from '../hooks/useComissoesProfessor';
 import { showToast } from '../components/shared/Toast';
 import { TableSkeleton } from '../components/shared/Loading';
@@ -561,33 +562,35 @@ export default function Comissoes() {
     carregarProfessores();
   }, [estudioId]);
 
-  const handleGerarRepasses = async () => {
-    if (!estudioId) {
-      showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
-      return;
+  // Comissoes.jsx
+const handleGerarRepasses = async () => {
+  if (!estudioId) {
+    showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
+    throw new Error('ESTUDIO_NAO_IDENTIFICADO');
+  }
+  const [ano, mes] = filtros.mesAno.split('-').map(Number);
+  setGerando(true);
+  setResultadoGeracao(null);
+  try {
+    const resultado = await gerarRepassesMensais(mes, ano, estudioId);
+    if (resultado?.jaGerados) {
+      showToast.error(resultado.error || 'Repasses deste mês já foram gerados.');
+      throw new Error('JA_GERADOS'); // impede o fechamento "silencioso" do modal
     }
-    const [ano, mes] = filtros.mesAno.split('-').map(Number);
-    setGerando(true);
-    setResultadoGeracao(null);
-    try {
-      const resultado = await gerarRepassesMensais(mes, ano, estudioId);
-      if (resultado?.jaGerados) {
-        showToast.error(resultado.error || 'Repasses deste mês já foram gerados.');
-        modalGeracao.fechar();
-        return;
-      }
-      setResultadoGeracao(resultado);
-      showToast.success(`${resultado.gerados ?? 0} repasse(s) gerado(s) com sucesso!`);
-      invalidarComissoes(filtros.professorId, filtros.mesAno);
-    } catch (err) {
-      const msg = err?.message || 'Erro ao gerar repasses mensais.';
+    setResultadoGeracao(resultado);
+    showToast.success(`${resultado.gerados ?? 0} repasse(s) gerado(s) com sucesso!`);
+    invalidarComissoes(filtros.professorId, filtros.mesAno);
+  } catch (err) {
+    const msg = err?.message || 'Erro ao gerar repasses mensais.';
+    if (!['JA_GERADOS', 'ESTUDIO_NAO_IDENTIFICADO'].includes(err?.message)) {
       showToast.error(msg);
       console.error('[Comissoes] gerarRepassesMensais:', err);
-    } finally {
-      setGerando(false);
-      modalGeracao.fechar();
     }
-  };
+    throw err; // deixa o ModalPreviewRepasses decidir se fecha ou não
+  } finally {
+    setGerando(false);
+  }
+};
 
   // UX-04: ao clicar "Ver detalhe" na visão geral, pre-seleciona o professor e muda de aba
   const handleSelecionarProfessor = (professorId) => {

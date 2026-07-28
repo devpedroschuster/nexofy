@@ -1,21 +1,4 @@
 // src/pages/CadastroEstudio.jsx
-// ─── Midnight Indigo · Cadastro (self-service, passo 2) ──────────────────────
-//
-// Roda depois que o usuário confirmou o e-mail (sessão já ativa).
-// Coleta os dados do estúdio e chama a Edge Function `criar-meu-estudio`.
-//
-// Guard de acesso fica em App.jsx: exige sessão válida; se o usuário já
-// tiver um estudio_membros, redireciona pra rota do perfil dele.
-//
-// Sucesso → recarrega a página em /dashboard (reload completo, não navigate)
-// porque useAuth cacheia o perfil já resolvido por usuário — um navigate
-// simples não dispararia a releitura de estudio_membros.
-//
-// NOTA IMPORTANTE: a validação de erro aqui depende de cadastroService
-// devolver a mensagem real do corpo da Edge Function (não a genérica do
-// supabase-js). Ver correção em cadastroService.criarMeuEstudio.
-// ─────────────────────────────────────────────────────────────────────────────
-
 import React, { useState, useId, useEffect, useRef } from 'react';
 import { Building2, Link2, Phone, Instagram, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 
@@ -25,6 +8,7 @@ import Input, { Label } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 
 const SLUG_RE = /^[a-z0-9-]{3,50}$/;
+const WHATSAPP_RE = /^\d{10,15}$/; // mesmo padrão de ConfiguracoesEstudio.jsx
 const DEBOUNCE_MS = 400;
 
 function slugificar(texto) {
@@ -45,36 +29,42 @@ export default function CadastroEstudio() {
   const [slugManual, setSlugManual] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // null = ainda não checado / não aplicável; true/false = resultado da checagem
   const [slugDisponivel, setSlugDisponivel] = useState(null);
   const [checandoSlug, setCheckandoSlug] = useState(false);
+  const [erroChecagemSlug, setErroChecagemSlug] = useState(false); // NOVO: falha silenciosa vira estado visível
   const debounceRef = useRef(null);
   const checagemAtualRef = useRef(0);
 
   const slugFormatoValido = SLUG_RE.test(form.slug);
   const slugTocado = form.slug.length > 0;
+  const whatsappValido = !form.whatsapp || WHATSAPP_RE.test(form.whatsapp.replace(/\D/g, ''));
 
-  // Checa disponibilidade real do slug (debounced), só quando o formato já é válido.
   useEffect(() => {
     if (!slugFormatoValido) {
       setSlugDisponivel(null);
       setCheckandoSlug(false);
+      setErroChecagemSlug(false);
       return;
     }
 
     setCheckandoSlug(true);
+    setErroChecagemSlug(false);
     const idChecagem = ++checagemAtualRef.current;
     clearTimeout(debounceRef.current);
 
     debounceRef.current = setTimeout(async () => {
       try {
         const disponivel = await cadastroService.slugDisponivel(form.slug);
-        // Ignora resultado se o usuário já digitou algo novo enquanto isso resolvia
         if (idChecagem === checagemAtualRef.current) {
           setSlugDisponivel(disponivel);
         }
-      } catch {
-        if (idChecagem === checagemAtualRef.current) setSlugDisponivel(null);
+      } catch (err) {
+        // FIX (seção 2): catch deixa de ser silencioso — loga e avisa a UI.
+        if (idChecagem === checagemAtualRef.current) {
+          console.error('[CadastroEstudio] Falha ao checar disponibilidade do slug:', err);
+          setSlugDisponivel(null);
+          setErroChecagemSlug(true);
+        }
       } finally {
         if (idChecagem === checagemAtualRef.current) setCheckandoSlug(false);
       }
@@ -114,9 +104,24 @@ export default function CadastroEstudio() {
       showToast.error('Esse slug já está em uso. Escolha outro.');
       return;
     }
+    // FIX (seção 2): whatsapp agora é validado no mesmo padrão de ConfiguracoesEstudio.jsx
+    if (!whatsappValido) {
+      showToast.error('WhatsApp inválido. Use apenas números: código do país + DDD + número.');
+      return;
+    }
 
     setLoading(true);
     try {
+      // FIX (seção 1): revalida o slug no instante do submit, fechando a
+      // janela de TOCTOU entre a checagem debounced e o clique real.
+      const aindaDisponivel = await cadastroService.slugDisponivel(form.slug);
+      if (aindaDisponivel === false) {
+        showToast.error('Esse slug acabou de ser usado por outra pessoa. Escolha outro.');
+        setSlugDisponivel(false);
+        setLoading(false);
+        return;
+      }
+
       await cadastroService.criarMeuEstudio({
         nome: form.nome,
         slug: form.slug,
@@ -125,11 +130,8 @@ export default function CadastroEstudio() {
       });
 
       showToast.success('Estúdio criado! Preparando seu painel...');
-      // Reload completo — useAuth precisa reler estudio_membros do zero.
       window.location.href = '/dashboard';
     } catch (err) {
-      // Mensagem já vem tratada de cadastroService (corpo real da Edge Function,
-      // não o texto genérico do supabase-js para erros HTTP não-2xx).
       showToast.error(err.message || 'Erro ao criar estúdio.');
       setLoading(false);
     }
@@ -151,9 +153,11 @@ export default function CadastroEstudio() {
       ? 'Apenas letras minúsculas, números e hífens · 3–50 caracteres'
       : checandoSlug
         ? 'Verificando disponibilidade...'
-        : slugDisponivel === false
-          ? 'Esse slug já está em uso.'
-          : 'Disponível!';
+        : erroChecagemSlug
+          ? 'Não foi possível verificar agora. Tentaremos de novo ao criar.' // FIX: falha deixa de ser invisível
+          : slugDisponivel === false
+            ? 'Esse slug já está em uso.'
+            : 'Disponível!';
 
   return (
     <div className="relative min-h-screen bg-background flex items-center justify-center p-4 overflow-hidden">
@@ -230,6 +234,7 @@ export default function CadastroEstudio() {
                   value={form.whatsapp}
                   onChange={(e) => set('whatsapp', e.target.value)}
                   disabled={loading}
+                  error={form.whatsapp.length > 0 && !whatsappValido}
                 />
               </div>
               <div>

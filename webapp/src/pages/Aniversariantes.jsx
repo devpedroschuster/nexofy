@@ -1,7 +1,13 @@
+// ── DIFF: apenas os trechos alterados de webapp/src/pages/Aniversariantes.jsx ──
+// Verificado contra useEstudio.js, useAuth.jsx e Badge.jsx: nenhuma outra
+// função/prop é afetada; useAlunos, useEspacos etc. não são tocados.
+ 
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { alunosService } from '../services/alunosService';
-import { useEstudio } from '../hooks/useEstudio';
+// FIX #1: importar o hook correto, que já existe e faz exatamente o que
+// este componente precisa (nome do estúdio com fallback padronizado).
+import { useNomeEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
 import { Gift, CalendarDays, Search, PartyPopper, Cake, MessageCircle } from 'lucide-react';
 import Input from '../components/ui/Input';
@@ -10,23 +16,54 @@ import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import Skeleton from '../components/ui/Skeleton';
 import Surface from '../components/ui/Surface';
-
+ 
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
-
-// Regex simples para validar YYYY-MM-DD antes de tentar parsear
+ 
 const REGEX_DATA_ISO = /^\d{4}-\d{2}-\d{2}/;
 
+// ── DIFF: apenas os trechos alterados de webapp/src/pages/Aniversariantes.jsx ──
+// Verificado contra useEstudio.js, useAuth.jsx e Badge.jsx: nenhuma outra
+// função/prop é afetada; useAlunos, useEspacos etc. não são tocados.
+ 
+import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { alunosService } from '../services/alunosService';
+// FIX #1: importar o hook correto, que já existe e faz exatamente o que
+// este componente precisa (nome do estúdio com fallback padronizado).
+import { useNomeEstudio } from '../hooks/useEstudio';
+import { useAuth } from '../hooks/useAuth';
+import { Gift, CalendarDays, Search, PartyPopper, Cake, MessageCircle } from 'lucide-react';
+import Input from '../components/ui/Input';
+import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
+import EmptyState from '../components/ui/EmptyState';
+import Skeleton from '../components/ui/Skeleton';
+import Surface from '../components/ui/Surface';
+ 
+const MESES = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
+ 
+const REGEX_DATA_ISO = /^\d{4}-\d{2}-\d{2}/;
+ 
 export default function Aniversariantes() {
-  const { nomeEstudio } = useEstudio();
   const { estudioId } = useAuth();
+ 
+  // FIX #1: antes chamava useEstudio() sem estudioId e desestruturava
+  // `nomeEstudio`, que nunca existiu no retorno de useEstudio (era o
+  // objeto cru do useQuery). Resultado: mensagem de WhatsApp saía com
+  // "Aqui é do undefined!". useNomeEstudio(estudioId) já resolve
+  // corretamente, com fallback 'Estúdio' caso o nome ainda não tenha
+  // carregado.
+  const { nomeEstudio } = useNomeEstudio(estudioId);
+ 
   const [busca, setBusca] = useState('');
   const [mesSelecionado, setMesSelecionado] = useState(new Date().getMonth());
-
-  // useQuery: cache automático por estúdio, sem race condition ao trocar
-  // de estudioId (impersonation), sem estado "loading" desatualizado.
+ 
   const {
     data: alunos = [],
     isLoading: loading,
@@ -37,36 +74,34 @@ export default function Aniversariantes() {
     enabled: !!estudioId,
     staleTime: 1000 * 60 * 5,
   });
-
+ 
   const alunosProcessados = useMemo(() => {
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
-
+ 
     return alunos
-      // Descarta registros com data ausente ou em formato inesperado,
-      // evitando "Invalid Date" silencioso quebrando ordenação/render.
       .filter(a => a.data_nascimento && REGEX_DATA_ISO.test(a.data_nascimento))
       .map(aluno => {
         const [ano, mes, dia] = aluno.data_nascimento.split('-').map(Number);
         const dataNasc = new Date(ano, mes - 1, dia);
         if (isNaN(dataNasc.getTime())) return null;
-
+ 
         const mesNasc = dataNasc.getMonth();
         const diaNasc = dataNasc.getDate();
-
+ 
         let anosFazendo = hoje.getFullYear() - dataNasc.getFullYear();
         const dataNiverEsteAno = new Date(hoje.getFullYear(), mesNasc, diaNasc);
-
+ 
         let niverJaPassou = false;
         if (dataNiverEsteAno < hoje) {
           niverJaPassou = true;
           dataNiverEsteAno.setFullYear(hoje.getFullYear() + 1);
           anosFazendo += 1;
         }
-
+ 
         const diffTime = dataNiverEsteAno - hoje;
         const diasFaltando = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
+ 
         return {
           ...aluno,
           mesNasc,
@@ -81,28 +116,33 @@ export default function Aniversariantes() {
       .filter(Boolean)
       .sort((a, b) => a.diaNasc - b.diaNasc);
   }, [alunos]);
-
-  const aniversariantesFiltrados = alunosProcessados.filter(a => {
-    const matchMes = a.mesNasc === mesSelecionado;
-    const nome = a.nome_completo ?? '';
-    const matchBusca = nome.toLowerCase().includes(busca.toLowerCase());
-    return matchMes && matchBusca;
-  });
-
-  const proximosAniversariantes = [...alunosProcessados]
-    .sort((a, b) => a.diasFaltando - b.diasFaltando)
-    .slice(0, 5);
-
+ 
+  // FIX #4 (performance): memoizado para não recalcular a cada tecla
+  // digitada na busca / a cada re-render não relacionado ao filtro.
+  const aniversariantesFiltrados = useMemo(() => {
+    const buscaLower = busca.toLowerCase();
+    return alunosProcessados.filter(a => {
+      const matchMes = a.mesNasc === mesSelecionado;
+      const nome = a.nome_completo ?? '';
+      const matchBusca = nome.toLowerCase().includes(buscaLower);
+      return matchMes && matchBusca;
+    });
+  }, [alunosProcessados, mesSelecionado, busca]);
+ 
+  const proximosAniversariantes = useMemo(
+    () => [...alunosProcessados].sort((a, b) => a.diasFaltando - b.diasFaltando).slice(0, 5),
+    [alunosProcessados]
+  );
+ 
   const abrirWhatsApp = (telefone, nome) => {
     if (!telefone) return;
     const numeroLimpo = telefone.replace(/\D/g, '');
-    if (numeroLimpo.length < 10) return; // evita link inválido do WhatsApp
-
+    if (numeroLimpo.length < 10) return; // TODO: expor feedback (toast) ao usuário aqui
+ 
     const primeiroNome = (nome ?? '').split(' ')[0] || 'aluno(a)';
     const mensagem = encodeURIComponent(
       `Olá ${primeiroNome}! Aqui é do ${nomeEstudio}. Passando para te desejar um Feliz Aniversário! 🎉🎈 Que o seu dia seja repleto de alegria e movimento!`
     );
-    // numeroLimpo já pode incluir DDI 55; evita duplicar
     const numeroComDDI = numeroLimpo.startsWith('55') ? numeroLimpo : `55${numeroLimpo}`;
     window.open(`https://wa.me/${numeroComDDI}?text=${mensagem}`, '_blank');
   };

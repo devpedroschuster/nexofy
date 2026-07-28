@@ -154,6 +154,21 @@ async function resolverRotaPosSenha(userId) {
   }
 
   if (membro?.role) {
+    // FIX (BUG-CRIT-01): antes retornava aqui sem zerar `primeiro_acesso`
+    // em `alunos`/`professores`. Como `Login.jsx` ainda decide o redirect
+    // para /redefinir-senha lendo essas colunas diretamente (não migrou
+    // para estudio_membros), o usuário ficava preso num loop de
+    // redefinição de senha a cada novo login.
+    const tabelaLegado = membro.role === 'professor' ? 'professores' : 'alunos';
+    const { error: updateErr } = await supabase
+      .from(tabelaLegado)
+      .update({ primeiro_acesso: false })
+      .eq('auth_id', userId);
+
+    if (updateErr) {
+      console.error(`[RedefinirSenha] Falha ao zerar primeiro_acesso (${tabelaLegado}, via estudio_membros):`, updateErr);
+    }
+
     return rotaPorPerfil(membro.role);
   }
 

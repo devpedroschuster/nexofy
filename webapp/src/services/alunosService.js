@@ -26,9 +26,12 @@ export const alunosService = {
       const fim    = inicio + tamanho - 1;
 
       let query = supabase
-        .from('alunos')
-        .select('*, planos(nome)', { count: 'exact' })
-        .eq('estudio_id', estudioId);
+  .from('alunos')
+  .select(
+    'id, nome_completo, email, role, ativo, plano_id, data_fim_plano, planos(nome)',
+    { count: 'exact' }
+  )
+  .eq('estudio_id', estudioId);
 
       if (filtros.role && filtros.role !== 'todos')
         query = query.eq('role', filtros.role);
