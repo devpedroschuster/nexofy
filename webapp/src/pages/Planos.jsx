@@ -265,7 +265,7 @@ export default function Planos() {
         </div>
       ) : planos.length === 0 ? (
         <EmptyState
-          icon={Package}
+          icon={<Package size={24} />}
           title="Nenhum plano cadastrado"
           description={podeGerenciar
             ? 'Crie o primeiro pacote comercial do estúdio usando o formulário acima.'
