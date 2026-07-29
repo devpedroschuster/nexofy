@@ -1,7 +1,7 @@
 // services/espacosService.js
 import { supabase } from '../lib/supabase';
 
-const ESPACOS_COLUMNS = 'id, estudio_id, nome, ordem, capacidade, ativo';
+const ESPACOS_COLUMNS = 'id, estudio_id, nome, slug, ordem, capacidade, ativo';
 
 export const espacosService = {
   async listar(estudioId, { incluirInativos = false } = {}) {
