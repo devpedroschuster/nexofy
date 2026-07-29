@@ -82,7 +82,7 @@ export const presencaService = {
     };
 
     const { data, error } = await supabase
-      .from('presenca')
+      .from('presencas')
       .insert([payload])
       .select()
       .single();
@@ -96,7 +96,7 @@ export const presencaService = {
 
   async cancelarAgendamento(id, estudioId) {
     const { data, error } = await supabase
-      .from('presenca')
+      .from('presencas')
       .delete()
       .eq('id', id)
       .eq('estudio_id', estudioId)
@@ -111,7 +111,7 @@ export const presencaService = {
   // aula+data ao montar os eventos do calendário.
   async listarPeriodo(inicio, fim, estudioId) {
     const { data, error } = await supabase
-      .from('presenca')
+      .from('presencas')
       .select('id, aula_id, data_aula, origem, status, aluno_id, lead_id, alunos(id, nome_completo), leads(id, nome_visitante)')
       .eq('estudio_id', estudioId)
       .gte('data_aula', inicio)
@@ -137,7 +137,7 @@ export const presencaService = {
           .eq('aula_id', aulaId)
           .eq('estudio_id', estudioId), // Bug #2: filtro de tenant explícito
         supabase
-          .from('presenca')
+          .from('presencas')
           .select(SELECT_CHAMADA)
           .eq('estudio_id', estudioId)
           .eq('aula_id', aulaId)
@@ -195,7 +195,7 @@ export const presencaService = {
 
     if (presencaId) {
       const { data, error } = await supabase
-        .from('presenca')
+        .from('presencas')
         .update({ status: 'presente', data_checkin: agora, registrado_por: userId })
         .eq('id', presencaId)
         .eq('estudio_id', estudioId)
@@ -217,7 +217,7 @@ export const presencaService = {
     };
 
     const { data, error } = await supabase
-      .from('presenca')
+      .from('presencas')
       .upsert([payload], {
         onConflict: 'aluno_id,aula_id,data_aula',
         ignoreDuplicates: false,
@@ -234,7 +234,7 @@ export const presencaService = {
     // Para avulso/lead: não pode sumir (perderia o rastro do agendamento),
     // então volta para 'agendado'.
     const { data: registro, error: errBusca } = await supabase
-      .from('presenca')
+      .from('presencas')
       .select('id, origem')
       .eq('id', presencaId)
       .eq('estudio_id', estudioId)
@@ -243,7 +243,7 @@ export const presencaService = {
 
     if (registro.origem === 'fixo') {
       const { error } = await supabase
-        .from('presenca')
+        .from('presencas')
         .delete()
         .eq('id', presencaId)
         .eq('estudio_id', estudioId);
@@ -252,7 +252,7 @@ export const presencaService = {
     }
 
     const { data, error } = await supabase
-      .from('presenca')
+      .from('presencas')
       .update({ status: 'agendado', data_checkin: null, registrado_por: null })
       .eq('id', presencaId)
       .eq('estudio_id', estudioId)
@@ -269,7 +269,7 @@ export const presencaService = {
 
     if (presencaId) {
       const { data, error } = await supabase
-        .from('presenca')
+        .from('presencas')
         .update({ status, data_checkin: null, registrado_por: userId })
         .eq('id', presencaId)
         .eq('estudio_id', estudioId)
@@ -290,7 +290,7 @@ export const presencaService = {
     };
 
     const { data, error } = await supabase
-      .from('presenca')
+      .from('presencas')
       .upsert([payload], {
         onConflict: 'aluno_id,aula_id,data_aula',
         ignoreDuplicates: false,
@@ -311,7 +311,7 @@ export const presencaService = {
   // ── HISTÓRICO / RELATÓRIOS ────────────────────────────────────────────
   async buscarHistoricoFrequencia(alunoId, estudioId) {
     const { data, error } = await supabase
-      .from('presenca')
+      .from('presencas')
       .select('*, agenda(atividade, horario)')
       .eq('aluno_id', alunoId)
       .eq('estudio_id', estudioId)

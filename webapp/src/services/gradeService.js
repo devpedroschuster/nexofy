@@ -29,17 +29,19 @@ export const gradeService = {
    * @param {Object} janela                             — objeto com propriedades 'inicio' e 'fim' para filtrar o período
    */
 async listarGrade(perfil, professorId, estudioId, janela) {
-  const aplicarJanela = (query) =>
-    janela ? query.gte('horario', janela.inicio).lte('horario', janela.fim) : query;
+  // `horario` é coluna `time` (só hora do dia) — não dá pra comparar com
+  // datas completas. `agenda` guarda definições de aula (recorrentes por
+  // dia da semana ou pontuais via `data_especifica`); a janela de período
+  // visível já é aplicada no client por useEventosCalendario/limitesVisiveis
+  // ao expandir a recorrência, então não filtramos por data aqui.
+  void janela; // mantido no parâmetro por compatibilidade de assinatura com o caller
 
   if (perfil === 'admin') {
-    const { data, error } = await aplicarJanela(
-      supabase
-        .from('agenda')
-        .select('*, professores(nome), modalidades(id, nome)')
-        .eq('estudio_id', estudioId)
-        .order('horario', { ascending: true })
-    );
+    const { data, error } = await supabase
+      .from('agenda')
+      .select('*, professores(nome), modalidades(id, nome)')
+      .eq('estudio_id', estudioId)
+      .order('horario', { ascending: true });
     if (error) throw error;
     return data;
   }
@@ -56,24 +58,20 @@ async listarGrade(perfil, professorId, estudioId, janela) {
 
   const [{ data: aulasDiretas, error: errDiretas }, { data: aulasPorMod, error: errMod }] =
     await Promise.all([
-      aplicarJanela(
-        supabase
-          .from('agenda')
-          .select('*, professores(nome), modalidades(id, nome)')
-          .eq('estudio_id', estudioId)
-          .eq('professor_id', professorId)
-          .order('horario', { ascending: true })
-      ),
+      supabase
+        .from('agenda')
+        .select('*, professores(nome), modalidades(id, nome)')
+        .eq('estudio_id', estudioId)
+        .eq('professor_id', professorId)
+        .order('horario', { ascending: true }),
       idsModsDoProf.length > 0
-        ? aplicarJanela(
-            supabase
-              .from('agenda')
-              .select('*, professores(nome), modalidades(id, nome)')
-              .eq('estudio_id', estudioId)
-              .is('professor_id', null)
-              .in('modalidade_id', idsModsDoProf)
-              .order('horario', { ascending: true })
-          )
+        ? supabase
+            .from('agenda')
+            .select('*, professores(nome), modalidades(id, nome)')
+            .eq('estudio_id', estudioId)
+            .is('professor_id', null)
+            .in('modalidade_id', idsModsDoProf)
+            .order('horario', { ascending: true })
         : Promise.resolve({ data: [], error: null }),
     ]);
 
@@ -171,7 +169,7 @@ async listarGrade(perfil, professorId, estudioId, janela) {
 
     if (dados.bloqueia_agenda) {
       await supabase
-        .from('presenca')
+        .from('presencas')
         .delete()
         .eq('estudio_id', estudioId)
         .eq('data_aula', dados.data);
