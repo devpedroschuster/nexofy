@@ -970,7 +970,7 @@ const nomeEstudio = estudio?.nome;
               {planos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
             </select>
           </div>
-          <PlanoSlots />
+          {PlanoSlots()}
         </div>
       </div>
     );
@@ -1120,7 +1120,7 @@ const nomeEstudio = estudio?.nome;
                 {planos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
               </select>
             </div>
-            <PlanoSlots />
+            {PlanoSlots()}
           </div>
         </div>
 
