@@ -79,10 +79,10 @@ async resumoMensal(mesAno, estudioId) {
         .lte('data_referencia', fim),
 
       supabase
-        .from('fechamento_comissoes')
-        .select('professor_id, valor_total, fechado_em')
-        .eq('estudio_id', estudioId)
-        .eq('mes_referencia', `${mesAno}-01`),
+  .from('fechamento_comissoes')
+  .select('professor_id, valor_total, created_at')
+  .eq('estudio_id', estudioId)
+  .eq('mes_referencia', `${mesAno}-01`),
     ]);
 
   if (errLancamentos) throw errLancamentos;
@@ -148,8 +148,8 @@ async resumoMensal(mesAno, estudioId) {
     if (!prof) throw new Error('PROFESSOR_FORA_DO_ESTUDIO');
 
     const { error } = await supabase
-      .from('fechamento_comissoes')
-      .insert([{ professor_id: professorId, estudio_id: estudioId, mes_referencia: `${mesAno}-01`, valor_total: valorTotal, fechado_em: new Date().toISOString() }]);
+  .from('fechamento_comissoes')
+  .insert([{ professor_id: professorId, estudio_id: estudioId, mes_referencia: `${mesAno}-01`, valor_total: valorTotal }]);
     if (error) {
       if (error.code === '23505') throw new Error('ALREADY_CLOSED');
       throw error;

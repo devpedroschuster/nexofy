@@ -486,7 +486,7 @@ function AbaVisaoGeral({ mesAno, onSelecionarProfessor }) {
                     <p className="font-bold text-foreground">{r.nome}</p>
                     {r.fechamento && (
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Fechado em {formatarData(r.fechamento.fechado_em)}
+                        Fechado em {formatarData(r.fechamento.created_at)}
                       </p>
                     )}
                   </td>
