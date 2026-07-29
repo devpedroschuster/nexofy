@@ -29172,7 +29172,7 @@ function ModalRecuperarSenha({ onClose }) {
 </file>
 
 <file path="webapp/src/pages/NovoAluno.jsx">
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
@@ -29536,9 +29536,9 @@ const nomeEstudio = estudio?.nome;
 
   // ── modalidades helpers (unchanged) ───────────────────────
   const getCountModEspecifca = (modId) =>
-    modalidadesSelecionadas.filter(id => id === modId).length;
+    modalidadesFinais.filter(id => id === modId).length;
   const getUsoPorArea = (areaNome) =>
-    modalidadesSelecionadas.filter(id =>
+    modalidadesFinais.filter(id =>
       modalidades.find(m => m.id === id)?.area === areaNome
     ).length;
   const getRegraDaArea    = (areaNome) => regrasPlano.find(r => r.modalidade === areaNome);
@@ -29557,16 +29557,95 @@ const nomeEstudio = estudio?.nome;
       setModalidadesSelecionadas(nova);
     }
   };
-  const modalidadesAgrupadas = modalidades.reduce((acc, mod) => {
+  // Memoizado: precisa ter referência estável para poder ser usado como
+  // dependência dos efeitos de auto-seleção/slots abaixo, sem causar loop.
+  const modalidadesAgrupadas = useMemo(() => modalidades.reduce((acc, mod) => {
     const area = mod.area || 'Outros';
     if (!acc[area]) acc[area] = [];
     acc[area].push(mod);
     return acc;
-  }, {});
+  }, {}), [modalidades]);
+
   const countUsoModNaGrade = (modId) =>
     matriculasAluno.filter(aulaId =>
       aulasGrade.find(a => a.id === aulaId)?.modalidades?.id === modId
     ).length;
+
+  // ── Melhoria de fluxo: modalidades por área ────────────────
+  // Áreas com 1 única modalidade (ex: Funcional) não exigem escolha manual
+  // — o sistema já sabe qual é a modalidade, então preenche sozinho.
+  const modalidadesAuto = useMemo(() => {
+    const ids = [];
+    regrasPlano.forEach(regra => {
+      const modsArea = modalidadesAgrupadas[regra.modalidade] || [];
+      if (modsArea.length === 1) {
+        const alvo = regra.limite === 999 ? 1 : regra.limite;
+        for (let i = 0; i < alvo; i++) ids.push(modsArea[0].id);
+      }
+    });
+    return ids;
+  }, [regrasPlano, modalidadesAgrupadas]);
+
+  // Áreas com múltiplas modalidades e limite finito (ex: Dança 2x/semana,
+  // podendo ser 2 estilos diferentes) usam "slots" nomeados — 1 dropdown
+  // por vaga semanal, em vez de uma lista solta de estilos com contador.
+  const [slotsPorArea, setSlotsPorArea] = useState({}); // { areaNome: (modId|null)[] }
+
+  useEffect(() => {
+    setSlotsPorArea(prev => {
+      const novo = {};
+      regrasPlano.forEach(regra => {
+        const modsArea = modalidadesAgrupadas[regra.modalidade] || [];
+        if (modsArea.length > 1 && regra.limite !== 999) {
+          if (prev[regra.modalidade]) {
+            // Já inicializado — só redimensiona se o limite do plano mudou.
+            const atual = prev[regra.modalidade];
+            novo[regra.modalidade] = Array.from({ length: regra.limite }, (_, i) => atual[i] ?? null);
+          } else {
+            // Primeira vez que essa área aparece: tenta hidratar a partir de
+            // modalidadesSelecionadas (caso de edição de aluno já existente).
+            const idsDaArea = modalidadesSelecionadas.filter(id =>
+              modsArea.some(m => m.id === id)
+            );
+            novo[regra.modalidade] = Array.from({ length: regra.limite }, (_, i) => idsDaArea[i] ?? null);
+          }
+        }
+      });
+      return novo;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regrasPlano, modalidadesAgrupadas]);
+
+  const atualizarSlot = (areaNome, index, modId) => {
+    setSlotsPorArea(prev => {
+      const atual = [...(prev[areaNome] || [])];
+      atual[index] = modId || null;
+      return { ...prev, [areaNome]: atual };
+    });
+  };
+
+  // Áreas cobertas por auto-seleção ou por slots nomeados não devem também
+  // aparecer na lista "livre" (addModalidade/removeModalidade) — essa lista
+  // livre fica reservada só para áreas Ilimitadas com múltiplos estilos.
+  const areasComSlotOuAuto = useMemo(() => new Set(
+    regrasPlano
+      .filter(r => {
+        const mods = modalidadesAgrupadas[r.modalidade] || [];
+        return mods.length === 1 || (mods.length > 1 && r.limite !== 999);
+      })
+      .map(r => r.modalidade)
+  ), [regrasPlano, modalidadesAgrupadas]);
+
+  // Fonte única de verdade para gravação e para os contadores de uso —
+  // combina: auto-selecionadas + slots nomeados + seleção livre (áreas ilimitadas).
+  const modalidadesFinais = useMemo(() => {
+    const slots  = Object.values(slotsPorArea).flat().filter(Boolean);
+    const livres = modalidadesSelecionadas.filter(id => {
+      const area = modalidades.find(m => m.id === id)?.area;
+      return area && !areasComSlotOuAuto.has(area);
+    });
+    return [...modalidadesAuto, ...slots, ...livres];
+  }, [modalidadesAuto, slotsPorArea, modalidadesSelecionadas, areasComSlotOuAuto, modalidades]);
 
   async function executarMatricula(aula) {
     try {
@@ -29640,7 +29719,7 @@ const nomeEstudio = estudio?.nome;
 
       const payloadBase = {
         plano_id:                  planoFinal,
-        modalidades_selecionadas:  roleSanitizado === 'aluno' ? modalidadesSelecionadas : [],
+        modalidades_selecionadas:  roleSanitizado === 'aluno' ? modalidadesFinais : [],
         data_inicio_plano:         data.data_inicio_plano || null,
         data_fim_plano:            data.data_fim_plano    || null,
         cpf:                       data.cpf               || null,
@@ -29802,7 +29881,7 @@ const nomeEstudio = estudio?.nome;
     showToast.success('Instruções copiadas!');
   };
 
-  const modalidadesUnicasIDs   = [...new Set(modalidadesSelecionadas)];
+  const modalidadesUnicasIDs   = [...new Set(modalidadesFinais)];
   const listaModalidadesAgenda = modalidadesUnicasIDs
     .map(id => modalidades.find(m => m.id === id)).filter(Boolean);
 
@@ -29890,8 +29969,11 @@ const nomeEstudio = estudio?.nome;
 
               <div className="space-y-6">
                 {Object.entries(modalidadesAgrupadas).map(([areaNome, modsArea]) => {
-                  const regra          = getRegraDaArea(areaNome);
-                  const isAreaBloqueada= !regra;
+                  const regra           = getRegraDaArea(areaNome);
+                  const isAreaBloqueada = !regra;
+                  const unicaModalidade = modsArea.length === 1;
+                  const limiteFinito    = !isAreaBloqueada && regra.limite !== 999;
+
                   return (
                     <div key={areaNome} className={`p-5 rounded-3xl border-2
                       ${isAreaBloqueada
@@ -29903,60 +29985,106 @@ const nomeEstudio = estudio?.nome;
                           Área: {areaNome}
                           {isAreaBloqueada && <Lock size={14} className="text-gray-400" />}
                         </h4>
-                        {!isAreaBloqueada && regra.limite !== 999 && (
+                        {!isAreaBloqueada && regra.limite !== 999 && !unicaModalidade && (
                           <span className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-md">
                             Usado: {getUsoPorArea(areaNome)} / {regra.limite}
                           </span>
                         )}
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {modsArea.map(mod => {
-                          const count    = getCountModEspecifca(mod.id);
-                          const isAtivo  = count > 0;
-                          const allowAdd = podeAdicionarMod(areaNome);
-                          return (
-                            <div key={mod.id} className={`flex items-center justify-between p-3
-                              rounded-xl transition-all
-                              ${isAreaBloqueada ? 'bg-gray-100'
-                                : isAtivo ? 'bg-orange-50/50 border border-orange-100'
-                                :           'bg-gray-50 border border-transparent'}`}>
-                              <span className={`text-sm font-bold
-                                ${isAtivo ? 'text-orange-900' : 'text-gray-500'}`}>
-                                {mod.nome}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => removeModalidade(mod.id)}
-                                  disabled={!isAtivo}
-                                  className="w-7 h-7 flex flex-col items-center justify-center
-                                    rounded-lg bg-white shadow-sm text-gray-500 font-black
-                                    hover:bg-red-50 hover:text-red-500
-                                    disabled:opacity-30 disabled:shadow-none transition-colors"
-                                >
-                                  -
-                                </button>
-                                <span className={`font-black w-4 text-center
-                                  ${isAtivo ? 'text-primary' : 'text-gray-300'}`}>
-                                  {count}x
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => addModalidade(mod.id)}
-                                  disabled={!allowAdd || isAreaBloqueada}
-                                  className={`w-7 h-7 flex flex-col items-center justify-center
-                                    rounded-lg bg-white shadow-sm font-black transition-colors
-                                    ${!allowAdd || isAreaBloqueada
-                                      ? 'opacity-30 shadow-none text-gray-400 cursor-not-allowed'
-                                      : 'text-blue-600 hover:bg-blue-50 hover:text-blue-700'}`}
-                                >
-                                  +
-                                </button>
-                              </div>
+
+                      {/* CASO 1: área com uma única modalidade — nada a escolher,
+                          o sistema já inclui automaticamente (ver modalidadesAuto). */}
+                      {!isAreaBloqueada && unicaModalidade && (
+                        <div className="flex items-center justify-between p-3 rounded-xl
+                          bg-green-50 border border-green-100">
+                          <span className="text-sm font-bold text-green-900">
+                            {modsArea[0].nome}
+                          </span>
+                          <span className="text-xs font-bold text-green-600 bg-white
+                            px-3 py-1 rounded-lg flex items-center gap-1">
+                            <Check size={12} /> Incluído automaticamente
+                          </span>
+                        </div>
+                      )}
+
+                      {/* CASO 2: múltiplas modalidades + limite finito (ex: Dança 2x/semana)
+                          — 1 dropdown nomeado por vaga semanal, sem contadores soltos. */}
+                      {limiteFinito && !unicaModalidade && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {(slotsPorArea[areaNome] || []).map((valorSlot, index) => (
+                            <div key={index} className="relative">
+                              <label className="text-[10px] font-black text-gray-400
+                                uppercase block mb-1 ml-1">
+                                {index + 1}ª aula de {areaNome}
+                              </label>
+                              <select
+                                value={valorSlot || ''}
+                                onChange={e => atualizarSlot(areaNome, index, e.target.value)}
+                                className="w-full px-4 py-3 bg-gray-50 rounded-xl outline-none
+                                  font-bold text-gray-700 cursor-pointer border border-transparent
+                                  focus:border-orange-200"
+                              >
+                                <option value="">Selecionar estilo...</option>
+                                {modsArea.map(mod => (
+                                  <option key={mod.id} value={mod.id}>{mod.nome}</option>
+                                ))}
+                              </select>
                             </div>
-                          );
-                        })}
-                      </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* CASO 3: múltiplas modalidades + ilimitado — mantém a lista livre
+                          de +/-, já que não há um número fixo de vagas a distribuir. */}
+                      {!isAreaBloqueada && regra.limite === 999 && !unicaModalidade && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {modsArea.map(mod => {
+                            const count    = getCountModEspecifca(mod.id);
+                            const isAtivo  = count > 0;
+                            const allowAdd = podeAdicionarMod(areaNome);
+                            return (
+                              <div key={mod.id} className={`flex items-center justify-between p-3
+                                rounded-xl transition-all
+                                ${isAtivo ? 'bg-orange-50/50 border border-orange-100'
+                                  :         'bg-gray-50 border border-transparent'}`}>
+                                <span className={`text-sm font-bold
+                                  ${isAtivo ? 'text-orange-900' : 'text-gray-500'}`}>
+                                  {mod.nome}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => removeModalidade(mod.id)}
+                                    disabled={!isAtivo}
+                                    className="w-7 h-7 flex flex-col items-center justify-center
+                                      rounded-lg bg-white shadow-sm text-gray-500 font-black
+                                      hover:bg-red-50 hover:text-red-500
+                                      disabled:opacity-30 disabled:shadow-none transition-colors"
+                                  >
+                                    -
+                                  </button>
+                                  <span className={`font-black w-4 text-center
+                                    ${isAtivo ? 'text-primary' : 'text-gray-300'}`}>
+                                    {count}x
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => addModalidade(mod.id)}
+                                    disabled={!allowAdd}
+                                    className={`w-7 h-7 flex flex-col items-center justify-center
+                                      rounded-lg bg-white shadow-sm font-black transition-colors
+                                      ${!allowAdd
+                                        ? 'opacity-30 shadow-none text-gray-400 cursor-not-allowed'
+                                        : 'text-blue-600 hover:bg-blue-50 hover:text-blue-700'}`}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -30144,7 +30272,7 @@ const nomeEstudio = estudio?.nome;
               {planos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
             </select>
           </div>
-          <PlanoSlots />
+          {PlanoSlots()}
         </div>
       </div>
     );
@@ -30294,7 +30422,7 @@ const nomeEstudio = estudio?.nome;
                 {planos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
               </select>
             </div>
-            <PlanoSlots />
+            {PlanoSlots()}
           </div>
         </div>
 

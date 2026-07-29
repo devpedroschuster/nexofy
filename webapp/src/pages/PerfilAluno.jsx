@@ -640,11 +640,12 @@ function AbaModalidades({ aluno, alunoId, estudioId, queryClient }) {
     setModalidadesSelecionadas(aluno?.modalidades_selecionadas || []);
   }, [aluno?.modalidades_selecionadas]);
 
-  // Helpers de contagem
+  // Helpers de contagem — usam modalidadesFinais (fonte única de verdade,
+  // já combinando auto-seleção + slots nomeados + seleção livre).
   const getCountModEspecifica = (modId) =>
-    modalidadesSelecionadas.filter(id => id === modId).length;
+    modalidadesFinais.filter(id => id === modId).length;
   const getUsoPorArea = (areaNome) =>
-    modalidadesSelecionadas.filter(id =>
+    modalidadesFinais.filter(id =>
       modalidades.find(m => m.id === id)?.area === areaNome
     ).length;
   const getRegraDaArea   = (areaNome) => regrasPlano.find(r => r.modalidade === areaNome);
@@ -667,18 +668,101 @@ function AbaModalidades({ aluno, alunoId, estudioId, queryClient }) {
     });
   };
 
-  const modalidadesAgrupadas = modalidades.reduce((acc, mod) => {
+  const modalidadesAgrupadas = React.useMemo(() => modalidades.reduce((acc, mod) => {
     const area = mod.area || 'Outros';
     if (!acc[area]) acc[area] = [];
     acc[area].push(mod);
     return acc;
-  }, {});
+  }, {}), [modalidades]);
+
+  const semPlano = !aluno?.plano_id;
+
+  // Áreas com 1 única modalidade (ex: Funcional) não exigem escolha manual
+  // — o sistema já sabe qual é a modalidade, então preenche sozinho.
+  const modalidadesAuto = React.useMemo(() => {
+    if (semPlano) return [];
+    const ids = [];
+    regrasPlano.forEach(regra => {
+      const modsArea = modalidadesAgrupadas[regra.modalidade] || [];
+      if (modsArea.length === 1) {
+        const alvo = regra.limite === 999 ? 1 : regra.limite;
+        for (let i = 0; i < alvo; i++) ids.push(modsArea[0].id);
+      }
+    });
+    return ids;
+  }, [semPlano, regrasPlano, modalidadesAgrupadas]);
+
+  // Áreas com múltiplas modalidades e limite finito (ex: Dança 2x/semana,
+  // podendo ser 2 estilos diferentes) usam "slots" nomeados — 1 dropdown
+  // por vaga semanal, em vez de uma lista solta de estilos com contador.
+  const [slotsPorArea, setSlotsPorArea] = useState({}); // { areaNome: (modId|null)[] }
+
+  React.useEffect(() => {
+    setSlotsPorArea(prev => {
+      if (semPlano) return {};
+      const novo = {};
+      regrasPlano.forEach(regra => {
+        const modsArea = modalidadesAgrupadas[regra.modalidade] || [];
+        if (modsArea.length > 1 && regra.limite !== 999) {
+          if (prev[regra.modalidade]) {
+            // Já inicializado — só redimensiona se o limite do plano mudou.
+            const atual = prev[regra.modalidade];
+            novo[regra.modalidade] = Array.from({ length: regra.limite }, (_, i) => atual[i] ?? null);
+          } else {
+            // Primeira vez que essa área aparece: hidrata a partir das
+            // modalidades já salvas no aluno.
+            const idsDaArea = (aluno?.modalidades_selecionadas || []).filter(id =>
+              modsArea.some(m => m.id === id)
+            );
+            novo[regra.modalidade] = Array.from({ length: regra.limite }, (_, i) => idsDaArea[i] ?? null);
+          }
+        }
+      });
+      return novo;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [semPlano, regrasPlano, modalidadesAgrupadas]);
+
+  const atualizarSlot = (areaNome, index, modId) => {
+    setSlotsPorArea(prev => {
+      const atual = [...(prev[areaNome] || [])];
+      atual[index] = modId || null;
+      return { ...prev, [areaNome]: atual };
+    });
+  };
+
+  // Áreas cobertas por auto-seleção ou por slots nomeados não devem também
+  // aparecer na lista "livre" (addModalidade/removeModalidade) — essa lista
+  // livre fica reservada para áreas Ilimitadas com múltiplos estilos, e para
+  // todas as áreas quando o aluno ainda não tem plano vinculado.
+  const areasComSlotOuAuto = React.useMemo(() => {
+    if (semPlano) return new Set();
+    return new Set(
+      regrasPlano
+        .filter(r => {
+          const mods = modalidadesAgrupadas[r.modalidade] || [];
+          return mods.length === 1 || (mods.length > 1 && r.limite !== 999);
+        })
+        .map(r => r.modalidade)
+    );
+  }, [semPlano, regrasPlano, modalidadesAgrupadas]);
+
+  // Fonte única de verdade para salvar e para os contadores de uso —
+  // combina: auto-selecionadas + slots nomeados + seleção livre.
+  const modalidadesFinais = React.useMemo(() => {
+    const slots  = Object.values(slotsPorArea).flat().filter(Boolean);
+    const livres = modalidadesSelecionadas.filter(id => {
+      const area = modalidades.find(m => m.id === id)?.area;
+      return semPlano || (area && !areasComSlotOuAuto.has(area));
+    });
+    return [...modalidadesAuto, ...slots, ...livres];
+  }, [modalidadesAuto, slotsPorArea, modalidadesSelecionadas, areasComSlotOuAuto, modalidades, semPlano]);
 
   const handleSalvar = async () => {
     setSalvando(true);
     try {
       await alunosService.atualizar(alunoId, {
-        modalidades_selecionadas: modalidadesSelecionadas,
+        modalidades_selecionadas: modalidadesFinais,
       }, estudioId);
       queryClient.invalidateQueries(['aluno', alunoId]);
       showToast.success('Modalidades atualizadas com sucesso!');
@@ -689,8 +773,6 @@ function AbaModalidades({ aluno, alunoId, estudioId, queryClient }) {
       setSalvando(false);
     }
   };
-
-  const semPlano = !aluno?.plano_id;
 
   return (
     <div className="space-y-6 animate-in slide-in-from-bottom-4 max-w-3xl">
@@ -738,6 +820,10 @@ function AbaModalidades({ aluno, alunoId, estudioId, queryClient }) {
         {Object.entries(modalidadesAgrupadas).map(([areaNome, modsArea]) => {
           const regra           = getRegraDaArea(areaNome);
           const isAreaBloqueada = !regra && !semPlano;
+          const unicaModalidade = modsArea.length === 1;
+          const limiteFinito    = !semPlano && !isAreaBloqueada && regra.limite !== 999;
+          const areaLivre       = semPlano || (!isAreaBloqueada && regra.limite === 999);
+
           return (
             <Surface
               key={areaNome}
@@ -751,52 +837,100 @@ function AbaModalidades({ aluno, alunoId, estudioId, queryClient }) {
                   {areaNome}
                   {isAreaBloqueada && <Lock size={13} className="text-muted-foreground" />}
                 </h4>
-                {!isAreaBloqueada && regra && regra.limite !== 999 && (
+                {!isAreaBloqueada && regra && regra.limite !== 999 && !unicaModalidade && (
                   <span className="text-xs font-bold text-info bg-info-soft px-2 py-1 rounded-lg">
                     {getUsoPorArea(areaNome)} / {regra.limite} usados
                   </span>
                 )}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {modsArea.map(mod => {
-                  const count    = getCountModEspecifica(mod.id);
-                  const isAtivo  = count > 0;
-                  const allowAdd = podeAdicionarMod(areaNome) || semPlano;
-                  return (
-                    <div key={mod.id} className={`flex items-center justify-between p-3 rounded-xl border transition-all
-                      ${isAreaBloqueada
-                        ? 'bg-muted border-border'
-                        : isAtivo
+
+              {/* CASO 1: área com uma única modalidade — nada a escolher,
+                  o sistema já inclui automaticamente (ver modalidadesAuto). */}
+              {!isAreaBloqueada && !semPlano && unicaModalidade && (
+                <div className="flex items-center justify-between p-3 rounded-xl bg-success-soft border border-success/20">
+                  <span className="text-sm font-bold text-success-foreground">
+                    {modsArea[0].nome}
+                  </span>
+                  <span className="text-xs font-bold text-success bg-background px-3 py-1 rounded-lg flex items-center gap-1">
+                    <CheckCircle size={12} /> Incluído automaticamente
+                  </span>
+                </div>
+              )}
+
+              {/* CASO 2: múltiplas modalidades + limite finito (ex: Dança 2x/semana)
+                  — 1 dropdown nomeado por vaga semanal, sem contadores soltos. */}
+              {limiteFinito && !unicaModalidade && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {(slotsPorArea[areaNome] || []).map((valorSlot, index) => (
+                    <div key={index} className="relative">
+                      <label className="text-[10px] font-black text-muted-foreground uppercase block mb-1 ml-1">
+                        {index + 1}ª aula de {areaNome}
+                      </label>
+                      <select
+                        value={valorSlot || ''}
+                        onChange={e => atualizarSlot(areaNome, index, e.target.value)}
+                        className="w-full px-4 py-3 bg-muted rounded-xl outline-none font-bold text-foreground cursor-pointer border border-transparent focus:border-primary/30"
+                      >
+                        <option value="">Selecionar estilo...</option>
+                        {modsArea.map(mod => (
+                          <option key={mod.id} value={mod.id}>{mod.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* CASO 3: múltiplas modalidades ilimitadas, ou aluno ainda sem
+                  plano vinculado — mantém a lista livre de +/-, já que não há
+                  um número fixo de vagas a distribuir. */}
+              {areaLivre && !(unicaModalidade && !semPlano) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {modsArea.map(mod => {
+                    const count    = getCountModEspecifica(mod.id);
+                    const isAtivo  = count > 0;
+                    const allowAdd = podeAdicionarMod(areaNome) || semPlano;
+                    return (
+                      <div key={mod.id} className={`flex items-center justify-between p-3 rounded-xl border transition-all
+                        ${isAtivo
                           ? 'bg-primary-soft border-primary/20'
                           : 'bg-background border-border hover:border-primary/30'}`}>
-                      <span className={`text-sm font-bold ${isAtivo ? 'text-primary' : 'text-muted-foreground'}`}>
-                        {mod.nome}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => removeModalidade(mod.id)}
-                          disabled={!isAtivo}
-                          className="w-7 h-7 flex items-center justify-center rounded-lg bg-background shadow-sm text-muted-foreground font-black hover:bg-destructive-soft hover:text-destructive disabled:opacity-30 disabled:shadow-none transition-colors"
-                        >
-                          −
-                        </button>
-                        <span className={`font-black w-5 text-center text-sm ${isAtivo ? 'text-primary' : 'text-muted-foreground/40'}`}>
-                          {count}x
+                        <span className={`text-sm font-bold ${isAtivo ? 'text-primary' : 'text-muted-foreground'}`}>
+                          {mod.nome}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => addModalidade(mod.id)}
-                          disabled={(!allowAdd && !semPlano) || isAreaBloqueada}
-                          className="w-7 h-7 flex items-center justify-center rounded-lg bg-background shadow-sm font-black transition-colors text-info hover:bg-info-soft disabled:opacity-30 disabled:shadow-none disabled:cursor-not-allowed"
-                        >
-                          +
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => removeModalidade(mod.id)}
+                            disabled={!isAtivo}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-background shadow-sm text-muted-foreground font-black hover:bg-destructive-soft hover:text-destructive disabled:opacity-30 disabled:shadow-none transition-colors"
+                          >
+                            −
+                          </button>
+                          <span className={`font-black w-5 text-center text-sm ${isAtivo ? 'text-primary' : 'text-muted-foreground/40'}`}>
+                            {count}x
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => addModalidade(mod.id)}
+                            disabled={!allowAdd && !semPlano}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-background shadow-sm font-black transition-colors text-info hover:bg-info-soft disabled:opacity-30 disabled:shadow-none disabled:cursor-not-allowed"
+                          >
+                            +
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* CASO 4: área bloqueada — sem regra para essa área no plano do aluno. */}
+              {isAreaBloqueada && (
+                <p className="text-xs text-muted-foreground font-medium">
+                  Este plano não libera aulas nesta área.
+                </p>
+              )}
             </Surface>
           );
         })}
