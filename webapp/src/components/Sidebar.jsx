@@ -13,7 +13,7 @@ import {
   LayoutDashboard, Users, Calendar, Download, LogOut,
   Package, TrendingDown, UserCheck, Calculator, X,
   Clock, Bell, Percent, DollarSign, Gift, CalendarCog,
-  CreditCard, Settings, ChevronRight,
+  CreditCard, Settings, ChevronRight, MapPin,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import ThemeToggle from './ui/ThemeToggle';
@@ -56,6 +56,7 @@ const MENU_ADMIN = [
   { name: 'Comissões',         path: '/comissoes',                  icon: Percent         },
   { name: 'Regras de Repasse', path: '/configuracoes/repasse',      icon: Calculator      },
   { name: 'Configurações',     path: '/configuracoes/estudio',      icon: Settings        },
+  { name: 'Espaços',           path: '/configuracoes/espacos',      icon: MapPin },
 ];
 
 const MENU_PROFESSOR = [

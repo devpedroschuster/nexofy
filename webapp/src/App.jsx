@@ -51,6 +51,7 @@ import ProfessorAlunos    from './pages/Professor/ProfessorAlunos';
 import ProfessorComissoes from './pages/Professor/ProfessorComissoes';
 import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
 import ConfiguracoesEstudio from './pages/ConfiguracoesEstudio';
+import ConfiguracoesEspacos from './pages/ConfiguracoesEspacos';
 
 // Super Admin
 import SuperAdminLayout      from './pages/SuperAdmin';
@@ -252,6 +253,7 @@ function AppRoutes() {
             <Route path="/notificacoes"          element={<Notificacoes />} />
             <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
             <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
+            <Route path="/configuracoes/espacos" element={<ConfiguracoesEspacos />} />
           </Route>
         </Route>
 
