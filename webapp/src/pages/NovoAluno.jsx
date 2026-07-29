@@ -587,8 +587,15 @@ const nomeEstudio = estudio?.nome;
     setErroAcesso('');
     try {
       const { data: funcData, error: funcError } = await supabase.functions.invoke(
-        'criar_usuario',
-        { body: { email: alunoSalvoEmail, nome: alunoSalvoNome, role: 'aluno' } }
+        'criar-acesso-aluno',
+        {
+          body: {
+            aluno_id: alunoSalvoId,
+            email: alunoSalvoEmail,
+            nome: alunoSalvoNome,
+            estudio_id: estudioId,
+          },
+        }
       );
       if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
       if (funcData?.error) throw new Error(
@@ -596,9 +603,9 @@ const nomeEstudio = estudio?.nome;
           ? 'Este e-mail já possui um acesso.'
           : funcData.error
       );
-      const { error: linkError } = await supabase
-        .from('alunos').update({ auth_id: funcData.user.id }).eq('id', alunoSalvoId);
-      if (linkError) throw new Error('Acesso criado, mas falhou ao vincular ao cadastro. Anote o auth_id e contacte o suporte.');
+     // O vínculo alunos.auth_id + estudio_membros já é feito dentro da Edge
+     // Function, com o filtro de estudio_id correto — não precisa (e não
+     // deve) ser repetido aqui direto no client, sem esse isolamento.
 
       setAcessoCriado(true);
       setDadosCriados({ nome: alunoSalvoNome, email: alunoSalvoEmail });
