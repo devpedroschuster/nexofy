@@ -19,6 +19,8 @@ const PRESETS = OPCOES_DURACAO.filter(o => o.value !== 'custom').map(o => o.valu
 export default function ModalNovaAula({
   novaAula, setNovaAula, modalidades, professores, espacos = [], savingAula, salvarAula
 }) {
+  const [espacoAutoSugerido, setEspacoAutoSugerido] = useState(false);
+
   const handleModalidadeChange = (e) => {
     const id = e.target.value;
     const mod = modalidades.find(m => m.id === id);
@@ -31,6 +33,12 @@ export default function ModalNovaAula({
     const espacoSugerido = espacos.find(
       esp => esp.nome?.toLowerCase() === mod?.area?.toLowerCase()
     )?.slug;
+
+    // Microfeedback: avisa o admin que o espaço mudou sozinho, em vez de
+    // deixar a troca silenciosa (achado de UX no audit — ele podia
+    // preencher o resto do form sem perceber que o espaço já não era
+    // mais o que ele tinha escolhido antes).
+    setEspacoAutoSugerido(!!espacoSugerido && espacoSugerido !== novaAula.espaco);
 
     setNovaAula({
       ...novaAula,
@@ -153,6 +161,11 @@ export default function ModalNovaAula({
               value={novaAula.capacidade || ''}
               onChange={e => setNovaAula({ ...novaAula, capacidade: e.target.value })}
             />
+            {Number(novaAula.capacidade) === 0 && (
+              <p className="col-span-3 text-xs text-muted-foreground font-medium mt-1">
+                Capacidade "sob consulta" — modalidade sem limite fixo definido no cadastro.
+              </p>
+            )}
           </div>
         </>
       ) : (
@@ -177,6 +190,11 @@ export default function ModalNovaAula({
         <label className="text-xs font-black text-muted-foreground uppercase mb-2 block">
           Espaço {!espacoValido && <span className="text-destructive normal-case font-medium">— selecione um espaço</span>}
         </label>
+        {espacoAutoSugerido && (
+          <p className="text-xs text-muted-foreground normal-case font-medium mb-2 flex items-center gap-1">
+            Espaço sugerido automaticamente para esta modalidade — pode trocar se quiser.
+          </p>
+        )}
         <div className="flex flex-wrap gap-3">
           {espacos.map((espaco) => {
             const cor = PALETA_CORES.find(c => c.id === espaco.cor) || PALETA_CORES[0];
@@ -192,7 +210,10 @@ export default function ModalNovaAula({
               >
                 <input type="radio" name="espaco" value={espaco.slug} className="sr-only" required
                   checked={selecionado}
-                  onChange={e => setNovaAula({ ...novaAula, espaco: e.target.value })} />
+                  o onChange={e => {
+                    setEspacoAutoSugerido(false);
+                    setNovaAula({ ...novaAula, espaco: e.target.value });
+                  }} />
                 <IconeEspaco nome={espaco.icone} size={18} /> <span className="font-bold text-sm">{espaco.nome}</span>
               </label>
             );

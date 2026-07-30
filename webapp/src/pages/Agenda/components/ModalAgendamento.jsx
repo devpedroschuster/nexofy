@@ -1,8 +1,8 @@
 import React from 'react';
-import { UserCheck, RefreshCw, MessageCircle } from 'lucide-react';
+import { UserCheck, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, WifiOff } from 'lucide-react';
 import { ModalConfirmacao } from '../../../components/ui/Modal';
 import Button from '../../../components/ui/Button';
-import Input from '../../../components/ui/Input'; // ✅ removido `Label` não utilizado
+import Input from '../../../components/ui/Input';
 
 // Configuração do modal de aviso conforme o tipo de bloqueio.
 function resolverConfigModal(tipo, msg) {
@@ -148,10 +148,25 @@ export default function ModalAgendamento({
           </p>
         )}
         {infoVaga && !verificandoVaga && (
-          <div className={`text-xs font-bold p-3 rounded-xl ${infoVaga.podeAgendarLivremente ? 'bg-success-soft text-success' : 'bg-destructive-soft text-destructive'}`}>
-            {infoVaga.podeAgendarLivremente
-              ? `✅ Vaga disponível (${infoVaga.ocupacaoAtual}/${infoVaga.capacidadeMax})`
-              : `⚠️ ${infoVaga.avisoCritico}`}
+          <div className={`text-xs font-bold p-3 rounded-xl flex items-center gap-2 ${
+            infoVaga.isErroTecnico
+              ? 'bg-muted text-muted-foreground'
+              : infoVaga.podeAgendarLivremente
+                ? 'bg-success-soft text-success'
+                : 'bg-destructive-soft text-destructive'
+          }`}>
+            {infoVaga.isErroTecnico ? (
+              <><WifiOff size={14} className="flex-shrink-0" /> {infoVaga.avisoCritico}</>
+            ) : infoVaga.podeAgendarLivremente ? (
+              <>
+                <CheckCircle2 size={14} className="flex-shrink-0" />
+                {infoVaga.isLivre
+                  ? 'Vaga disponível — turma sem limite de capacidade'
+                  : `Vaga disponível (${infoVaga.ocupacaoAtual}/${infoVaga.capacidadeMax})`}
+              </>
+            ) : (
+              <><AlertTriangle size={14} className="flex-shrink-0" /> {infoVaga.avisoCritico}</>
+            )}
           </div>
         )}
 

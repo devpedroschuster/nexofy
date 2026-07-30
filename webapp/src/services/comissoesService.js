@@ -4,7 +4,7 @@ export const comissoesService = {
   async listarProfessores(estudioId) {
     const { data, error } = await supabase
       .from('professores')
-      .select('*')
+      .select('id, nome')
       .eq('estudio_id', estudioId)
       .eq('ativo', true)
       .order('nome');

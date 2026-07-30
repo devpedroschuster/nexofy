@@ -7,15 +7,35 @@ import { presencaService } from '../../../services/presencaService';
 import { leadsService } from '../../../services/leadsService';
 import { showToast } from '../../../components/shared/Toast';
 
-// Classifica o motivo do bloqueio a partir da mensagem de erro do service/RPC.
-// Retorna 'lotacao' | 'plano' | null
+// ─────────────────────────────────────────────────────────────────────────
+// P0 fix: classificação do motivo de bloqueio (lotação / fora do plano)
+// deixa de depender de casar substring em texto livre vindo do banco e
+// passa a usar o SQLSTATE estruturado retornado pela trigger/RPC via
+// PostgREST (error.code).
 //
-// Atenção: esta classificação depende de casar substring da mensagem vinda
-// do backend (RPC/trigger). Qualquer alteração no texto dessas mensagens no
-// banco precisa vir acompanhada de atualização aqui, senão o agendamento
-// passa a ser bloqueado com um toast genérico em vez de oferecer o modal de
-// "prosseguir mesmo assim".
-function classificarMotivoAviso(msgErro) {
+// Convenção de códigos (faixa livre plpgsql P0001–P0999):
+//   P0100 -> turma lotada / limite de capacidade atingido
+//   P0101 -> fora do plano do aluno (modalidade não incluída ou limite
+//            semanal esgotado)
+//
+// AÇÃO NECESSÁRIA NO BANCO (fora deste repo — não há migration aqui):
+// as triggers que hoje fazem `RAISE EXCEPTION 'Turma lotada...'` (texto
+// livre) precisam trocar para:
+//   RAISE EXCEPTION 'Turma lotada: ...' USING ERRCODE = 'P0100';
+//   RAISE EXCEPTION 'Fora do plano: ...' USING ERRCODE = 'P0101';
+// Isso torna o código, não a mensagem, o contrato entre banco e frontend.
+// A mensagem continua livre para copy/wording — só passou a ser
+// cosmética, nunca lógica de negócio.
+// ─────────────────────────────────────────────────────────────────────────
+
+const CODIGO_LOTACAO = 'P0100';
+const CODIGO_FORA_DO_PLANO = 'P0101';
+
+// Fallback textual — MANTIDO SÓ enquanto a trigger no banco não for
+// migrada para emitir os SQLSTATE acima. Depois da migration, este bloco
+// e a função inteira podem ser removidos; deixe o TODO até lá.
+// TODO(db): remover este fallback assim que a trigger emitir P0100/P0101.
+function classificarMotivoAvisoPorTexto(msgErro) {
   if (!msgErro) return null;
   const msg = msgErro.toLowerCase();
 
@@ -33,6 +53,19 @@ function classificarMotivoAviso(msgErro) {
   }
 
   return null;
+}
+
+// Classifica a partir do erro completo (objeto do Supabase/PostgREST),
+// não apenas da mensagem. Prioriza o código estruturado; só cai para
+// texto se o banco ainda não tiver sido migrado para os novos SQLSTATE.
+function classificarMotivoAviso(err) {
+  const codigo = err?.code;
+
+  if (codigo === CODIGO_LOTACAO) return 'lotacao';
+  if (codigo === CODIGO_FORA_DO_PLANO) return 'plano';
+
+  // Fallback textual (ver TODO acima)
+  return classificarMotivoAvisoPorTexto(err?.message || '');
 }
 
 export function useAgendamento(onSucesso, feriados = [], estudioId) {
@@ -180,13 +213,15 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
         return false;
       }
 
-      const motivo = classificarMotivoAviso(msgErro);
+      // P0 fix: classifica pelo erro completo (código estruturado
+      // primeiro, texto só como fallback) em vez de só a mensagem.
+      const motivo = classificarMotivoAviso(err);
 
       if (motivo === 'lotacao' || motivo === 'plano') {
         abrirModalAviso = true;
         setModalLotacao({ isOpen: true, msg: msgErro, tipo: motivo });
         return false;
-      } else if (msgErro.includes('já possui um agendamento')) {
+      } else if (err.code === '23505' || msgErro.includes('já possui um agendamento')) {
         showToast.error('Este aluno já está agendado nesta turma nessa data.');
       } else {
         showToast.error('Não foi possível realizar o agendamento. Tente novamente.');

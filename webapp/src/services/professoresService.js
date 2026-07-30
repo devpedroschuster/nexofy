@@ -9,7 +9,7 @@ export const professoresService = {
 
     let query = supabase
       .from('professores')
-      .select('*')
+      .select('id, nome, email, telefone, pix_comissao, auth_id, ativo, estudio_id')
       .eq('estudio_id', estudioId)
       .order('nome');
 
@@ -45,7 +45,7 @@ export const professoresService = {
         .update(payload)
         .eq('id', professor.id)
         .eq('estudio_id', estudioId)
-        .select()
+        .select('id, nome, email, telefone, pix_comissao, auth_id, ativo, estudio_id')
         .single();
 
       if (error) throw error;

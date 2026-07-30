@@ -178,6 +178,7 @@ webapp/
       Cadastro.jsx
       CadastroEstudio.jsx
       Comissoes.jsx
+      ConfiguracoesEspacos.jsx
       ConfiguracoesEstudio.jsx
       ConfiguracoesFeriados.jsx
       ConfiguracoesRepasse.jsx
@@ -1944,6 +1945,361 @@ export default function SuperAdminNovoEstudio() {
           </Button>
         </div>
       </form>
+    </div>
+  );
+}
+</file>
+
+<file path="webapp/src/pages/ConfiguracoesEspacos.jsx">
+// webapp/src/pages/ConfiguracoesEspacos.jsx
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { MapPin, Plus, Edit2, Trash2, RefreshCw, Users } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { useImpersonation } from '../context/ImpersonationContext';
+import { useEspacos } from '../pages/Agenda/hooks/useEspacos';
+import { espacosService } from '../services/espacosService';
+import { showToast } from '../components/shared/Toast';
+import { ICONES_ESPACO, IconeEspaco } from '../lib/iconesEspaco.jsx';
+import { PALETA_CORES } from '../lib/constants';
+import Input, { Label } from '../components/ui/Input';
+import Button from '../components/ui/Button';
+import Surface from '../components/ui/Surface';
+import Modal from '../components/ui/Modal';
+import EmptyState from '../components/ui/EmptyState';
+
+const ESPACO_VAZIO = { nome: '', capacidade: '', cor: 'primary', icone: 'MapPin' };
+const NOMES_ICONES = Object.keys(ICONES_ESPACO);
+
+export default function ConfiguracoesEspacos() {
+  const queryClient = useQueryClient();
+  const { estudioId, perfil } = useAuth();
+  // Mesmo padrão de ConfiguracoesEstudio.jsx: em impersonation, o estúdio
+  // "ativo" vem do ImpersonationContext, não de useAuth().
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
+  const podeEditar = perfil === 'admin' || perfil === 'super_admin';
+
+  const {
+    data: espacos = [],
+    isLoading,
+    isError,
+  } = useEspacos(idEfetivo, { incluirInativos: true });
+
+  const [novoEspaco, setNovoEspaco] = useState(ESPACO_VAZIO);
+  const [criando, setCriando] = useState(false);
+
+  const [modalAberto, setModalAberto] = useState(false);
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false);
+  const [espacoEmEdicao, setEspacoEmEdicao] = useState(null);
+
+  const [alternandoId, setAlternandoId] = useState(null);
+
+  const espacosAtivos = espacos.filter(e => e.ativo);
+  const espacosInativos = espacos.filter(e => !e.ativo);
+
+  function invalidarEspacos() {
+    return queryClient.invalidateQueries({ queryKey: ['espacos', idEfetivo] });
+  }
+
+  async function handleCriar(e) {
+    e.preventDefault();
+    if (!idEfetivo) {
+      showToast.error('Não foi possível identificar o estúdio. Recarregue a página.');
+      return;
+    }
+    if (!novoEspaco.nome.trim()) return;
+
+    setCriando(true);
+    try {
+      await espacosService.criar(idEfetivo, novoEspaco);
+      showToast.success('Espaço criado com sucesso!');
+      setNovoEspaco(ESPACO_VAZIO);
+      await invalidarEspacos();
+    } catch (err) {
+      console.error('[ConfiguracoesEspacos] Erro ao criar:', err);
+      showToast.error(
+        err?.code === '23505'
+          ? 'Já existe um espaço com esse nome.'
+          : 'Erro ao criar espaço. Tente novamente.'
+      );
+    } finally {
+      setCriando(false);
+    }
+  }
+
+  function abrirEdicao(espaco) {
+    setEspacoEmEdicao({
+      id: espaco.id,
+      nome: espaco.nome,
+      capacidade: espaco.capacidade ?? '',
+      cor: espaco.cor ?? 'primary',
+      icone: espaco.icone ?? 'MapPin',
+    });
+    setModalAberto(true);
+  }
+
+  async function handleSalvarEdicao(e) {
+    e.preventDefault();
+    if (!espacoEmEdicao?.nome.trim()) return;
+
+    setSalvandoEdicao(true);
+    try {
+      await espacosService.atualizar(espacoEmEdicao.id, idEfetivo, espacoEmEdicao);
+      showToast.success('Espaço atualizado com sucesso!');
+      setModalAberto(false);
+      await invalidarEspacos();
+    } catch (err) {
+      console.error('[ConfiguracoesEspacos] Erro ao atualizar:', err);
+      showToast.error('Erro ao atualizar espaço.');
+    } finally {
+      setSalvandoEdicao(false);
+    }
+  }
+
+  async function handleAlternarAtivo(espaco) {
+    setAlternandoId(espaco.id);
+    try {
+      if (espaco.ativo) {
+        await espacosService.desativar(espaco.id, idEfetivo);
+        showToast.success('Espaço desativado. Ele não aparecerá mais na Agenda.');
+      } else {
+        await espacosService.reativar(espaco.id, idEfetivo);
+        showToast.success('Espaço reativado.');
+      }
+      await invalidarEspacos();
+    } catch (err) {
+      console.error('[ConfiguracoesEspacos] Erro ao alternar status:', err);
+      showToast.error('Erro ao atualizar o espaço.');
+    } finally {
+      setAlternandoId(null);
+    }
+  }
+
+  function CardEspaco({ espaco }) {
+    const cor = PALETA_CORES.find(c => c.id === espaco.cor) || PALETA_CORES[0];
+    return (
+      <Surface
+        variant="card"
+        padding="lg"
+        className={`flex items-center justify-between gap-4 ${!espaco.ativo ? 'opacity-60' : ''}`}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`h-11 w-11 rounded-2xl flex items-center justify-center shrink-0 ${cor.bg} ${cor.text}`}>
+            <IconeEspaco nome={espaco.icone} size={20} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-black text-foreground truncate">{espaco.nome}</p>
+            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1">
+              {espaco.capacidade ? (
+                <>
+                  <Users size={12} /> Capacidade: {espaco.capacidade}
+                </>
+              ) : (
+                'Sem limite de capacidade definido'
+              )}
+              {!espaco.ativo && ' · Inativo'}
+            </p>
+          </div>
+        </div>
+
+        {podeEditar && (
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="outline" size="sm" onClick={() => abrirEdicao(espaco)}>
+              <Edit2 size={14} />
+            </Button>
+            <Button
+              variant={espaco.ativo ? 'outline' : 'brand'}
+              size="sm"
+              loading={alternandoId === espaco.id}
+              onClick={() => handleAlternarAtivo(espaco)}
+            >
+              {espaco.ativo ? <Trash2 size={14} /> : <RefreshCw size={14} />}
+            </Button>
+          </div>
+        )}
+      </Surface>
+    );
+  }
+
+  return (
+    <div className="p-8 space-y-8 animate-in fade-in">
+      <div>
+        <h1 className="text-3xl font-black text-foreground">Espaços</h1>
+        <p className="text-muted-foreground">
+          Cadastre as salas/áreas do estúdio para poder selecioná-las ao criar uma aula na Agenda.
+        </p>
+      </div>
+
+      {podeEditar && (
+        <Surface variant="card" padding="lg" className="space-y-6">
+          <h3 className="font-bold text-foreground flex items-center gap-2">
+            <Plus size={20} /> Novo Espaço
+          </h3>
+
+          <form onSubmit={handleCriar} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <div className="md:col-span-2">
+              <Label htmlFor="nome-espaco" required>Nome do Espaço</Label>
+              <Input
+                id="nome-espaco"
+                required
+                placeholder="Ex: Espaço Movimento"
+                value={novoEspaco.nome}
+                onChange={e => setNovoEspaco({ ...novoEspaco, nome: e.target.value })}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="capacidade-espaco">Capacidade (opcional)</Label>
+              <Input
+                id="capacidade-espaco"
+                type="number"
+                min="1"
+                placeholder="Ex: 20"
+                value={novoEspaco.capacidade}
+                onChange={e => setNovoEspaco({ ...novoEspaco, capacidade: e.target.value })}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="icone-espaco">Ícone</Label>
+              <Input
+                as="select"
+                id="icone-espaco"
+                value={novoEspaco.icone}
+                onChange={e => setNovoEspaco({ ...novoEspaco, icone: e.target.value })}
+              >
+                {NOMES_ICONES.map(nome => (
+                  <option key={nome} value={nome}>{nome}</option>
+                ))}
+              </Input>
+            </div>
+
+            <div className="md:col-span-3">
+              <Label>Cor</Label>
+              <div className="flex flex-wrap gap-2">
+                {PALETA_CORES.map(cor => (
+                  <button
+                    key={cor.id}
+                    type="button"
+                    onClick={() => setNovoEspaco({ ...novoEspaco, cor: cor.id })}
+                    className={`h-9 w-9 rounded-full border-2 ${cor.bg} ${
+                      novoEspaco.cor === cor.id ? 'border-foreground' : 'border-transparent'
+                    }`}
+                    title={cor.id}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <Button type="submit" variant="brand" className="w-full font-black" disabled={criando || !novoEspaco.nome.trim()}>
+                {criando ? <RefreshCw className="animate-spin" size={18} /> : <Plus size={18} />}
+                Adicionar
+              </Button>
+            </div>
+          </form>
+        </Surface>
+      )}
+
+      {isLoading && (
+        <p className="text-muted-foreground font-medium">Carregando espaços...</p>
+      )}
+
+      {isError && (
+        <p className="text-destructive font-medium">Erro ao carregar espaços. Tente recarregar a página.</p>
+      )}
+
+      {!isLoading && !isError && espacos.length === 0 && (
+        <EmptyState
+          icon={<MapPin size={32} />}
+          title="Nenhum espaço cadastrado"
+          description="Cadastre o primeiro espaço acima para poder usá-lo ao criar aulas na Agenda."
+        />
+      )}
+
+      {espacosAtivos.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-black text-muted-foreground uppercase">Ativos</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {espacosAtivos.map(espaco => <CardEspaco key={espaco.id} espaco={espaco} />)}
+          </div>
+        </div>
+      )}
+
+      {espacosInativos.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-black text-muted-foreground uppercase">Inativos</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {espacosInativos.map(espaco => <CardEspaco key={espaco.id} espaco={espaco} />)}
+          </div>
+        </div>
+      )}
+
+      <Modal aberto={modalAberto} fechar={() => setModalAberto(false)} title="Editar Espaço" size="md">
+        {espacoEmEdicao && (
+          <form onSubmit={handleSalvarEdicao} className="p-6 space-y-4">
+            <div>
+              <Label htmlFor="nome-edicao" required>Nome</Label>
+              <Input
+                id="nome-edicao"
+                required
+                value={espacoEmEdicao.nome}
+                onChange={e => setEspacoEmEdicao({ ...espacoEmEdicao, nome: e.target.value })}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="capacidade-edicao">Capacidade</Label>
+              <Input
+                id="capacidade-edicao"
+                type="number"
+                min="1"
+                value={espacoEmEdicao.capacidade}
+                onChange={e => setEspacoEmEdicao({ ...espacoEmEdicao, capacidade: e.target.value })}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="icone-edicao">Ícone</Label>
+              <Input
+                as="select"
+                id="icone-edicao"
+                value={espacoEmEdicao.icone}
+                onChange={e => setEspacoEmEdicao({ ...espacoEmEdicao, icone: e.target.value })}
+              >
+                {NOMES_ICONES.map(nome => (
+                  <option key={nome} value={nome}>{nome}</option>
+                ))}
+              </Input>
+            </div>
+
+            <div>
+              <Label>Cor</Label>
+              <div className="flex flex-wrap gap-2">
+                {PALETA_CORES.map(cor => (
+                  <button
+                    key={cor.id}
+                    type="button"
+                    onClick={() => setEspacoEmEdicao({ ...espacoEmEdicao, cor: cor.id })}
+                    className={`h-9 w-9 rounded-full border-2 ${cor.bg} ${
+                      espacoEmEdicao.cor === cor.id ? 'border-foreground' : 'border-transparent'
+                    }`}
+                    title={cor.id}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button type="button" variant="outline" onClick={() => setModalAberto(false)}>Cancelar</Button>
+              <Button type="submit" variant="brand" loading={salvandoEdicao} disabled={!espacoEmEdicao.nome.trim()}>
+                Salvar
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -9270,35 +9626,6 @@ export const dreService = {
 };
 </file>
 
-<file path="webapp/src/services/espacosService.js">
-// services/espacosService.js
-import { supabase } from '../lib/supabase';
-
-const ESPACOS_COLUMNS = 'id, estudio_id, nome, ordem, capacidade, ativo';
-
-export const espacosService = {
-  async listar(estudioId, { incluirInativos = false } = {}) {
-    if (!estudioId) {
-      throw new Error('espacosService.listar: estudioId é obrigatório');
-    }
-
-    let query = supabase
-      .from('espacos')
-      .select(ESPACOS_COLUMNS)
-      .eq('estudio_id', estudioId)
-      .order('ordem', { ascending: true });
-
-    if (!incluirInativos) {
-      query = query.eq('ativo', true);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-    return data ?? [];
-  },
-};
-</file>
-
 <file path="webapp/src/services/feriadosService.js">
 import { supabase } from '../lib/supabase';
 
@@ -12284,10 +12611,10 @@ export default function ModalAcoesEvento({
 
 <file path="webapp/src/pages/Agenda/components/ModalAgendamento.jsx">
 import React from 'react';
-import { UserCheck, RefreshCw, MessageCircle } from 'lucide-react';
+import { UserCheck, RefreshCw, MessageCircle, CheckCircle2, AlertTriangle, WifiOff } from 'lucide-react';
 import { ModalConfirmacao } from '../../../components/ui/Modal';
 import Button from '../../../components/ui/Button';
-import Input from '../../../components/ui/Input'; // ✅ removido `Label` não utilizado
+import Input from '../../../components/ui/Input';
 
 // Configuração do modal de aviso conforme o tipo de bloqueio.
 function resolverConfigModal(tipo, msg) {
@@ -12433,10 +12760,25 @@ export default function ModalAgendamento({
           </p>
         )}
         {infoVaga && !verificandoVaga && (
-          <div className={`text-xs font-bold p-3 rounded-xl ${infoVaga.podeAgendarLivremente ? 'bg-success-soft text-success' : 'bg-destructive-soft text-destructive'}`}>
-            {infoVaga.podeAgendarLivremente
-              ? `✅ Vaga disponível (${infoVaga.ocupacaoAtual}/${infoVaga.capacidadeMax})`
-              : `⚠️ ${infoVaga.avisoCritico}`}
+          <div className={`text-xs font-bold p-3 rounded-xl flex items-center gap-2 ${
+            infoVaga.isErroTecnico
+              ? 'bg-muted text-muted-foreground'
+              : infoVaga.podeAgendarLivremente
+                ? 'bg-success-soft text-success'
+                : 'bg-destructive-soft text-destructive'
+          }`}>
+            {infoVaga.isErroTecnico ? (
+              <><WifiOff size={14} className="flex-shrink-0" /> {infoVaga.avisoCritico}</>
+            ) : infoVaga.podeAgendarLivremente ? (
+              <>
+                <CheckCircle2 size={14} className="flex-shrink-0" />
+                {infoVaga.isLivre
+                  ? 'Vaga disponível — turma sem limite de capacidade'
+                  : `Vaga disponível (${infoVaga.ocupacaoAtual}/${infoVaga.capacidadeMax})`}
+              </>
+            ) : (
+              <><AlertTriangle size={14} className="flex-shrink-0" /> {infoVaga.avisoCritico}</>
+            )}
           </div>
         )}
 
@@ -12593,6 +12935,8 @@ const PRESETS = OPCOES_DURACAO.filter(o => o.value !== 'custom').map(o => o.valu
 export default function ModalNovaAula({
   novaAula, setNovaAula, modalidades, professores, espacos = [], savingAula, salvarAula
 }) {
+  const [espacoAutoSugerido, setEspacoAutoSugerido] = useState(false);
+
   const handleModalidadeChange = (e) => {
     const id = e.target.value;
     const mod = modalidades.find(m => m.id === id);
@@ -12605,6 +12949,12 @@ export default function ModalNovaAula({
     const espacoSugerido = espacos.find(
       esp => esp.nome?.toLowerCase() === mod?.area?.toLowerCase()
     )?.slug;
+
+    // Microfeedback: avisa o admin que o espaço mudou sozinho, em vez de
+    // deixar a troca silenciosa (achado de UX no audit — ele podia
+    // preencher o resto do form sem perceber que o espaço já não era
+    // mais o que ele tinha escolhido antes).
+    setEspacoAutoSugerido(!!espacoSugerido && espacoSugerido !== novaAula.espaco);
 
     setNovaAula({
       ...novaAula,
@@ -12727,6 +13077,11 @@ export default function ModalNovaAula({
               value={novaAula.capacidade || ''}
               onChange={e => setNovaAula({ ...novaAula, capacidade: e.target.value })}
             />
+            {Number(novaAula.capacidade) === 0 && (
+              <p className="col-span-3 text-xs text-muted-foreground font-medium mt-1">
+                Capacidade "sob consulta" — modalidade sem limite fixo definido no cadastro.
+              </p>
+            )}
           </div>
         </>
       ) : (
@@ -12751,6 +13106,11 @@ export default function ModalNovaAula({
         <label className="text-xs font-black text-muted-foreground uppercase mb-2 block">
           Espaço {!espacoValido && <span className="text-destructive normal-case font-medium">— selecione um espaço</span>}
         </label>
+        {espacoAutoSugerido && (
+          <p className="text-xs text-muted-foreground normal-case font-medium mb-2 flex items-center gap-1">
+            Espaço sugerido automaticamente para esta modalidade — pode trocar se quiser.
+          </p>
+        )}
         <div className="flex flex-wrap gap-3">
           {espacos.map((espaco) => {
             const cor = PALETA_CORES.find(c => c.id === espaco.cor) || PALETA_CORES[0];
@@ -12766,7 +13126,10 @@ export default function ModalNovaAula({
               >
                 <input type="radio" name="espaco" value={espaco.slug} className="sr-only" required
                   checked={selecionado}
-                  onChange={e => setNovaAula({ ...novaAula, espaco: e.target.value })} />
+                  o onChange={e => {
+                    setEspacoAutoSugerido(false);
+                    setNovaAula({ ...novaAula, espaco: e.target.value });
+                  }} />
                 <IconeEspaco nome={espaco.icone} size={18} /> <span className="font-bold text-sm">{espaco.nome}</span>
               </label>
             );
@@ -12885,15 +13248,35 @@ import { presencaService } from '../../../services/presencaService';
 import { leadsService } from '../../../services/leadsService';
 import { showToast } from '../../../components/shared/Toast';
 
-// Classifica o motivo do bloqueio a partir da mensagem de erro do service/RPC.
-// Retorna 'lotacao' | 'plano' | null
+// ─────────────────────────────────────────────────────────────────────────
+// P0 fix: classificação do motivo de bloqueio (lotação / fora do plano)
+// deixa de depender de casar substring em texto livre vindo do banco e
+// passa a usar o SQLSTATE estruturado retornado pela trigger/RPC via
+// PostgREST (error.code).
 //
-// Atenção: esta classificação depende de casar substring da mensagem vinda
-// do backend (RPC/trigger). Qualquer alteração no texto dessas mensagens no
-// banco precisa vir acompanhada de atualização aqui, senão o agendamento
-// passa a ser bloqueado com um toast genérico em vez de oferecer o modal de
-// "prosseguir mesmo assim".
-function classificarMotivoAviso(msgErro) {
+// Convenção de códigos (faixa livre plpgsql P0001–P0999):
+//   P0100 -> turma lotada / limite de capacidade atingido
+//   P0101 -> fora do plano do aluno (modalidade não incluída ou limite
+//            semanal esgotado)
+//
+// AÇÃO NECESSÁRIA NO BANCO (fora deste repo — não há migration aqui):
+// as triggers que hoje fazem `RAISE EXCEPTION 'Turma lotada...'` (texto
+// livre) precisam trocar para:
+//   RAISE EXCEPTION 'Turma lotada: ...' USING ERRCODE = 'P0100';
+//   RAISE EXCEPTION 'Fora do plano: ...' USING ERRCODE = 'P0101';
+// Isso torna o código, não a mensagem, o contrato entre banco e frontend.
+// A mensagem continua livre para copy/wording — só passou a ser
+// cosmética, nunca lógica de negócio.
+// ─────────────────────────────────────────────────────────────────────────
+
+const CODIGO_LOTACAO = 'P0100';
+const CODIGO_FORA_DO_PLANO = 'P0101';
+
+// Fallback textual — MANTIDO SÓ enquanto a trigger no banco não for
+// migrada para emitir os SQLSTATE acima. Depois da migration, este bloco
+// e a função inteira podem ser removidos; deixe o TODO até lá.
+// TODO(db): remover este fallback assim que a trigger emitir P0100/P0101.
+function classificarMotivoAvisoPorTexto(msgErro) {
   if (!msgErro) return null;
   const msg = msgErro.toLowerCase();
 
@@ -12911,6 +13294,19 @@ function classificarMotivoAviso(msgErro) {
   }
 
   return null;
+}
+
+// Classifica a partir do erro completo (objeto do Supabase/PostgREST),
+// não apenas da mensagem. Prioriza o código estruturado; só cai para
+// texto se o banco ainda não tiver sido migrado para os novos SQLSTATE.
+function classificarMotivoAviso(err) {
+  const codigo = err?.code;
+
+  if (codigo === CODIGO_LOTACAO) return 'lotacao';
+  if (codigo === CODIGO_FORA_DO_PLANO) return 'plano';
+
+  // Fallback textual (ver TODO acima)
+  return classificarMotivoAvisoPorTexto(err?.message || '');
 }
 
 export function useAgendamento(onSucesso, feriados = [], estudioId) {
@@ -13058,13 +13454,15 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
         return false;
       }
 
-      const motivo = classificarMotivoAviso(msgErro);
+      // P0 fix: classifica pelo erro completo (código estruturado
+      // primeiro, texto só como fallback) em vez de só a mensagem.
+      const motivo = classificarMotivoAviso(err);
 
       if (motivo === 'lotacao' || motivo === 'plano') {
         abrirModalAviso = true;
         setModalLotacao({ isOpen: true, msg: msgErro, tipo: motivo });
         return false;
-      } else if (msgErro.includes('já possui um agendamento')) {
+      } else if (err.code === '23505' || msgErro.includes('já possui um agendamento')) {
         showToast.error('Este aluno já está agendado nesta turma nessa data.');
       } else {
         showToast.error('Não foi possível realizar o agendamento. Tente novamente.');
@@ -16904,12 +17302,12 @@ import { supabase } from '../lib/supabase';
 // ─────────────────────────────────────────────────────────────────────────
 // presencaService
 //
-// Responsável pela tabela `presenca` (check-in, agendamento e falta de
+// Responsável pela tabela `presencas` (check-in, agendamento e falta de
 // alunos fixos e avulsos). Leads vivem em `leadsService` / tabela `leads` —
-// a ponte entre os dois é presenca.lead_id, usado apenas quando
+// a ponte entre os dois é presencas.lead_id, usado apenas quando
 // origem = 'lead'.
 //
-// Modelo de negócio (ver migration 001_split_presenca_leads.sql):
+// Modelo de negócio (ver migration 001_split_presencas_leads.sql):
 //   - origem 'fixo'   -> nunca nasce como 'agendado'; só ganha linha quando
 //                        o resultado do dia é registrado (presente/falta_*).
 //   - origem 'avulso' -> nasce explicitamente como 'agendado' ao ser marcado
@@ -16928,69 +17326,29 @@ export const presencaService = {
   // Cria o registro explícito de agendamento para um aluno cadastrado que
   // marcou presença numa aula pontual (fora da matrícula fixa).
   //
-  // BUG #5 fix: o parâmetro ignorarAvisos é agora recebido e propagado para
-  // o RPC `agendar_avulso` via p_ignorar_avisos. Quando true, o banco
-  // bypassa as validações de capacidade e restrição de plano, permitindo que
-  // o agendamento seja confirmado mesmo em turma lotada ou fora do plano.
+  // FIX (achado no audit): antes deste fix o INSERT era feito direto na
+  // tabela, sem nenhuma validação de negócio no banco — capacidade e
+  // regras de plano eram só um aviso visual (verificar_disponibilidade_v2
+  // chamada apenas pelo indicador de vaga), nunca bloqueavam o insert.
+  // Isso permitia overbooking e agendamento fora do plano sem nenhum
+  // erro, além de uma condição de corrida entre checagem e insert.
   //
-  // IMPORTANTE: o RPC `agendar_avulso` precisa existir no banco com a
-  // assinatura abaixo. Enquanto não existir, a função cai no fallback de
-  // INSERT direto (sem bypass), que é o comportamento original.
-  //
-  // Assinatura esperada do RPC:
-  //   agendar_avulso(
-  //     p_estudio_id   uuid,
-  //     p_aluno_id     uuid,
-  //     p_aula_id      uuid,
-  //     p_data_aula    date,
-  //     p_ignorar_avisos boolean DEFAULT false
-  //   ) RETURNS presenca
+  // Agora usamos o RPC `agendar_avulso`, que valida e insere na mesma
+  // transação (com advisory lock por aula+data) e sinaliza o motivo do
+  // bloqueio via error.code estruturado:
+  //   P0100 -> turma lotada
+  //   P0101 -> fora do plano do aluno
+  //   23505 -> aluno já agendado nessa turma/data (unique_violation)
+  // Ver migration 20260730120000_agendar_avulso_rpc.sql.
   async agendarAvulso({ alunoId, aulaId, dataAula, ignorarAvisos = false }, estudioId) {
-    // ── Caminho via RPC (com suporte a p_ignorar_avisos) ─────────────────
-    // Use este caminho quando o RPC `agendar_avulso` estiver implementado
-    // no banco. Ele é o único que consegue realmente bypasear as validações
-    // de negócio (triggers de capacidade/plano) quando ignorarAvisos = true.
-    //
-    // Para ativar: remova o bloco de comentário abaixo e apague o bloco
-    // "Caminho via INSERT direto" que vem depois.
-    //
-    // const { data, error } = await supabase.rpc('agendar_avulso', {
-    //   p_estudio_id:      estudioId,
-    //   p_aluno_id:        alunoId,
-    //   p_aula_id:         aulaId,
-    //   p_data_aula:       dataAula,
-    //   p_ignorar_avisos:  ignorarAvisos,
-    // });
-    //
-    // if (error && error.code === '23505') {
-    //   throw new Error('Este aluno já possui um agendamento nesta mesma turma e mesma data.');
-    // }
-    // if (error) throw error;
-    // return data;
+    const { data, error } = await supabase.rpc('agendar_avulso', {
+      p_estudio_id:     estudioId,
+      p_aluno_id:       alunoId,
+      p_aula_id:        aulaId,
+      p_data_aula:      dataAula,
+      p_ignorar_avisos: ignorarAvisos,
+    });
 
-    // ── Caminho via INSERT direto (comportamento original) ────────────────
-    // Mantido enquanto o RPC ainda não existe no banco.
-    // Neste caminho, ignorarAvisos não tem efeito prático — o banco vai
-    // rejeitar o INSERT pelos mesmos triggers/constraints de antes.
-    // Assim que o RPC for criado, substitua este bloco pelo bloco acima.
-    const payload = {
-      estudio_id: estudioId,
-      aluno_id: alunoId,
-      aula_id: aulaId,
-      data_aula: dataAula,
-      origem: 'avulso',
-      status: 'agendado',
-    };
-
-    const { data, error } = await supabase
-      .from('presencas')
-      .insert([payload])
-      .select()
-      .single();
-
-    if (error && error.code === '23505') {
-      throw new Error('Este aluno já possui um agendamento nesta mesma turma e mesma data.');
-    }
     if (error) throw error;
     return data;
   },
@@ -17235,7 +17593,7 @@ export const professoresService = {
 
     let query = supabase
       .from('professores')
-      .select('*')
+      .select('id, nome, email, telefone, pix_comissao, auth_id, ativo, estudio_id')
       .eq('estudio_id', estudioId)
       .order('nome');
 
@@ -17271,7 +17629,7 @@ export const professoresService = {
         .update(payload)
         .eq('id', professor.id)
         .eq('estudio_id', estudioId)
-        .select()
+        .select('id, nome, email, telefone, pix_comissao, auth_id, ativo, estudio_id')
         .single();
 
       if (error) throw error;
@@ -19232,286 +19590,6 @@ export default function ModalPreviewRepasses({ isOpen, onClose, mesAno, onConfir
     </Modal>
   );
 }
-</file>
-
-<file path="webapp/src/components/Sidebar.jsx">
-// src/components/Sidebar.jsx
-// ─── Midnight Indigo · Sidebar ────────────────────────────────────────────────
-//
-// Design: usa tokens sidebar-* (isolados do resto da UI).
-// Borda esquerda no item ativo (indicador de posição visual).
-// Avatar com inicial do nome para todos os perfis no rodapé.
-// Overlay mobile com backdrop-blur.
-// ─────────────────────────────────────────────────────────────────────────────
-
-import React from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import {
-  LayoutDashboard, Users, Calendar, Download, LogOut,
-  Package, TrendingDown, UserCheck, Calculator, X,
-  Clock, Bell, Percent, DollarSign, Gift, CalendarCog,
-  CreditCard, Settings, ChevronRight,
-} from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import ThemeToggle from './ui/ThemeToggle';
-import { usePWA } from '../hooks/usePWA';
-import { cn } from '../lib/cn';
-
-/* ── Helpers ────────────────────────────────────────────────────────────────── */
-function resolverPerfil(perfil) {
-  if (!perfil) return null;
-  if (typeof perfil === 'string') return perfil.toLowerCase().trim();
-  return String(perfil.role ?? perfil.tipo ?? 'admin').toLowerCase().trim();
-}
-
-function inicialNome(nome) {
-  if (!nome) return '?';
-  return nome.trim().charAt(0).toUpperCase();
-}
-
-/* ── Menus ──────────────────────────────────────────────────────────────────── */
-const MENU_ADMIN = [
-  { label: 'Visão Geral' },
-  { name: 'Painel',            path: '/dashboard',                  icon: LayoutDashboard },
-  { name: 'Notificações',      path: '/notificacoes',               icon: Bell            },
-  { name: 'Leads',             path: '/leads',                      icon: Clock           },
-  { name: 'Aniversariantes',   path: '/aniversariantes',            icon: Gift            },
-
-  { label: 'Gestão e Operação' },
-  { name: 'Alunos',            path: '/alunos',                     icon: Users           },
-  { name: 'Planos',            path: '/planos',                     icon: CreditCard      },
-  { name: 'Professores',       path: '/professores',                icon: UserCheck       },
-  { name: 'Modalidades',       path: '/modalidades',                icon: Package         },
-  { name: 'Agenda',            path: '/agenda',                     icon: Calendar        },
-  { name: 'Presença',          path: '/presenca',                   icon: Clock           },
-  { name: 'Feriados',          path: '/configuracoes/feriados',     icon: CalendarCog     },
-
-  { label: 'Financeiro' },
-  { name: 'Mensalidades',      path: '/financeiro',                 icon: DollarSign      },
-  { name: 'Despesas',          path: '/despesas',                   icon: TrendingDown    },
-  { name: 'Resultado',         path: '/resultado-financeiro',       icon: Calculator      },
-  { name: 'Comissões',         path: '/comissoes',                  icon: Percent         },
-  { name: 'Regras de Repasse', path: '/configuracoes/repasse',      icon: Calculator      },
-  { name: 'Configurações',     path: '/configuracoes/estudio',      icon: Settings        },
-];
-
-const MENU_PROFESSOR = [
-  { label: 'Minha Área' },
-  { name: 'Minha Agenda', path: '/agenda',           icon: Calendar },
-  { name: 'Meus Alunos',  path: '/professor/alunos', icon: Users    },
-];
-
-const PERFIS_COM_MENU_ADMIN = ['admin', 'super_admin'];
-
-/* ── Componente ─────────────────────────────────────────────────────────────── */
-function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }) {
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  const perfilResolvido = resolverPerfil(perfil);
-  const isProfessor = perfilResolvido === 'professor';
-  const isAdmin = PERFIS_COM_MENU_ADMIN.includes(perfilResolvido);
-
-  const { canInstall, install } = usePWA();
-
-  const itensMenu = isProfessor ? MENU_PROFESSOR : isAdmin ? MENU_ADMIN : [];
-
-  async function handleLogout() {
-    try {
-      await supabase.auth.signOut();
-    } catch (err) {
-      console.error('Erro ao sair (signOut remoto falhou):', err);
-    } finally {
-      Object.keys(localStorage)
-        .filter((k) => k.startsWith('supabase.'))
-        .forEach((k) => localStorage.removeItem(k));
-      navigate('/login', { replace: true });
-    }
-  }
-
-  return (
-    <>
-      {/* ── Overlay Mobile ──────────────────────────────────────────────── */}
-      {menuAberto && (
-        <div
-          className="fixed inset-0 z-40 bg-background/60 backdrop-blur-sm md:hidden"
-          onClick={() => setMenuAberto(false)}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-      <aside
-        className={cn(
-          'fixed inset-y-0 left-0 z-50 md:static',
-          'flex h-full w-64 flex-col',
-          'bg-sidebar border-r border-sidebar-border',
-          'transform transition-transform duration-300 ease-out',
-          menuAberto ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-        )}
-      >
-        {/* ── Header / Logo ──────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-5 py-6 shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            {/* Avatar do estúdio */}
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary shadow-brand">
-              <span className="text-primary-foreground font-bold text-base leading-none">
-                {nomeEstudio?.charAt(0)?.toUpperCase() ?? 'E'}
-              </span>
-            </div>
-
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-sidebar-foreground leading-tight">
-                {nomeEstudio ?? 'Estúdio'}
-              </p>
-              {isProfessor && (
-                <p className="text-[10px] font-medium text-sidebar-muted-foreground uppercase tracking-wider mt-0.5">
-                  Área do Professor
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Fechar no mobile */}
-          <button
-            onClick={() => setMenuAberto(false)}
-            className={cn(
-              'md:hidden flex h-8 w-8 items-center justify-center rounded-lg',
-              'text-sidebar-muted-foreground',
-              'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-              'transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-            )}
-            aria-label="Fechar menu"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* ── Navegação ──────────────────────────────────────────────────── */}
-        <nav
-          className="flex-1 overflow-y-auto px-3 pb-4 space-y-0.5 custom-scrollbar"
-          aria-label="Navegação principal"
-        >
-          {itensMenu.map((item, index) => {
-            /* Label de seção */
-            if (item.label) {
-              return (
-                <p
-                  key={`label-${index}`}
-                  className="px-3 pt-5 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-sidebar-muted-foreground/70 select-none"
-                >
-                  {item.label}
-                </p>
-              );
-            }
-
-            const Icon  = item.icon;
-            const ativo = location.pathname === item.path;
-
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={() => setMenuAberto(false)}
-                aria-current={ativo ? 'page' : undefined}
-                className={cn(
-                  'group flex items-center gap-3 rounded-lg px-3 py-2.5',
-                  'text-sm font-medium transition-all duration-150',
-                  'focus-visible:ring-2 focus-visible:ring-ring outline-none',
-                  ativo
-                    ? [
-                        'bg-sidebar-accent text-sidebar-accent-foreground',
-                        'border-l-2 border-sidebar-primary pl-[10px]', // indicador ativo
-                      ]
-                    : [
-                        'text-sidebar-muted-foreground',
-                        'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                        'border-l-2 border-transparent pl-[10px]',
-                      ]
-                )}
-              >
-                <Icon
-                  size={17}
-                  strokeWidth={ativo ? 2 : 1.5}
-                  className="shrink-0"
-                />
-                <span className="flex-1 truncate">{item.name}</span>
-                {ativo && (
-                  <ChevronRight size={13} className="shrink-0 opacity-40" />
-                )}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* ── Rodapé ─────────────────────────────────────────────────────── */}
-        <div className="shrink-0 border-t border-sidebar-border px-3 py-4 space-y-2">
-
-          {/* Identidade do usuário */}
-          {nomeUsuario && (
-            <div className="flex items-center gap-3 rounded-lg bg-sidebar-accent px-3 py-2.5">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-brand">
-                <span className="text-xs font-bold leading-none">
-                  {inicialNome(nomeUsuario)}
-                </span>
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] text-sidebar-muted-foreground font-medium leading-none mb-0.5">
-                  {isProfessor ? 'Professor' : 'Administrador'}
-                </p>
-                <p className="text-sm font-semibold text-sidebar-foreground truncate leading-tight">
-                  {nomeUsuario}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* ThemeToggle */}
-          <div className="flex justify-center py-1">
-            <ThemeToggle />
-          </div>
-
-          {/* Instalar PWA */}
-          {canInstall && (
-            <button
-              onClick={install}
-              className={cn(
-                'flex w-full items-center gap-3 rounded-lg px-3 py-2.5',
-                'text-sm font-medium text-sidebar-primary',
-                'hover:bg-sidebar-accent transition-colors',
-                'focus-visible:ring-2 focus-visible:ring-ring outline-none',
-              )}
-            >
-              <Download size={16} className="shrink-0" />
-              <span>Instalar aplicativo</span>
-            </button>
-          )}
-
-          {/* Logout */}
-          <button
-            onClick={handleLogout}
-            className={cn(
-              'flex w-full items-center gap-3 rounded-lg px-3 py-2.5',
-              'text-sm font-medium text-sidebar-muted-foreground',
-              'hover:bg-destructive-soft hover:text-destructive transition-colors',
-              'focus-visible:ring-2 focus-visible:ring-ring outline-none',
-            )}
-          >
-            <LogOut size={16} className="shrink-0" />
-            <span>Sair do sistema</span>
-          </button>
-
-          {/* Versão */}
-          <p className="text-center text-[10px] text-sidebar-muted-foreground/40 font-medium pb-1">
-            v3.0 · Midnight Indigo
-          </p>
-        </div>
-      </aside>
-    </>
-  );
-}
-
-export default Sidebar;
 </file>
 
 <file path="webapp/src/hooks/useAlunos.js">
@@ -24080,11 +24158,17 @@ import { supabase } from '../lib/supabase';
 // agendamentoService
 //
 // Sprint 03 (split presenca/leads): toda a lógica de criar/listar/cancelar
-// presença e agendamento foi movida para presencaService (tabela `presenca`)
-// e leadsService (tabela `leads`). Este arquivo agora cuida apenas da
-// checagem de disponibilidade de vaga, que depende da RPC
-// verificar_disponibilidade_v2 — pendente de revisão no banco para
-// considerar a nova tabela `presenca` em vez da antiga `presencas`.
+// presença e agendamento foi movida para presencaService (tabela
+// `presencas`, plural — nome definitivo, não foi renomeada) e leadsService
+// (tabela `leads`). Este arquivo cuida apenas da checagem de disponibilidade
+// de vaga (indicador visual de vagas ao preencher o formulário).
+//
+// A validação real de capacidade/plano no INSERT acontece na RPC
+// `agendar_avulso` (presencaService.agendarAvulso), que roda checagem +
+// insert na mesma transação e emite P0100/P0101/23505 via error.code.
+// A chamada aqui (verificar_disponibilidade_v2) é só leitura/preview —
+// nunca bloqueia o agendamento, por isso os erros dela caem no fallback
+// isErroTecnico abaixo em vez de abrir o modal de "agendar mesmo assim".
 // ─────────────────────────────────────────────────────────────────────────
 
 export const agendamentoService = {
@@ -24396,6 +24480,123 @@ export const despesasService = {
     if (error) throw error;
     return true;
   }
+};
+</file>
+
+<file path="webapp/src/services/espacosService.js">
+// services/espacosService.js
+import { supabase } from '../lib/supabase';
+
+const ESPACOS_COLUMNS = 'id, estudio_id, nome, slug, ordem, capacidade, ativo, cor, icone';
+
+function slugify(nome) {
+  return nome
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+export const espacosService = {
+  async listar(estudioId, { incluirInativos = false } = {}) {
+    if (!estudioId) {
+      throw new Error('espacosService.listar: estudioId é obrigatório');
+    }
+
+    let query = supabase
+      .from('espacos')
+      .select(ESPACOS_COLUMNS)
+      .eq('estudio_id', estudioId)
+      .order('ordem', { ascending: true });
+
+    if (!incluirInativos) {
+      query = query.eq('ativo', true);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async criar(estudioId, { nome, capacidade = null, cor = 'primary', icone = 'MapPin' }) {
+    if (!estudioId) {
+      throw new Error('espacosService.criar: estudioId é obrigatório');
+    }
+    const nomeLimpo = (nome ?? '').trim();
+    if (!nomeLimpo) {
+      throw new Error('espacosService.criar: nome é obrigatório');
+    }
+
+    // FIX: próxima ordem = maior ordem existente + 1, para o espaço novo
+    // aparecer no fim da lista em vez de embaralhar a ordem dos outros.
+    const { data: existentes, error: errOrdem } = await supabase
+      .from('espacos')
+      .select('ordem')
+      .eq('estudio_id', estudioId)
+      .order('ordem', { ascending: false })
+      .limit(1);
+    if (errOrdem) throw errOrdem;
+    const proximaOrdem = (existentes?.[0]?.ordem ?? 0) + 1;
+
+    const payload = {
+      estudio_id: estudioId,
+      nome: nomeLimpo,
+      slug: slugify(nomeLimpo),
+      capacidade: capacidade === '' || capacidade === null ? null : Number(capacidade),
+      cor,
+      icone,
+      ordem: proximaOrdem,
+      ativo: true,
+    };
+
+    const { data, error } = await supabase
+      .from('espacos')
+      .insert(payload)
+      .select(ESPACOS_COLUMNS)
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async atualizar(id, estudioId, dados) {
+    if (!id) throw new Error('espacosService.atualizar: id é obrigatório');
+    if (!estudioId) throw new Error('espacosService.atualizar: estudioId é obrigatório');
+
+    const payload = {};
+    if (dados.nome !== undefined) {
+      const nomeLimpo = dados.nome.trim();
+      payload.nome = nomeLimpo;
+      payload.slug = slugify(nomeLimpo);
+    }
+    if (dados.capacidade !== undefined) {
+      payload.capacidade = dados.capacidade === '' || dados.capacidade === null ? null : Number(dados.capacidade);
+    }
+    if (dados.cor !== undefined) payload.cor = dados.cor;
+    if (dados.icone !== undefined) payload.icone = dados.icone;
+    if (dados.ativo !== undefined) payload.ativo = dados.ativo;
+
+    const { data, error } = await supabase
+      .from('espacos')
+      .update(payload)
+      .eq('id', id)
+      .eq('estudio_id', estudioId) // FIX: defesa em profundidade além do RLS — nunca atualiza fora do tenant
+      .select(ESPACOS_COLUMNS)
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  // Soft delete: em vez de apagar a linha (o que quebraria aulas/turmas
+  // já vinculadas a esse espaço), marcamos como inativo. Espaços inativos
+  // somem das opções de "Nova Aula" mas o histórico continua íntegro.
+  async desativar(id, estudioId) {
+    return this.atualizar(id, estudioId, { ativo: false });
+  },
+
+  async reativar(id, estudioId) {
+    return this.atualizar(id, estudioId, { ativo: true });
+  },
 };
 </file>
 
@@ -24800,6 +25001,287 @@ export const leadsService = {
     return true;
   },
 };
+</file>
+
+<file path="webapp/src/components/Sidebar.jsx">
+// src/components/Sidebar.jsx
+// ─── Midnight Indigo · Sidebar ────────────────────────────────────────────────
+//
+// Design: usa tokens sidebar-* (isolados do resto da UI).
+// Borda esquerda no item ativo (indicador de posição visual).
+// Avatar com inicial do nome para todos os perfis no rodapé.
+// Overlay mobile com backdrop-blur.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import React from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import {
+  LayoutDashboard, Users, Calendar, Download, LogOut,
+  Package, TrendingDown, UserCheck, Calculator, X,
+  Clock, Bell, Percent, DollarSign, Gift, CalendarCog,
+  CreditCard, Settings, ChevronRight, MapPin,
+} from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import ThemeToggle from './ui/ThemeToggle';
+import { usePWA } from '../hooks/usePWA';
+import { cn } from '../lib/cn';
+
+/* ── Helpers ────────────────────────────────────────────────────────────────── */
+function resolverPerfil(perfil) {
+  if (!perfil) return null;
+  if (typeof perfil === 'string') return perfil.toLowerCase().trim();
+  return String(perfil.role ?? perfil.tipo ?? 'admin').toLowerCase().trim();
+}
+
+function inicialNome(nome) {
+  if (!nome) return '?';
+  return nome.trim().charAt(0).toUpperCase();
+}
+
+/* ── Menus ──────────────────────────────────────────────────────────────────── */
+const MENU_ADMIN = [
+  { label: 'Visão Geral' },
+  { name: 'Painel',            path: '/dashboard',                  icon: LayoutDashboard },
+  { name: 'Notificações',      path: '/notificacoes',               icon: Bell            },
+  { name: 'Leads',             path: '/leads',                      icon: Clock           },
+  { name: 'Aniversariantes',   path: '/aniversariantes',            icon: Gift            },
+
+  { label: 'Gestão e Operação' },
+  { name: 'Alunos',            path: '/alunos',                     icon: Users           },
+  { name: 'Planos',            path: '/planos',                     icon: CreditCard      },
+  { name: 'Professores',       path: '/professores',                icon: UserCheck       },
+  { name: 'Modalidades',       path: '/modalidades',                icon: Package         },
+  { name: 'Agenda',            path: '/agenda',                     icon: Calendar        },
+  { name: 'Presença',          path: '/presenca',                   icon: Clock           },
+  { name: 'Feriados',          path: '/configuracoes/feriados',     icon: CalendarCog     },
+
+  { label: 'Financeiro' },
+  { name: 'Mensalidades',      path: '/financeiro',                 icon: DollarSign      },
+  { name: 'Despesas',          path: '/despesas',                   icon: TrendingDown    },
+  { name: 'Resultado',         path: '/resultado-financeiro',       icon: Calculator      },
+  { name: 'Comissões',         path: '/comissoes',                  icon: Percent         },
+  { name: 'Regras de Repasse', path: '/configuracoes/repasse',      icon: Calculator      },
+  { name: 'Configurações',     path: '/configuracoes/estudio',      icon: Settings        },
+  { name: 'Espaços',           path: '/configuracoes/espacos',      icon: MapPin },
+];
+
+const MENU_PROFESSOR = [
+  { label: 'Minha Área' },
+  { name: 'Minha Agenda', path: '/agenda',           icon: Calendar },
+  { name: 'Meus Alunos',  path: '/professor/alunos', icon: Users    },
+];
+
+const PERFIS_COM_MENU_ADMIN = ['admin', 'super_admin'];
+
+/* ── Componente ─────────────────────────────────────────────────────────────── */
+function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const perfilResolvido = resolverPerfil(perfil);
+  const isProfessor = perfilResolvido === 'professor';
+  const isAdmin = PERFIS_COM_MENU_ADMIN.includes(perfilResolvido);
+
+  const { canInstall, install } = usePWA();
+
+  const itensMenu = isProfessor ? MENU_PROFESSOR : isAdmin ? MENU_ADMIN : [];
+
+  async function handleLogout() {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Erro ao sair (signOut remoto falhou):', err);
+    } finally {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith('supabase.'))
+        .forEach((k) => localStorage.removeItem(k));
+      navigate('/login', { replace: true });
+    }
+  }
+
+  return (
+    <>
+      {/* ── Overlay Mobile ──────────────────────────────────────────────── */}
+      {menuAberto && (
+        <div
+          className="fixed inset-0 z-40 bg-background/60 backdrop-blur-sm md:hidden"
+          onClick={() => setMenuAberto(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 md:static',
+          'flex h-full w-64 flex-col',
+          'bg-sidebar border-r border-sidebar-border',
+          'transform transition-transform duration-300 ease-out',
+          menuAberto ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        )}
+      >
+        {/* ── Header / Logo ──────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-5 py-6 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Avatar do estúdio */}
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary shadow-brand">
+              <span className="text-primary-foreground font-bold text-base leading-none">
+                {nomeEstudio?.charAt(0)?.toUpperCase() ?? 'E'}
+              </span>
+            </div>
+
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-sidebar-foreground leading-tight">
+                {nomeEstudio ?? 'Estúdio'}
+              </p>
+              {isProfessor && (
+                <p className="text-[10px] font-medium text-sidebar-muted-foreground uppercase tracking-wider mt-0.5">
+                  Área do Professor
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Fechar no mobile */}
+          <button
+            onClick={() => setMenuAberto(false)}
+            className={cn(
+              'md:hidden flex h-8 w-8 items-center justify-center rounded-lg',
+              'text-sidebar-muted-foreground',
+              'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+              'transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+            )}
+            aria-label="Fechar menu"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* ── Navegação ──────────────────────────────────────────────────── */}
+        <nav
+          className="flex-1 overflow-y-auto px-3 pb-4 space-y-0.5 custom-scrollbar"
+          aria-label="Navegação principal"
+        >
+          {itensMenu.map((item, index) => {
+            /* Label de seção */
+            if (item.label) {
+              return (
+                <p
+                  key={`label-${index}`}
+                  className="px-3 pt-5 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-sidebar-muted-foreground/70 select-none"
+                >
+                  {item.label}
+                </p>
+              );
+            }
+
+            const Icon  = item.icon;
+            const ativo = location.pathname === item.path;
+
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                onClick={() => setMenuAberto(false)}
+                aria-current={ativo ? 'page' : undefined}
+                className={cn(
+                  'group flex items-center gap-3 rounded-lg px-3 py-2.5',
+                  'text-sm font-medium transition-all duration-150',
+                  'focus-visible:ring-2 focus-visible:ring-ring outline-none',
+                  ativo
+                    ? [
+                        'bg-sidebar-accent text-sidebar-accent-foreground',
+                        'border-l-2 border-sidebar-primary pl-[10px]', // indicador ativo
+                      ]
+                    : [
+                        'text-sidebar-muted-foreground',
+                        'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                        'border-l-2 border-transparent pl-[10px]',
+                      ]
+                )}
+              >
+                <Icon
+                  size={17}
+                  strokeWidth={ativo ? 2 : 1.5}
+                  className="shrink-0"
+                />
+                <span className="flex-1 truncate">{item.name}</span>
+                {ativo && (
+                  <ChevronRight size={13} className="shrink-0 opacity-40" />
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* ── Rodapé ─────────────────────────────────────────────────────── */}
+        <div className="shrink-0 border-t border-sidebar-border px-3 py-4 space-y-2">
+
+          {/* Identidade do usuário */}
+          {nomeUsuario && (
+            <div className="flex items-center gap-3 rounded-lg bg-sidebar-accent px-3 py-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-brand">
+                <span className="text-xs font-bold leading-none">
+                  {inicialNome(nomeUsuario)}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] text-sidebar-muted-foreground font-medium leading-none mb-0.5">
+                  {isProfessor ? 'Professor' : 'Administrador'}
+                </p>
+                <p className="text-sm font-semibold text-sidebar-foreground truncate leading-tight">
+                  {nomeUsuario}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ThemeToggle */}
+          <div className="flex justify-center py-1">
+            <ThemeToggle />
+          </div>
+
+          {/* Instalar PWA */}
+          {canInstall && (
+            <button
+              onClick={install}
+              className={cn(
+                'flex w-full items-center gap-3 rounded-lg px-3 py-2.5',
+                'text-sm font-medium text-sidebar-primary',
+                'hover:bg-sidebar-accent transition-colors',
+                'focus-visible:ring-2 focus-visible:ring-ring outline-none',
+              )}
+            >
+              <Download size={16} className="shrink-0" />
+              <span>Instalar aplicativo</span>
+            </button>
+          )}
+
+          {/* Logout */}
+          <button
+            onClick={handleLogout}
+            className={cn(
+              'flex w-full items-center gap-3 rounded-lg px-3 py-2.5',
+              'text-sm font-medium text-sidebar-muted-foreground',
+              'hover:bg-destructive-soft hover:text-destructive transition-colors',
+              'focus-visible:ring-2 focus-visible:ring-ring outline-none',
+            )}
+          >
+            <LogOut size={16} className="shrink-0" />
+            <span>Sair do sistema</span>
+          </button>
+
+          {/* Versão */}
+          <p className="text-center text-[10px] text-sidebar-muted-foreground/40 font-medium pb-1">
+            v3.0 · Midnight Indigo
+          </p>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+export default Sidebar;
 </file>
 
 <file path="webapp/src/lib/constants.js">
@@ -27198,7 +27680,7 @@ export const comissoesService = {
   async listarProfessores(estudioId) {
     const { data, error } = await supabase
       .from('professores')
-      .select('*')
+      .select('id, nome')
       .eq('estudio_id', estudioId)
       .eq('ativo', true)
       .order('nome');
@@ -27360,7 +27842,7 @@ export const gradeService = {
   async listarProfessores(estudioId) {
     const { data, error } = await supabase
       .from('professores')
-      .select('*')
+      .select('id, nome')
       .eq('estudio_id', estudioId)
       .eq('ativo', true)
       .order('nome');
@@ -27567,301 +28049,6 @@ async listarGrade(perfil, professorId, estudioId, janela) {
     return data;
   },
 };
-</file>
-
-<file path="webapp/src/App.jsx">
-// webapp/src/App.jsx
-import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import { RefreshCw, Menu } from 'lucide-react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-
-// FIX (crítico): AuthProvider era usado no JSX mas nunca era importado
-// (ReferenceError: AuthProvider is not defined — a aplicação não chegava
-// a renderizar nada). Agora importado junto com useAuth.
-import { useAuth, AuthProvider } from './hooks/useAuth';
-import { useSuperAdmin } from './hooks/useSuperAdmin';
-import { useEstudio } from './hooks/useEstudio';
-import { rotaPorPerfil } from './lib/navigation';
-import { ThemeProvider } from './providers/ThemeProvider';
-import { ToastProvider } from './components/shared/Toast';
-import ErrorBoundary from './components/shared/ErrorBoundary';
-import Sidebar from './components/Sidebar';
-import { PWABanners } from './components/PWABanners';
-import PaginaNaoEncontrada from './components/PaginaNaoEncontrada';
-
-// Impersonation
-import { ImpersonationProvider } from './context/ImpersonationContext';
-import BannerImpersonation from './pages/SuperAdmin/components/BannerImpersonation';
-
-// Pages
-import Login from './pages/Login';
-import Cadastro from './pages/Cadastro';
-import CadastroEstudio from './pages/CadastroEstudio';
-import RedefinirSenha from './pages/RedefinirSenha';
-import Dashboard from './pages/Dashboard';
-import Alunos from './pages/Alunos';
-import NovoAluno from './pages/NovoAluno';
-import PerfilAluno from './pages/PerfilAluno';
-import Leads from './pages/Leads';
-import Professores from './pages/Professores';
-import Agenda from './pages/Agenda/Agenda';
-import Financeiro from './pages/Financeiro';
-import Despesas from './pages/Despesas';
-import Planos from './pages/Planos';
-import Modalidades from './pages/Modalidades';
-import Presenca from './pages/Presenca';
-import Comissoes from './pages/Comissoes';
-import Aniversariantes from './pages/Aniversariantes';
-import Landing from './pages/Landing';
-import AreaAluno from './pages/AreaAluno';
-import ConfiguracoesFeriados from './pages/ConfiguracoesFeriados';
-import Notificacoes from './pages/Notificacoes';
-import ConfiguracoesRepasse from './pages/ConfiguracoesRepasse';
-import ProfessorAlunos    from './pages/Professor/ProfessorAlunos';
-import ProfessorComissoes from './pages/Professor/ProfessorComissoes';
-import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
-import ConfiguracoesEstudio from './pages/ConfiguracoesEstudio';
-
-// Super Admin
-import SuperAdminLayout      from './pages/SuperAdmin';
-import SuperAdminDashboard   from './pages/SuperAdmin/pages/SuperAdminDashboard';
-import SuperAdminEstudios    from './pages/SuperAdmin/pages/SuperAdminEstudios';
-import SuperAdminNovoEstudio from './pages/SuperAdmin/pages/SuperAdminNovoEstudio';
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { retry: 1, refetchOnWindowFocus: false },
-  },
-});
-
-function Spinner() {
-  return (
-    <div className="h-screen w-screen flex items-center justify-center bg-background">
-      <RefreshCw className="animate-spin text-primary" size={48} />
-    </div>
-  );
-}
-
-// Destino pós-autenticação, considerando o caso "logado mas ainda sem
-// estudio_membros" (usuário confirmou e-mail mas não terminou o onboarding).
-// Sem esse caso à parte, perfil === null cai no fallback de rotaPorPerfil
-// ('/login'), e como a rota /login redireciona sessão ativa de volta pra
-// rotaPorPerfil(perfil), o resultado é um loop de redirect em /login.
-function destinoPosAuth(sessao, perfil) {
-  if (!sessao) return '/login';
-  if (perfil === null) return '/cadastro/estudio';
-  return rotaPorPerfil(perfil);
-}
-
-// Layout com sidebar (admin + professor)
-// Quando em modo impersonation, o super_admin acessa estas rotas com o
-// override ativo — o BannerImpersonation no topo avisa sobre isso.
-const LayoutComSidebar = ({ perfil, nomeUsuario, estudioId }) => {
-  const { data: estudio } = useEstudio(estudioId);
-  const nomeEstudio = estudio?.nome ?? 'Estudio';
-  const [menuAberto, setMenuAberto] = useState(false);
-
-  return (
-    <div className="flex h-screen bg-background transition-colors duration-300 overflow-hidden w-full">
-      {/* Banner de impersonation fica no topo de tudo (fixed, z-[200]) */}
-      <BannerImpersonation />
-
-      <Sidebar
-        perfil={perfil}
-        nomeUsuario={nomeUsuario}
-        nomeEstudio={nomeEstudio}
-        estudioId={estudioId}
-        menuAberto={menuAberto}
-        setMenuAberto={setMenuAberto}
-      />
-
-      <div className="flex-1 flex flex-col h-screen overflow-hidden w-full max-w-full">
-        <div className="md:hidden flex items-center justify-between bg-card border-b border-border p-4 shrink-0 z-10 shadow-sm transition-colors duration-300">
-          <div>
-            <h2 className="text-xl font-black text-primary tracking-tight leading-none">{nomeEstudio}</h2>
-            {perfil === 'professor' && (
-              <p className="text-[11px] font-bold text-muted-foreground mt-0.5">Area do Professor</p>
-            )}
-          </div>
-          <button
-            onClick={() => setMenuAberto(true)}
-            className="p-2 text-muted-foreground bg-muted rounded-xl hover:bg-subtle transition-colors"
-          >
-            <Menu size={24} />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto w-full custom-scrollbar">
-          <Outlet context={{ perfil }} />
-        </div>
-      </div>
-
-      <PWABanners />
-    </div>
-  );
-};
-
-// Guard generico (admin / professor / aluno)
-// Sessão ativa sem perfil (ainda sem estudio_membros) manda pro onboarding,
-// não pra tela de login — o usuário já está autenticado, só falta o
-// segundo passo do cadastro.
-const RotaPrivada = ({ sessao, perfil, loading, allowedRoles }) => {
-  if (loading) return <Spinner />;
-  if (!sessao) return <Navigate to="/login" replace />;
-  if (perfil === null) return <Navigate to="/cadastro/estudio" replace />;
-  if (allowedRoles && !allowedRoles.includes(perfil)) {
-    return <Navigate to={rotaPorPerfil(perfil)} replace />;
-  }
-  return <Outlet />;
-};
-
-// Guard exclusivo de super_admin
-// Autocontido: chama useSuperAdmin() internamente, sem receber perfil via props.
-function RotaSuperAdmin() {
-  const { isSuperAdmin, loading, autenticado } = useSuperAdmin();
-  if (loading)       return <Spinner />;
-  if (!autenticado)  return <Navigate to="/login" replace />;
-  if (!isSuperAdmin) return <Navigate to={rotaPorPerfil('admin')} replace />;
-  return <Outlet />;
-}
-
-// Guard do passo 2 do cadastro self-service (/cadastro/estudio).
-// Exige sessão ativa; se o usuário já tiver estudio_membros, não deixa
-// re-entrar no wizard — manda direto pra rota do perfil dele.
-const RotaCadastroEstudio = ({ sessao, perfil, loading }) => {
-  if (loading) return <Spinner />;
-  if (!sessao) return <Navigate to="/login" replace />;
-  if (perfil !== null) return <Navigate to={rotaPorPerfil(perfil)} replace />;
-  return <Outlet />;
-};
-
-// FIX (crítico): toda a lógica que dependia de useAuth() foi extraída para
-// este componente interno, que é renderizado DENTRO de <AuthProvider> (via
-// AppShell abaixo). Antes, `App()` chamava useAuth() na própria raiz, antes
-// do AuthProvider existir na árvore — o que faz useAuth() lançar
-// "useAuth deve ser usado dentro de <AuthProvider>" e derrubar a aplicação
-// inteira no primeiro render.
-function AppRoutes() {
-  const { sessao, perfil, loading, nomeUsuario, estudioId } = useAuth();
-
-  if (loading) return <Spinner />;
-
-  return (
-    <BrowserRouter>
-      <ToastProvider />
-      <Routes>
-
-        {/* Publicas */}
-        <Route path="/" element={
-          !sessao ? <Landing /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
-        } />
-        <Route path="/login" element={
-          !sessao ? <Login /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
-        } />
-        <Route path="/cadastro" element={
-          !sessao ? <Cadastro /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
-        } />
-        <Route path="/redefinir-senha" element={<RedefinirSenha />} />
-
-        {/* Cadastro self-service — passo 2 (dados do estúdio) */}
-        <Route element={<RotaCadastroEstudio sessao={sessao} perfil={perfil} loading={loading} />}>
-          <Route path="/cadastro/estudio" element={<CadastroEstudio />} />
-        </Route>
-
-        {/* Super Admin — guard proprio, layout proprio, sem Sidebar de estudio */}
-        <Route element={<RotaSuperAdmin />}>
-          <Route path="/super" element={<SuperAdminLayout />}>
-            <Route index                element={<SuperAdminDashboard />} />
-            <Route path="estudios"      element={<SuperAdminEstudios />} />
-            <Route path="estudios/novo" element={<SuperAdminNovoEstudio />} />
-          </Route>
-        </Route>
-
-        {/* Aluno */}
-        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['aluno']} />}>
-          <Route path="/area-aluno" element={<AreaAluno />} />
-        </Route>
-
-        {/*
-          Admin + Professor
-          Nota: quando super_admin usa impersonation, perfil ainda e 'super_admin'.
-          O acesso ao dashboard e feito via navigate('/dashboard') no handleAcessar,
-          mas o RLS do servidor ja enxerga o estudio_id correto pelo override.
-          O guard allowedRoles nao bloqueia porque RotaPrivada recebe perfil='super_admin'
-          que nao esta na lista — para resolver isso, o super_admin em modo impersonation
-          acessa estas rotas como 'admin' efetivo. Duas opcoes:
-            A) Adicionar 'super_admin' nos allowedRoles de admin (abaixo, mais simples)
-            B) Criar um layout de impersonation separado (mais isolado)
-          Usamos a opcao A, que e a padrao para ferramentas de suporte.
-        */}
-        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'professor', 'super_admin']} />}>
-          <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
-            <Route path="/agenda"              element={<Agenda />} />
-            <Route path="/professor/alunos"    element={<ProfessorAlunos />} />
-            <Route path="/professor/comissoes" element={<ProfessorComissoes />} />
-          </Route>
-        </Route>
-
-        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'super_admin']} />}>
-          <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
-            <Route path="/dashboard"             element={<Dashboard />} />
-            <Route path="/leads"                 element={<Leads />} />
-            <Route path="/alunos"                element={<Alunos />} />
-            <Route path="/alunos/novo"           element={<NovoAluno />} />
-            <Route path="/alunos/:id"            element={<PerfilAluno />} />
-            <Route path="/professores"           element={<Professores />} />
-            <Route path="/financeiro"            element={<Financeiro />} />
-            <Route path="/despesas"              element={<Despesas />} />
-            <Route path="/resultado-financeiro"  element={<ResultadoFinanceiro />} />
-            <Route path="/planos"                element={<Planos />} />
-            <Route path="/modalidades"           element={<Modalidades />} />
-            <Route path="/presenca"              element={<Presenca />} />
-            <Route path="/comissoes"             element={<Comissoes />} />
-            <Route path="/aniversariantes"       element={<Aniversariantes />} />
-            <Route path="/configuracoes/feriados"element={<ConfiguracoesFeriados />} />
-            <Route path="/notificacoes"          element={<Notificacoes />} />
-            <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
-            <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
-          </Route>
-        </Route>
-
-        {/* 404 */}
-        <Route path="*" element={
-          <PaginaNaoEncontrada destino={destinoPosAuth(sessao, perfil)} />
-        } />
-
-      </Routes>
-    </BrowserRouter>
-  );
-}
-
-export default function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <ErrorBoundary>
-        <ThemeProvider>
-          {/*
-            ImpersonationProvider envolve o BrowserRouter (dentro de AppRoutes)
-            para que useImpersonation() funcione em qualquer componente da
-            arvore, incluindo o BannerImpersonation montado dentro do
-            LayoutComSidebar.
-
-            AuthProvider agora envolve AppRoutes, que é onde useAuth() é
-            efetivamente chamado — corrigindo o crash anterior.
-          */}
-          <AuthProvider>
-            <ImpersonationProvider>
-              <AppRoutes />
-            </ImpersonationProvider>
-          </AuthProvider>
-        </ThemeProvider>
-      </ErrorBoundary>
-      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
-    </QueryClientProvider>
-  );
-}
 </file>
 
 <file path="webapp/index.html">
@@ -29299,6 +29486,303 @@ function ModalRecuperarSenha({ onClose }) {
         </div>
       </div>
     </div>
+  );
+}
+</file>
+
+<file path="webapp/src/App.jsx">
+// webapp/src/App.jsx
+import React, { useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { RefreshCw, Menu } from 'lucide-react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+
+// FIX (crítico): AuthProvider era usado no JSX mas nunca era importado
+// (ReferenceError: AuthProvider is not defined — a aplicação não chegava
+// a renderizar nada). Agora importado junto com useAuth.
+import { useAuth, AuthProvider } from './hooks/useAuth';
+import { useSuperAdmin } from './hooks/useSuperAdmin';
+import { useEstudio } from './hooks/useEstudio';
+import { rotaPorPerfil } from './lib/navigation';
+import { ThemeProvider } from './providers/ThemeProvider';
+import { ToastProvider } from './components/shared/Toast';
+import ErrorBoundary from './components/shared/ErrorBoundary';
+import Sidebar from './components/Sidebar';
+import { PWABanners } from './components/PWABanners';
+import PaginaNaoEncontrada from './components/PaginaNaoEncontrada';
+
+// Impersonation
+import { ImpersonationProvider } from './context/ImpersonationContext';
+import BannerImpersonation from './pages/SuperAdmin/components/BannerImpersonation';
+
+// Pages
+import Login from './pages/Login';
+import Cadastro from './pages/Cadastro';
+import CadastroEstudio from './pages/CadastroEstudio';
+import RedefinirSenha from './pages/RedefinirSenha';
+import Dashboard from './pages/Dashboard';
+import Alunos from './pages/Alunos';
+import NovoAluno from './pages/NovoAluno';
+import PerfilAluno from './pages/PerfilAluno';
+import Leads from './pages/Leads';
+import Professores from './pages/Professores';
+import Agenda from './pages/Agenda/Agenda';
+import Financeiro from './pages/Financeiro';
+import Despesas from './pages/Despesas';
+import Planos from './pages/Planos';
+import Modalidades from './pages/Modalidades';
+import Presenca from './pages/Presenca';
+import Comissoes from './pages/Comissoes';
+import Aniversariantes from './pages/Aniversariantes';
+import Landing from './pages/Landing';
+import AreaAluno from './pages/AreaAluno';
+import ConfiguracoesFeriados from './pages/ConfiguracoesFeriados';
+import Notificacoes from './pages/Notificacoes';
+import ConfiguracoesRepasse from './pages/ConfiguracoesRepasse';
+import ProfessorAlunos    from './pages/Professor/ProfessorAlunos';
+import ProfessorComissoes from './pages/Professor/ProfessorComissoes';
+import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
+import ConfiguracoesEstudio from './pages/ConfiguracoesEstudio';
+import ConfiguracoesEspacos from './pages/ConfiguracoesEspacos';
+
+// Super Admin
+import SuperAdminLayout      from './pages/SuperAdmin';
+import SuperAdminDashboard   from './pages/SuperAdmin/pages/SuperAdminDashboard';
+import SuperAdminEstudios    from './pages/SuperAdmin/pages/SuperAdminEstudios';
+import SuperAdminNovoEstudio from './pages/SuperAdmin/pages/SuperAdminNovoEstudio';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, refetchOnWindowFocus: false },
+  },
+});
+
+function Spinner() {
+  return (
+    <div className="h-screen w-screen flex items-center justify-center bg-background">
+      <RefreshCw className="animate-spin text-primary" size={48} />
+    </div>
+  );
+}
+
+// Destino pós-autenticação, considerando o caso "logado mas ainda sem
+// estudio_membros" (usuário confirmou e-mail mas não terminou o onboarding).
+// Sem esse caso à parte, perfil === null cai no fallback de rotaPorPerfil
+// ('/login'), e como a rota /login redireciona sessão ativa de volta pra
+// rotaPorPerfil(perfil), o resultado é um loop de redirect em /login.
+function destinoPosAuth(sessao, perfil) {
+  if (!sessao) return '/login';
+  if (perfil === null) return '/cadastro/estudio';
+  return rotaPorPerfil(perfil);
+}
+
+// Layout com sidebar (admin + professor)
+// Quando em modo impersonation, o super_admin acessa estas rotas com o
+// override ativo — o BannerImpersonation no topo avisa sobre isso.
+const LayoutComSidebar = ({ perfil, nomeUsuario, estudioId }) => {
+  const { data: estudio } = useEstudio(estudioId);
+  const nomeEstudio = estudio?.nome ?? 'Estudio';
+  const [menuAberto, setMenuAberto] = useState(false);
+
+  return (
+    <div className="flex h-screen bg-background transition-colors duration-300 overflow-hidden w-full">
+      {/* Banner de impersonation fica no topo de tudo (fixed, z-[200]) */}
+      <BannerImpersonation />
+
+      <Sidebar
+        perfil={perfil}
+        nomeUsuario={nomeUsuario}
+        nomeEstudio={nomeEstudio}
+        estudioId={estudioId}
+        menuAberto={menuAberto}
+        setMenuAberto={setMenuAberto}
+      />
+
+      <div className="flex-1 flex flex-col h-screen overflow-hidden w-full max-w-full">
+        <div className="md:hidden flex items-center justify-between bg-card border-b border-border p-4 shrink-0 z-10 shadow-sm transition-colors duration-300">
+          <div>
+            <h2 className="text-xl font-black text-primary tracking-tight leading-none">{nomeEstudio}</h2>
+            {perfil === 'professor' && (
+              <p className="text-[11px] font-bold text-muted-foreground mt-0.5">Area do Professor</p>
+            )}
+          </div>
+          <button
+            onClick={() => setMenuAberto(true)}
+            className="p-2 text-muted-foreground bg-muted rounded-xl hover:bg-subtle transition-colors"
+          >
+            <Menu size={24} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto w-full custom-scrollbar">
+          <Outlet context={{ perfil }} />
+        </div>
+      </div>
+
+      <PWABanners />
+    </div>
+  );
+};
+
+// Guard generico (admin / professor / aluno)
+// Sessão ativa sem perfil (ainda sem estudio_membros) manda pro onboarding,
+// não pra tela de login — o usuário já está autenticado, só falta o
+// segundo passo do cadastro.
+const RotaPrivada = ({ sessao, perfil, loading, allowedRoles }) => {
+  if (loading) return <Spinner />;
+  if (!sessao) return <Navigate to="/login" replace />;
+  if (perfil === null) return <Navigate to="/cadastro/estudio" replace />;
+  if (allowedRoles && !allowedRoles.includes(perfil)) {
+    return <Navigate to={rotaPorPerfil(perfil)} replace />;
+  }
+  return <Outlet />;
+};
+
+// Guard exclusivo de super_admin
+// Autocontido: chama useSuperAdmin() internamente, sem receber perfil via props.
+function RotaSuperAdmin() {
+  const { isSuperAdmin, loading, autenticado } = useSuperAdmin();
+  if (loading)       return <Spinner />;
+  if (!autenticado)  return <Navigate to="/login" replace />;
+  if (!isSuperAdmin) return <Navigate to={rotaPorPerfil('admin')} replace />;
+  return <Outlet />;
+}
+
+// Guard do passo 2 do cadastro self-service (/cadastro/estudio).
+// Exige sessão ativa; se o usuário já tiver estudio_membros, não deixa
+// re-entrar no wizard — manda direto pra rota do perfil dele.
+const RotaCadastroEstudio = ({ sessao, perfil, loading }) => {
+  if (loading) return <Spinner />;
+  if (!sessao) return <Navigate to="/login" replace />;
+  if (perfil !== null) return <Navigate to={rotaPorPerfil(perfil)} replace />;
+  return <Outlet />;
+};
+
+// FIX (crítico): toda a lógica que dependia de useAuth() foi extraída para
+// este componente interno, que é renderizado DENTRO de <AuthProvider> (via
+// AppShell abaixo). Antes, `App()` chamava useAuth() na própria raiz, antes
+// do AuthProvider existir na árvore — o que faz useAuth() lançar
+// "useAuth deve ser usado dentro de <AuthProvider>" e derrubar a aplicação
+// inteira no primeiro render.
+function AppRoutes() {
+  const { sessao, perfil, loading, nomeUsuario, estudioId } = useAuth();
+
+  if (loading) return <Spinner />;
+
+  return (
+    <BrowserRouter>
+      <ToastProvider />
+      <Routes>
+
+        {/* Publicas */}
+        <Route path="/" element={
+          !sessao ? <Landing /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+        } />
+        <Route path="/login" element={
+          !sessao ? <Login /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+        } />
+        <Route path="/cadastro" element={
+          !sessao ? <Cadastro /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+        } />
+        <Route path="/redefinir-senha" element={<RedefinirSenha />} />
+
+        {/* Cadastro self-service — passo 2 (dados do estúdio) */}
+        <Route element={<RotaCadastroEstudio sessao={sessao} perfil={perfil} loading={loading} />}>
+          <Route path="/cadastro/estudio" element={<CadastroEstudio />} />
+        </Route>
+
+        {/* Super Admin — guard proprio, layout proprio, sem Sidebar de estudio */}
+        <Route element={<RotaSuperAdmin />}>
+          <Route path="/super" element={<SuperAdminLayout />}>
+            <Route index                element={<SuperAdminDashboard />} />
+            <Route path="estudios"      element={<SuperAdminEstudios />} />
+            <Route path="estudios/novo" element={<SuperAdminNovoEstudio />} />
+          </Route>
+        </Route>
+
+        {/* Aluno */}
+        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['aluno']} />}>
+          <Route path="/area-aluno" element={<AreaAluno />} />
+        </Route>
+
+        {/*
+          Admin + Professor
+          Nota: quando super_admin usa impersonation, perfil ainda e 'super_admin'.
+          O acesso ao dashboard e feito via navigate('/dashboard') no handleAcessar,
+          mas o RLS do servidor ja enxerga o estudio_id correto pelo override.
+          O guard allowedRoles nao bloqueia porque RotaPrivada recebe perfil='super_admin'
+          que nao esta na lista — para resolver isso, o super_admin em modo impersonation
+          acessa estas rotas como 'admin' efetivo. Duas opcoes:
+            A) Adicionar 'super_admin' nos allowedRoles de admin (abaixo, mais simples)
+            B) Criar um layout de impersonation separado (mais isolado)
+          Usamos a opcao A, que e a padrao para ferramentas de suporte.
+        */}
+        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'professor', 'super_admin']} />}>
+          <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
+            <Route path="/agenda"              element={<Agenda />} />
+            <Route path="/professor/alunos"    element={<ProfessorAlunos />} />
+            <Route path="/professor/comissoes" element={<ProfessorComissoes />} />
+          </Route>
+        </Route>
+
+        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'super_admin']} />}>
+          <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
+            <Route path="/dashboard"             element={<Dashboard />} />
+            <Route path="/leads"                 element={<Leads />} />
+            <Route path="/alunos"                element={<Alunos />} />
+            <Route path="/alunos/novo"           element={<NovoAluno />} />
+            <Route path="/alunos/:id"            element={<PerfilAluno />} />
+            <Route path="/professores"           element={<Professores />} />
+            <Route path="/financeiro"            element={<Financeiro />} />
+            <Route path="/despesas"              element={<Despesas />} />
+            <Route path="/resultado-financeiro"  element={<ResultadoFinanceiro />} />
+            <Route path="/planos"                element={<Planos />} />
+            <Route path="/modalidades"           element={<Modalidades />} />
+            <Route path="/presenca"              element={<Presenca />} />
+            <Route path="/comissoes"             element={<Comissoes />} />
+            <Route path="/aniversariantes"       element={<Aniversariantes />} />
+            <Route path="/configuracoes/feriados"element={<ConfiguracoesFeriados />} />
+            <Route path="/notificacoes"          element={<Notificacoes />} />
+            <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
+            <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
+            <Route path="/configuracoes/espacos" element={<ConfiguracoesEspacos />} />
+          </Route>
+        </Route>
+
+        {/* 404 */}
+        <Route path="*" element={
+          <PaginaNaoEncontrada destino={destinoPosAuth(sessao, perfil)} />
+        } />
+
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ErrorBoundary>
+        <ThemeProvider>
+          {/*
+            ImpersonationProvider envolve o BrowserRouter (dentro de AppRoutes)
+            para que useImpersonation() funcione em qualquer componente da
+            arvore, incluindo o BannerImpersonation montado dentro do
+            LayoutComSidebar.
+
+            AuthProvider agora envolve AppRoutes, que é onde useAuth() é
+            efetivamente chamado — corrigindo o crash anterior.
+          */}
+          <AuthProvider>
+            <ImpersonationProvider>
+              <AppRoutes />
+            </ImpersonationProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </ErrorBoundary>
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+    </QueryClientProvider>
   );
 }
 </file>

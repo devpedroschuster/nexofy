@@ -4,11 +4,17 @@ import { supabase } from '../lib/supabase';
 // agendamentoService
 //
 // Sprint 03 (split presenca/leads): toda a lógica de criar/listar/cancelar
-// presença e agendamento foi movida para presencaService (tabela `presenca`)
-// e leadsService (tabela `leads`). Este arquivo agora cuida apenas da
-// checagem de disponibilidade de vaga, que depende da RPC
-// verificar_disponibilidade_v2 — pendente de revisão no banco para
-// considerar a nova tabela `presenca` em vez da antiga `presencas`.
+// presença e agendamento foi movida para presencaService (tabela
+// `presencas`, plural — nome definitivo, não foi renomeada) e leadsService
+// (tabela `leads`). Este arquivo cuida apenas da checagem de disponibilidade
+// de vaga (indicador visual de vagas ao preencher o formulário).
+//
+// A validação real de capacidade/plano no INSERT acontece na RPC
+// `agendar_avulso` (presencaService.agendarAvulso), que roda checagem +
+// insert na mesma transação e emite P0100/P0101/23505 via error.code.
+// A chamada aqui (verificar_disponibilidade_v2) é só leitura/preview —
+// nunca bloqueia o agendamento, por isso os erros dela caem no fallback
+// isErroTecnico abaixo em vez de abrir o modal de "agendar mesmo assim".
 // ─────────────────────────────────────────────────────────────────────────
 
 export const agendamentoService = {
