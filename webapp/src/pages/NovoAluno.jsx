@@ -16,7 +16,7 @@ import { formatarCPF, validarCPF } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
-import { useImpersonation } from '../hooks/useImpersonation';
+import { useImpersonation } from "../context/ImpersonationContext";
 import { useBuscaCep } from '../hooks/useBuscaCep';
 import { useCamposDinamicos } from '../hooks/useCamposDinamicos';
 import { construirSchemaMetadata } from '../lib/camposDinamicosValidation';

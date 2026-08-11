@@ -9,7 +9,7 @@
 // O `.eq('estudio_id', estudioId)` explícito em update/delete abaixo é
 // defesa em profundidade além da RLS — os dois precisam estar corretos.
 
-import { supabase } from '../lib/supabaseClient';
+import { supabase } from "../lib/supabase";
 import {
   buildAlunosColumnRegistry,
   TABLE_COLUMNS_ESTATICO,
