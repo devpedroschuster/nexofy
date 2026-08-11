@@ -20,8 +20,13 @@ export const dreService = {
    * @param {string} estudioId  — vem do useAuth
    */
   async obterDRE(mes, ano, estudioId) {
-    const dataInicio = new Date(ano, mes, 1).toISOString().split('T')[0];
-    const dataFim    = new Date(ano, mes + 1, 0).toISOString().split('T')[0];
+  if (!estudioId) throw new Error('dreService.obterDRE: estudioId é obrigatório'); // FIX
+  if (!Number.isInteger(mes) || mes < 0 || mes > 11) {
+    throw new Error('dreService.obterDRE: mes inválido'); // FIX
+  }
+
+  const dataInicio = new Date(ano, mes, 1).toISOString().split('T')[0];
+  const dataFim    = new Date(ano, mes + 1, 0).toISOString().split('T')[0];
 
     const [
       { data: mensalidades,  error: e1 },
@@ -153,6 +158,7 @@ export const dreService = {
    * @param {string} estudioId  — vem do useAuth
    */
   async obterHistorico(meses = 6, estudioId) {
+    if (!estudioId) throw new Error('dreService.obterHistorico: estudioId é obrigatório');
     const agora = new Date();
     const dataLimite = new Date(agora.getFullYear(), agora.getMonth() - meses + 1, 1)
       .toISOString().split('T')[0];

@@ -210,7 +210,7 @@ export default function ModalNovaAula({
               >
                 <input type="radio" name="espaco" value={espaco.slug} className="sr-only" required
                   checked={selecionado}
-                  o onChange={e => {
+                  onChange={e => {
                     setEspacoAutoSugerido(false);
                     setNovaAula({ ...novaAula, espaco: e.target.value });
                   }} />

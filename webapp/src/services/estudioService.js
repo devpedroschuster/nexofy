@@ -1,28 +1,39 @@
-// webapp/src/services/estudioService.js
 import { supabase } from '../lib/supabase';
+import { SEGMENTOS } from '../lib/terminologia';
 
-/**
- * Atualiza os dados do estúdio.
- * O RLS garante que apenas o admin do estúdio pode atualizar.
- */
+// Item 2 do plano multi-segmento (seção 4 do PLANO_ITEM_2.md): segmento,
+// terminologia e modulos_ativos entram na allowlist de atualizarEstudio.
+// Sem isso, a UI nova de ConfiguracoesEstudio.jsx salvaria e o payload
+// seria silenciosamente descartado no filter abaixo — mesma allowlist
+// server-adjacent que já protege os campos existentes.
+const CAMPOS_PERMITIDOS = [
+  'nome', 'whatsapp', 'instagram_url', 'maps_url',
+  'email_suporte', 'cor_primaria', 'timezone',
+  'segmento', 'terminologia', 'modulos_ativos',
+];
+
+const SEGMENTOS_VALIDOS = SEGMENTOS.map((s) => s.value);
+
 export async function atualizarEstudio(estudioId, dados) {
+  const payload = Object.fromEntries(
+    Object.entries(dados).filter(([k]) => CAMPOS_PERMITIDOS.includes(k))
+  );
+
+  // Defesa em profundidade além do `check` da migration (estudios_segmento_check):
+  // recusa cedo, com erro tratável na UI, em vez de deixar o Postgres
+  // estourar um erro cru de constraint.
+  if ('segmento' in payload && !SEGMENTOS_VALIDOS.includes(payload.segmento)) {
+    throw new Error(`Segmento inválido: "${payload.segmento}".`);
+  }
+
   const { error } = await supabase
     .from('estudios')
-    .update(dados)
+    .update(payload)
     .eq('id', estudioId);
 
   if (error) throw error;
 }
 
-/**
- * Faz upload do logo para o bucket "logos" (público).
- * Path: "{estudio_id}/logo.png"
- * Após o upload, atualiza a coluna logo_url na tabela estudios.
- *
- * @param {string} estudioId - UUID do estúdio
- * @param {File}   file      - Arquivo de imagem selecionado pelo usuário
- * @returns {string} URL pública do logo
- */
 export async function uploadLogo(estudioId, file) {
   const path = `${estudioId}/logo.png`;
 
@@ -33,8 +44,6 @@ export async function uploadLogo(estudioId, file) {
   if (uploadError) throw uploadError;
 
   const { data } = supabase.storage.from('logos').getPublicUrl(path);
-
   await atualizarEstudio(estudioId, { logo_url: data.publicUrl });
-
   return data.publicUrl;
 }

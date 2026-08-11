@@ -14,33 +14,44 @@ import {
   useSalvarConfiguracoesRepasse,
 } from '../hooks/useConfiguracoesRepasse';
 
-// ─── CR1 FIX: soma-avulsa agora valida aula_avulsa igual ao soma-livre ────────
+const DEFAULTS_REPASSE = {
+  valor_1_modalidade: 0,
+  valor_multi_modalidade: 0,
+  plano_livre_pct_casa: 50,
+  plano_livre_pct_prof: 50,
+  aula_experimental_valor: 0,
+  aula_experimental_pct_prof: 0,
+  aula_avulsa_valor: 0,
+  aula_avulsa_pct_casa: 50,
+  aula_avulsa_pct_prof: 50,
+};
+
+const toNumber = (v) => Number(v) || 0;
+
+// FIX: testes de soma agora escrevem em paths próprios (soma-livre / soma-avulsa)
+// e usam tolerância de arredondamento em vez de === 100.
 const schema = yup.object().shape({
   valor_1_modalidade: yup.number().min(0).required('Campo obrigatório'),
   valor_multi_modalidade: yup.number().min(0).required('Campo obrigatório'),
   plano_livre_pct_casa: yup.number().min(0).max(100).required('Campo obrigatório'),
   plano_livre_pct_prof: yup.number().min(0).max(100).required('Campo obrigatório'),
-  aula_experimental_valor: yup
-    .number()
-    .min(0)
-    .required('Campo obrigatório'),
+  aula_experimental_valor: yup.number().min(0).required('Campo obrigatório'),
   aula_experimental_pct_prof: yup.number().min(0).max(100).required('Campo obrigatório'),
-  aula_avulsa_valor: yup
-    .number()
-    .min(0)
-    .required('Campo obrigatório'),
+  aula_avulsa_valor: yup.number().min(0).required('Campo obrigatório'),
   aula_avulsa_pct_casa: yup.number().min(0).max(100).required('Campo obrigatório'),
   aula_avulsa_pct_prof: yup.number().min(0).max(100).required('Campo obrigatório'),
 })
-  .test('soma-livre', 'A soma do Plano Livre deve ser 100%', (values) => {
-    return (Number(values.plano_livre_pct_casa) + Number(values.plano_livre_pct_prof)) === 100;
+  .test('soma-livre', 'soma-livre', function (values) {
+    const soma = toNumber(values.plano_livre_pct_casa) + toNumber(values.plano_livre_pct_prof);
+    if (Math.abs(soma - 100) < 0.01) return true;
+    return this.createError({ path: 'soma-livre', message: 'A soma do Plano Livre (% Casa + % Prof.) deve ser 100%' });
   })
-  // CR1 FIX: validação de soma para aula avulsa
-  .test('soma-avulsa', 'A soma da Aula Avulsa (% Casa + % Prof.) deve ser 100%', (values) => {
-    return (Number(values.aula_avulsa_pct_casa) + Number(values.aula_avulsa_pct_prof)) === 100;
+  .test('soma-avulsa', 'soma-avulsa', function (values) {
+    const soma = toNumber(values.aula_avulsa_pct_casa) + toNumber(values.aula_avulsa_pct_prof);
+    if (Math.abs(soma - 100) < 0.01) return true;
+    return this.createError({ path: 'soma-avulsa', message: 'A soma da Aula Avulsa (% Casa + % Prof.) deve ser 100%' });
   });
 
-// ─── Tooltip simples ──────────────────────────────────────────────────────────
 function Tooltip({ text }) {
   return (
     <span className="group relative inline-flex items-center cursor-help">
@@ -58,8 +69,7 @@ function Tooltip({ text }) {
   );
 }
 
-// ─── Simulador de divisão em R$ ───────────────────────────────────────────────
-function DivisaoSimulada({ label, valor, pctProf, pctCasa, pctCasaLabel = '% Casa' }) {
+function DivisaoSimulada({ label, valor, pctProf, pctCasa }) {
   if (!valor || valor <= 0) return null;
   const prof = ((pctProf / 100) * valor).toFixed(2);
   const casa = pctCasa != null ? ((pctCasa / 100) * valor).toFixed(2) : null;
@@ -70,6 +80,39 @@ function DivisaoSimulada({ label, valor, pctProf, pctCasa, pctCasaLabel = '% Cas
       <span>Exemplo com <span className="text-foreground">R$ {Number(valor).toFixed(2)}</span>:</span>
       <span className="text-emerald-600">Prof. → R$ {prof}</span>
       {casa != null && <span className="text-amber-600">Casa → R$ {casa}</span>}
+    </div>
+  );
+}
+
+// FIX: Field vive fora do componente pai -> identidade estável, sem remount
+// a cada mudança de `errors` (que ocorre a cada tecla após o 1º submit inválido).
+function Field({ label, name, suffix, icon: Icon, tooltip, register, error }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-black text-muted-foreground uppercase flex items-center gap-1.5">
+        {Icon && <Icon size={12} />}
+        {label}
+        {tooltip && <Tooltip text={tooltip} />}
+      </label>
+      <div className="relative">
+        <Input
+          type="number"
+          step="0.01"
+          error={!!error}
+          {...register(name, { valueAsNumber: true })}
+          className={suffix ? 'pr-10' : ''}
+        />
+        {suffix && (
+          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground/60 select-none">
+            {suffix}
+          </span>
+        )}
+      </div>
+      {error && (
+        <p className="text-[10px] font-bold text-destructive animate-in fade-in slide-in-from-top-1">
+          {error.message}
+        </p>
+      )}
     </div>
   );
 }
@@ -86,14 +129,13 @@ export default function ConfiguracoesRepasse() {
     formState: { errors, isDirty },
   } = useForm({
     resolver: yupResolver(schema),
+    defaultValues: DEFAULTS_REPASSE,
   });
 
-  // ─── CR3 FIX: bloquear navegação com alterações não salvas ────────────────
   const navigate = useNavigate();
   const isDirtyRef = useRef(isDirty);
   useEffect(() => { isDirtyRef.current = isDirty; }, [isDirty]);
 
-  // Bloqueia reload/fechar aba
   useEffect(() => {
     if (!isDirty) return;
     const handler = (e) => { e.preventDefault(); e.returnValue = ''; };
@@ -101,7 +143,6 @@ export default function ConfiguracoesRepasse() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [isDirty]);
 
-  // Helper para navegar com confirmação
   // eslint-disable-next-line no-unused-vars
   const navegarComConfirmacao = useCallback((destino) => {
     if (isDirtyRef.current) {
@@ -111,44 +152,18 @@ export default function ConfiguracoesRepasse() {
     navigate(destino);
   }, [navigate]);
 
+  // FIX: só reseta o form quando não há edição em andamento, evitando
+  // sobrescrever silenciosamente digitação do usuário após um refetch.
+  // FIX: estúdio novo (configs === null) recebe defaults em vez de tela em branco/travada.
   useEffect(() => {
+    if (isDirty) return;
     if (configs) reset(configs);
-  }, [configs, reset]);
+    else if (configs === null) reset(DEFAULTS_REPASSE);
+  }, [configs, reset, isDirty]);
 
   const onSubmit = (data) => mutation.mutate(data);
 
-  // Watch dos valores para o simulador em tempo real
   const watched = useWatch({ control });
-
-  // ─── Field component (definido fora do render para evitar re-mount) ───────
-  const Field = useCallback(({ label, name, suffix, icon: Icon, tooltip }) => (
-    <div className="space-y-1.5">
-      <label className="text-xs font-black text-muted-foreground uppercase flex items-center gap-1.5">
-        {Icon && <Icon size={12} />}
-        {label}
-        {tooltip && <Tooltip text={tooltip} />}
-      </label>
-      <div className="relative">
-        <Input
-          type="number"
-          step="0.01"
-          error={!!errors[name]}
-          {...register(name)}
-          className={suffix ? 'pr-10' : ''}
-        />
-        {suffix && (
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground/60 select-none">
-            {suffix}
-          </span>
-        )}
-      </div>
-      {errors[name] && (
-        <p className="text-[10px] font-bold text-destructive animate-in fade-in slide-in-from-top-1">
-          {errors[name].message}
-        </p>
-      )}
-    </div>
-  ), [errors, register]);
 
   if (isLoading) {
     return (
@@ -158,9 +173,6 @@ export default function ConfiguracoesRepasse() {
     );
   }
 
-  // Falha ao carregar: não deixa o formulário renderizar em branco como se
-  // fosse uma configuração nova — isso mascararia o erro real e arriscaria
-  // o admin "recriar" configurações que só falharam ao carregar.
   if (erroCarregamento) {
     return (
       <div className="h-full w-full flex items-center justify-center p-20">
@@ -173,7 +185,6 @@ export default function ConfiguracoesRepasse() {
     );
   }
 
-  // CR2: avisos de valor zero
   const avisoExperimental = Number(watched.aula_experimental_valor) === 0;
   const avisoAvulsa = Number(watched.aula_avulsa_valor) === 0;
 
@@ -202,40 +213,33 @@ export default function ConfiguracoesRepasse() {
 
       <form className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-        {/* Mensalidade */}
         <Surface variant="card" padding="lg" className="space-y-6">
           <h2 className="font-black text-foreground flex items-center gap-2 border-b border-border pb-4">
             <Calculator className="text-primary" size={20} /> Valores de Mensalidade
           </h2>
           <div className="grid grid-cols-1 gap-6">
             <Field
-              label="Valor 1 Modalidade"
-              name="valor_1_modalidade"
-              suffix="R$"
-              icon={DollarSign}
+              label="Valor 1 Modalidade" name="valor_1_modalidade" suffix="R$" icon={DollarSign}
               tooltip="Mensalidade padrão para alunos matriculados em uma única modalidade."
+              register={register} error={errors.valor_1_modalidade}
             />
             <Field
-              label="Valor Multi-Modalidade (Livre)"
-              name="valor_multi_modalidade"
-              suffix="R$"
-              icon={DollarSign}
+              label="Valor Multi-Modalidade (Livre)" name="valor_multi_modalidade" suffix="R$" icon={DollarSign}
               tooltip="Mensalidade para alunos no Plano Livre, que frequentam múltiplas modalidades sem restrição de turma."
+              register={register} error={errors.valor_multi_modalidade}
             />
           </div>
         </Surface>
 
-        {/* Plano Livre */}
         <Surface variant="card" padding="lg" className="space-y-6">
           <h2 className="font-black text-foreground flex items-center gap-2 border-b border-border pb-4">
             <Percent className="text-warning" size={20} /> Divisão Plano Livre
             <Tooltip text="No Plano Livre, a mensalidade é dividida proporcionalmente entre a casa e os professores com base nas aulas frequentadas. A soma deve ser 100%." />
           </h2>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="% Casa" name="plano_livre_pct_casa" suffix="%" />
-            <Field label="% Professores" name="plano_livre_pct_prof" suffix="%" />
+            <Field label="% Casa" name="plano_livre_pct_casa" suffix="%" register={register} error={errors.plano_livre_pct_casa} />
+            <Field label="% Professores" name="plano_livre_pct_prof" suffix="%" register={register} error={errors.plano_livre_pct_prof} />
           </div>
-          {/* Simulador em tempo real */}
           <DivisaoSimulada
             valor={watched.valor_multi_modalidade}
             pctProf={watched.plano_livre_pct_prof}
@@ -246,21 +250,18 @@ export default function ConfiguracoesRepasse() {
           </p>
         </Surface>
 
-        {/* Experimental & Avulsa */}
         <Surface variant="card" padding="lg" className="space-y-6 md:col-span-2">
           <h2 className="font-black text-foreground flex items-center gap-2 border-b border-border pb-4">
              Experimental &amp; Avulsa
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
 
-            {/* Experimental */}
             <div className="space-y-4">
               <p className="text-xs font-black text-muted-foreground uppercase flex items-center gap-1.5">
                 Aula Experimental
                 <Tooltip text="Aula única para novos alunos conhecerem a turma. O valor e o percentual configurados aqui são aplicados diretamente no cálculo do repasse ao professor." />
               </p>
 
-              {/* UX-06: aviso confirmando que o campo é ativo e aplicado pela engine */}
               <div className="flex items-start gap-2 p-3 rounded-xl bg-success-soft border border-success/20">
                 <CheckCircle2 size={13} className="text-success shrink-0 mt-0.5" />
                 <p className="text-[11px] text-success font-medium leading-snug">
@@ -269,40 +270,35 @@ export default function ConfiguracoesRepasse() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Valor" name="aula_experimental_valor" suffix="R$" icon={DollarSign} />
-                <Field label="% Prof." name="aula_experimental_pct_prof" suffix="%" />
+                <Field label="Valor" name="aula_experimental_valor" suffix="R$" icon={DollarSign} register={register} error={errors.aula_experimental_valor} />
+                <Field label="% Prof." name="aula_experimental_pct_prof" suffix="%" register={register} error={errors.aula_experimental_pct_prof} />
               </div>
-              {/* CR2: aviso de valor zero */}
               {avisoExperimental && (
                 <p className="text-[11px] text-warning font-semibold flex items-center gap-1.5">
                   <Info size={12} /> Valor R$ 0,00 — os repasses desta aula serão zerados.
                 </p>
               )}
-              {/* Simulador */}
               <DivisaoSimulada
                 valor={watched.aula_experimental_valor}
                 pctProf={watched.aula_experimental_pct_prof}
               />
             </div>
 
-            {/* Avulsa */}
             <div className="space-y-4">
               <p className="text-xs font-black text-muted-foreground uppercase flex items-center gap-1.5">
                 Aula Avulsa
                 <Tooltip text="Aula paga de forma avulsa, sem vínculo com plano. O valor total é dividido entre casa e professor. A soma % Casa + % Prof. deve ser 100%." />
               </p>
               <div className="grid grid-cols-3 gap-3">
-                <Field label="Valor" name="aula_avulsa_valor" suffix="R$" />
-                <Field label="% Casa" name="aula_avulsa_pct_casa" suffix="%" />
-                <Field label="% Prof." name="aula_avulsa_pct_prof" suffix="%" />
+                <Field label="Valor" name="aula_avulsa_valor" suffix="R$" register={register} error={errors.aula_avulsa_valor} />
+                <Field label="% Casa" name="aula_avulsa_pct_casa" suffix="%" register={register} error={errors.aula_avulsa_pct_casa} />
+                <Field label="% Prof." name="aula_avulsa_pct_prof" suffix="%" register={register} error={errors.aula_avulsa_pct_prof} />
               </div>
-              {/* CR2: aviso de valor zero */}
               {avisoAvulsa && (
                 <p className="text-[11px] text-warning font-semibold flex items-center gap-1.5">
                   <Info size={12} /> Valor R$ 0,00 — os repasses desta aula serão zerados.
                 </p>
               )}
-              {/* Simulador */}
               <DivisaoSimulada
                 valor={watched.aula_avulsa_valor}
                 pctProf={watched.aula_avulsa_pct_prof}
@@ -312,12 +308,9 @@ export default function ConfiguracoesRepasse() {
           </div>
         </Surface>
 
-        {/* Erros de validação de soma (nível do schema) */}
-        {(errors[''] || errors['soma-livre'] || errors['soma-avulsa']) && (
+        {/* FIX: agora os paths batem com os testes do schema (soma-livre / soma-avulsa) */}
+        {(errors['soma-livre'] || errors['soma-avulsa']) && (
           <Surface variant="subtle" className="md:col-span-2 border border-destructive/20 p-4 rounded-2xl">
-            {errors[''] && (
-              <p className="text-sm text-destructive font-black text-center">{errors[''].message}</p>
-            )}
             {errors['soma-livre'] && (
               <p className="text-sm text-destructive font-black text-center">{errors['soma-livre'].message}</p>
             )}

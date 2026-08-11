@@ -7,9 +7,12 @@ import {
 import { alunosService } from '../services/alunosService';
 import { useDebounce } from '../hooks/useDebounce';
 import { useAlunos, PAGE_SIZE } from '../hooks/useAlunos';
-import { useNomeEstudio } from '../hooks/useEstudio'; // FIX: hook correto para o nome
+import { useNomeEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
-import { useImpersonation } from '../context/ImpersonationContext'; // FIX: suporte a impersonation
+import { useImpersonation } from '../context/ImpersonationContext';
+import { useTabelaColunas } from '../hooks/useTabelaColunas';
+import { renderCelula } from '../components/tabela/CelulaDinamica';
+import { ALUNOS_COLUNAS_FIXAS } from '../lib/tabelaColunas';
 import Surface from '../components/ui/Surface';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -43,6 +46,136 @@ function calcularStatusVencimento(dataFim) {
   if (dias < 0)  return { tone: 'destructive', label: dataFormatada, dias };
   if (dias <= 7) return { tone: 'warning',     label: dataFormatada, dias };
   return              { tone: 'success',      label: dataFormatada, dias };
+}
+
+// ---------------------------------------------------------------------
+// Renderers das 4 colunas fixas de negócio de Alunos (item 3 do plano
+// multi-segmento — tabela configurável). Cada função recebe a linha
+// `aluno` inteira (não um valor escalar) porque essas colunas são
+// compostas — avatar+nome+email, badges, cálculo de vencimento — e
+// mantêm exatamente o mesmo JSX/lógica que já existia inline na tabela,
+// só extraído para poder ser despachado pelo column_key configurado em
+// tabela_colunas_config. NENHUMA lógica de negócio foi alterada aqui.
+// ---------------------------------------------------------------------
+
+function CelulaAlunoFixa({ aluno, navigate }) {
+  return (
+    <div
+      className="flex items-center gap-3 md:gap-4 cursor-pointer"
+      onClick={() => navigate(`/alunos/${aluno.id}`)}
+      role="button" tabIndex={0}
+      onKeyDown={(e) => e.key === 'Enter' && navigate(`/alunos/${aluno.id}`)}
+    >
+      <div className="w-9 h-9 md:w-10 md:h-10 rounded-2xl bg-brand-soft text-brand font-black text-sm flex items-center justify-center shrink-0 uppercase">
+        {aluno.nome_completo?.[0] ?? '?'}
+      </div>
+      <div>
+        <p className="font-bold text-sm text-foreground leading-tight group-hover:text-primary transition-colors">
+          {aluno.nome_completo}
+        </p>
+        <p className="text-xs text-muted-foreground font-medium">
+          {aluno.email}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CelulaPlanoCargoFixa({ aluno }) {
+  return (
+    <>
+      <span className="text-xs font-bold text-foreground block">
+        {aluno.planos?.nome || 'Sem Plano'}
+      </span>
+      <span className="text-[10px] font-black uppercase text-muted-foreground">
+        {ROLE_LABEL[aluno.role?.toLowerCase()] ?? aluno.role}
+      </span>
+    </>
+  );
+}
+
+function CelulaStatusFixa({ aluno }) {
+  const statusInfo = STATUS_ATIVO[String(aluno.ativo)]
+    ?? { label: 'Indefinido', tone: 'neutral' };
+
+  return (
+    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${
+      statusInfo.tone === 'success'
+        ? 'bg-success-soft text-success'
+        : statusInfo.tone === 'destructive'
+        ? 'bg-destructive-soft text-destructive'
+        : 'bg-muted text-muted-foreground'
+    }`}>
+      <div className={`w-1.5 h-1.5 rounded-full ${
+        statusInfo.tone === 'success'     ? 'bg-success'
+        : statusInfo.tone === 'destructive' ? 'bg-destructive'
+        : 'bg-muted-foreground'
+      }`} />
+      <span className="text-[10px] font-black uppercase">{statusInfo.label}</span>
+    </div>
+  );
+}
+
+function CelulaVencimentoFixa({ aluno }) {
+  const vencimento = calcularStatusVencimento(aluno.data_fim_plano);
+
+  if (aluno.role === 'admin' || !aluno.plano_id) {
+    return <Badge tone="neutral" variant="soft">—</Badge>;
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <Badge tone={vencimento.tone} variant="soft">{vencimento.label}</Badge>
+      {vencimento.dias !== null && (
+        <span className={`text-[10px] font-black ${
+          vencimento.dias < 0  ? 'text-destructive'
+          : vencimento.dias <= 7 ? 'text-warning'
+          : 'text-muted-foreground'
+        }`}>
+          {vencimento.dias < 0
+            ? `${Math.abs(vencimento.dias)}d em atraso`
+            : vencimento.dias === 0
+            ? 'Vence hoje'
+            : `${vencimento.dias}d restantes`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Ordem/visibilidade padrão usada enquanto tabela_colunas_config ainda
+// não carregou (evita adicionar um novo estado de loading só pra isso —
+// a tabela renderiza com o layout de sempre e se ajusta quando a config
+// chegar). Mantém as 4 colunas de negócio na mesma ordem que sempre
+// tiveram, todas visíveis — comportamento idêntico ao anterior à
+// integração até a config real chegar.
+const COLUNAS_ALUNOS_FALLBACK = ALUNOS_COLUNAS_FIXAS.map((c, i) => ({
+  id: `fallback-${c.key}`,
+  column_key: c.key,
+  label: c.defaultLabel,
+  is_visible: true,
+  display_order: i + 1,
+  field_type: c.fieldType,
+  origin: c.origin,
+}));
+
+/**
+ * Despacha o render de uma célula pra linha `aluno`, de acordo com a
+ * origem da coluna: fixa (JSX composto, com navigate) ou dinâmica
+ * (renderCelula genérico sobre aluno.metadata[column_key]).
+ */
+function renderCelulaAluno(coluna, aluno, navigate) {
+  if (coluna.origin === 'fixed') {
+    switch (coluna.column_key) {
+      case 'aluno':       return <CelulaAlunoFixa aluno={aluno} navigate={navigate} />;
+      case 'plano_cargo': return <CelulaPlanoCargoFixa aluno={aluno} />;
+      case 'status':      return <CelulaStatusFixa aluno={aluno} />;
+      case 'vencimento':  return <CelulaVencimentoFixa aluno={aluno} />;
+      default:            return null; // não deveria acontecer — coluna fixa desconhecida
+    }
+  }
+
+  return renderCelula(coluna.field_type, aluno.metadata?.[coluna.column_key]);
 }
 
 export default function Alunos() {
@@ -97,6 +230,14 @@ export default function Alunos() {
     pagina,
     idEfetivo, // FIX: useAlunos passa a receber o tenant efetivo explicitamente
   );
+
+  // Item 3 (tabela configurável): visibilidade/ordem das colunas, com
+  // fallback pro layout padrão (idêntico ao anterior) enquanto a config
+  // ainda não carregou — não bloqueia o carregamento normal da tabela.
+  const { colunas: colunasConfig } = useTabelaColunas('alunos');
+  const colunasVisiveis = (colunasConfig.length > 0 ? colunasConfig : COLUNAS_ALUNOS_FALLBACK)
+    .filter((c) => c.is_visible)
+    .sort((a, b) => a.display_order - b.display_order);
 
   const inicioRegistro = total === 0 ? 0 : (pagina - 1) * PAGE_SIZE + 1;
   const fimRegistro    = Math.min(pagina * PAGE_SIZE, total);
@@ -228,94 +369,32 @@ export default function Alunos() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-[10px] font-black uppercase text-muted-foreground tracking-widest border-b border-border bg-muted/40">
-                    <th className="px-6 md:px-8 py-4 md:py-6 text-left">Aluno</th>
-                    <th className="px-6 md:px-8 py-4 md:py-6 text-left">Plano / Cargo</th>
-                    <th className="px-6 md:px-8 py-4 md:py-6 text-left">Status</th>
-                    <th className="px-6 md:px-8 py-4 md:py-6 text-left">
-                      <span className="flex items-center gap-1.5">
-                        <Calendar size={11} /> Vencimento
-                      </span>
-                    </th>
+                    {colunasVisiveis.map((coluna) => (
+                      <th
+                        key={coluna.id}
+                        className="px-6 md:px-8 py-4 md:py-6 text-left"
+                      >
+                        {coluna.column_key === 'vencimento' ? (
+                          <span className="flex items-center gap-1.5">
+                            <Calendar size={11} /> {coluna.label}
+                          </span>
+                        ) : (
+                          coluna.label
+                        )}
+                      </th>
+                    ))}
                     <th className="px-6 md:px-8 py-4 md:py-6 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {alunos.map((aluno) => {
-                    const vencimento = calcularStatusVencimento(aluno.data_fim_plano);
-                    const statusInfo = STATUS_ATIVO[String(aluno.ativo)]
-                      ?? { label: 'Indefinido', tone: 'neutral' };
-
                     return (
                       <tr key={aluno.id} className="group hover:bg-subtle transition-colors">
-                        <td className="px-6 md:px-8 py-4 md:py-6">
-                          <div
-                            className="flex items-center gap-3 md:gap-4 cursor-pointer"
-                            onClick={() => navigate(`/alunos/${aluno.id}`)}
-                            role="button" tabIndex={0}
-                            onKeyDown={(e) => e.key === 'Enter' && navigate(`/alunos/${aluno.id}`)}
-                          >
-                            <div className="w-9 h-9 md:w-10 md:h-10 rounded-2xl bg-brand-soft text-brand font-black text-sm flex items-center justify-center shrink-0 uppercase">
-                              {aluno.nome_completo?.[0] ?? '?'}
-                            </div>
-                            <div>
-                              <p className="font-bold text-sm text-foreground leading-tight group-hover:text-primary transition-colors">
-                                {aluno.nome_completo}
-                              </p>
-                              <p className="text-xs text-muted-foreground font-medium">
-                                {aluno.email}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="px-6 md:px-8 py-4 md:py-6">
-                          <span className="text-xs font-bold text-foreground block">
-                            {aluno.planos?.nome || 'Sem Plano'}
-                          </span>
-                          <span className="text-[10px] font-black uppercase text-muted-foreground">
-                            {ROLE_LABEL[aluno.role?.toLowerCase()] ?? aluno.role}
-                          </span>
-                        </td>
-
-                        <td className="px-6 md:px-8 py-4 md:py-6">
-                          <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${
-                            statusInfo.tone === 'success'
-                              ? 'bg-success-soft text-success'
-                              : statusInfo.tone === 'destructive'
-                              ? 'bg-destructive-soft text-destructive'
-                              : 'bg-muted text-muted-foreground'
-                          }`}>
-                            <div className={`w-1.5 h-1.5 rounded-full ${
-                              statusInfo.tone === 'success'     ? 'bg-success'
-                              : statusInfo.tone === 'destructive' ? 'bg-destructive'
-                              : 'bg-muted-foreground'
-                            }`} />
-                            <span className="text-[10px] font-black uppercase">{statusInfo.label}</span>
-                          </div>
-                        </td>
-
-                        <td className="px-6 md:px-8 py-4 md:py-6">
-                          {aluno.role === 'admin' || !aluno.plano_id ? (
-                            <Badge tone="neutral" variant="soft">—</Badge>
-                          ) : (
-                            <div className="flex flex-col gap-0.5">
-                              <Badge tone={vencimento.tone} variant="soft">{vencimento.label}</Badge>
-                              {vencimento.dias !== null && (
-                                <span className={`text-[10px] font-black ${
-                                  vencimento.dias < 0  ? 'text-destructive'
-                                  : vencimento.dias <= 7 ? 'text-warning'
-                                  : 'text-muted-foreground'
-                                }`}>
-                                  {vencimento.dias < 0
-                                    ? `${Math.abs(vencimento.dias)}d em atraso`
-                                    : vencimento.dias === 0
-                                    ? 'Vence hoje'
-                                    : `${vencimento.dias}d restantes`}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </td>
+                        {colunasVisiveis.map((coluna) => (
+                          <td key={coluna.id} className="px-6 md:px-8 py-4 md:py-6">
+                            {renderCelulaAluno(coluna, aluno, navigate)}
+                          </td>
+                        ))}
 
                         <td className="px-6 md:px-8 py-4 md:py-6 text-right">
                           <div className="flex items-center justify-end gap-2 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity">

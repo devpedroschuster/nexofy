@@ -9,6 +9,11 @@
 // Uso: <AuthProvider> uma única vez em App.jsx, no topo da árvore.
 // A API pública de useAuth() é idêntica à anterior — nenhum consumidor
 // existente precisa mudar.
+//
+// Item 2 do plano multi-segmento: passa a carregar também `segmento`,
+// `terminologia` e `modulosAtivos` do estúdio do membro, ampliando a
+// MESMA query que já busca estudio_id/role (join em vez de round-trip
+// novo) — ver seção 3 do PLANO_ITEM_2.md.
 
 import React, {
   createContext,
@@ -21,12 +26,24 @@ import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext(null);
 
+// Defaults de segmento/terminologia/modulos_ativos — usados sempre que não
+// há estúdio resolvido ainda (loading, super_admin sem tenant, logout).
+// Mesmos defaults da migration (coluna `segmento` e `modulos_ativos` têm
+// default idêntico no banco) — nunca deve faltar rótulo/menu na tela por
+// ausência momentânea de dado.
+const SEGMENTO_DEFAULT = 'danca_fitness';
+const TERMINOLOGIA_DEFAULT = {};
+const MODULOS_ATIVOS_DEFAULT = [];
+
 export function AuthProvider({ children }) {
   const [sessao, setSessao] = useState(null);
   const [perfil, setPerfil] = useState(null);
   const [professorId, setProfessorId] = useState(null);
   const [nomeUsuario, setNomeUsuario] = useState(null);
   const [estudioId, setEstudioId] = useState(null);
+  const [segmento, setSegmento] = useState(SEGMENTO_DEFAULT);
+  const [terminologia, setTerminologia] = useState(TERMINOLOGIA_DEFAULT);
+  const [modulosAtivos, setModulosAtivos] = useState(MODULOS_ATIVOS_DEFAULT);
   const [loading, setLoading] = useState(true);
   const [erroPerfil, setErroPerfil] = useState(null); // novo: expõe falhas ao consumidor
 
@@ -35,6 +52,24 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let cancelled = false;
+
+    // Helper local: reseta os três campos de segmento pros defaults —
+    // chamado em todo ponto onde estudioId também volta pra null (logout,
+    // erro, super_admin sem tenant, fallback sem membro).
+    const resetarSegmento = () => {
+      setSegmento(SEGMENTO_DEFAULT);
+      setTerminologia(TERMINOLOGIA_DEFAULT);
+      setModulosAtivos(MODULOS_ATIVOS_DEFAULT);
+    };
+
+    // Helper local: aplica os dados de `estudios` vindos do join —
+    // tolera null/undefined (estúdio ainda não migrado, join falho) caindo
+    // nos defaults em vez de deixar `undefined` vazar pra UI.
+    const aplicarSegmentoDoEstudio = (estudioRow) => {
+      setSegmento(estudioRow?.segmento ?? SEGMENTO_DEFAULT);
+      setTerminologia(estudioRow?.terminologia ?? TERMINOLOGIA_DEFAULT);
+      setModulosAtivos(estudioRow?.modulos_ativos ?? MODULOS_ATIVOS_DEFAULT);
+    };
 
     const carregarPerfilUsuario = async (session) => {
       if (cancelled) return;
@@ -47,6 +82,7 @@ export function AuthProvider({ children }) {
           setNomeUsuario(null);
           setEstudioId(null);
           setErroPerfil(null);
+          resetarSegmento();
           setLoading(false);
         }
         return;
@@ -63,19 +99,22 @@ export function AuthProvider({ children }) {
       const authId = session.user.id;
 
       try {
+        // Join direto na query existente (Opção A da seção 3 do
+        // PLANO_ITEM_2.md): zero round-trips adicionais — o dado de
+        // segmento/terminologia/modulos_ativos chega no mesmo response.
         const { data: membros, error: errMembro } = await supabase
-  .from('estudio_membros')
-  .select('estudio_id, role')
-  .eq('user_id', authId);
+          .from('estudio_membros')
+          .select('estudio_id, role, estudios(segmento, terminologia, modulos_ativos)')
+          .eq('user_id', authId)
+          .limit(5);
 
-if (errMembro) {
-  console.error('Erro ao buscar estudio_membros:', errMembro);
-}
+        if (errMembro) {
+          throw errMembro;
+        }
 
-if (cancelled) return;
+        if (cancelled) return;
 
-// Prioriza super_admin caso existam múltiplos vínculos
-const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ?? null;
+        const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ?? null;
 
         if (membro) {
           perfilJaCarregado.current = true;
@@ -87,11 +126,16 @@ const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ??
             setEstudioId(null);
             setProfessorId(null);
             setNomeUsuario(session.user.user_metadata?.nome ?? session.user.email ?? null);
+            // super_admin sem tenant selecionado usa os defaults — troca
+            // para o segmento do tenant impersonado é responsabilidade do
+            // ImpersonationContext (useTerminologia combina os dois).
+            resetarSegmento();
             setLoading(false);
             return;
           }
 
           setEstudioId(membro.estudio_id);
+          aplicarSegmentoDoEstudio(membro.estudios);
 
           if (membro.role === 'admin') {
             setPerfil('admin');
@@ -146,6 +190,9 @@ const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ??
           setPerfil(usuario.role === 'admin' ? 'admin' : 'aluno');
           setProfessorId(null);
           setNomeUsuario(null);
+          // Fallback legado não tem join com estudios (não passa por
+          // estudio_membros) — fica nos defaults.
+          resetarSegmento();
           setLoading(false);
           return;
         }
@@ -163,6 +210,7 @@ const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ??
           setPerfil('professor');
           setProfessorId(professor.id);
           setNomeUsuario(professor.nome ?? null);
+          resetarSegmento();
           setLoading(false);
           return;
         }
@@ -174,6 +222,7 @@ const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ??
         setProfessorId(null);
         setNomeUsuario(null);
         setEstudioId(null);
+        resetarSegmento();
       } catch (error) {
         console.error('Erro fatal ao carregar perfil:', error);
         if (cancelled) return;
@@ -185,6 +234,7 @@ const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ??
         setProfessorId(null);
         setNomeUsuario(null);
         setEstudioId(null);
+        resetarSegmento();
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -208,6 +258,7 @@ const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ??
         setNomeUsuario(null);
         setEstudioId(null);
         setErroPerfil(null);
+        resetarSegmento();
         setLoading(false);
 
       } else if (event === 'SIGNED_IN') {
@@ -234,7 +285,18 @@ const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ??
     };
   }, []); // roda uma única vez — agora para a aplicação inteira, não por componente
 
-  const value = { sessao, perfil, professorId, estudioId, nomeUsuario, loading, erroPerfil };
+  const value = {
+    sessao,
+    perfil,
+    professorId,
+    estudioId,
+    nomeUsuario,
+    loading,
+    erroPerfil,
+    segmento,
+    terminologia,
+    modulosAtivos,
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

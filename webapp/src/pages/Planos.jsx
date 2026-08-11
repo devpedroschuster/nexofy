@@ -11,9 +11,12 @@ import Surface from '../components/ui/Surface';
 import Badge from '../components/ui/Badge';
 import Skeleton from '../components/ui/Skeleton';
 import EmptyState from '../components/ui/EmptyState';
+import { AREAS_MODALIDADE, LIMITE_ILIMITADO_SEMANA } from '../lib/constants';
 
 const PLANO_VAZIO = {
-  nome: '', preco: '', frequencia_semanal: '', duracao_meses: 1, regras_acesso: []
+  nome: '', preco: '', frequencia_semanal: '', duracao_meses: 1, regras_acesso: [],
+  comissao_professor: '', comissao_espaco: '', comissao_diretor: '',
+  is_plano_livre: false,
 };
 
 export default function Planos() {
@@ -79,6 +82,18 @@ export default function Planos() {
       showToast.error('A duração deve ser um número inteiro entre 1 e 24 meses.');
       return false;
     }
+
+    // Espelha a constraint check_soma_comissoes do banco — dá feedback
+    // imediato no form em vez de deixar o erro estourar só no save.
+    const comProf = Number(plano.comissao_professor) || 0;
+    const comEsp = Number(plano.comissao_espaco) || 0;
+    const comDir = Number(plano.comissao_diretor) || 0;
+    const somaComissoes = comProf + comEsp + comDir;
+    if (somaComissoes !== 100 && somaComissoes !== 0) {
+      showToast.error('A soma das comissões (professor + espaço + direção) deve ser 100% ou ficar zerada.');
+      return false;
+    }
+
     return true;
   }
 
@@ -106,7 +121,7 @@ export default function Planos() {
       if (err?.code === '23505') {
         showToast.error('Já existe um plano com esse nome.');
       } else {
-        showToast.error('Erro ao criar plano.');
+        showToast.error(err?.message || 'Erro ao criar plano.');
       }
     } finally {
       setCreating(false);
@@ -136,7 +151,16 @@ export default function Planos() {
   }
 
   function abrirEdicao(plano) {
-    setPlanoEmEdicao({ ...plano, duracao_meses: plano.duracao_meses || 1, regras_acesso: plano.regras_acesso || [] });
+    setPlanoEmEdicao({
+      ...plano,
+      duracao_meses: plano.duracao_meses || 1,
+      regras_acesso: plano.regras_acesso || [],
+      // Fallback pros planos criados antes desta mudança (campos NULL no banco).
+      comissao_professor: plano.comissao_professor ?? '',
+      comissao_espaco: plano.comissao_espaco ?? '',
+      comissao_diretor: plano.comissao_diretor ?? '',
+      is_plano_livre: !!plano.is_plano_livre,
+    });
     modalEdicao.abrir();
   }
 
@@ -163,7 +187,7 @@ export default function Planos() {
       if (err?.code === '23505') {
         showToast.error('Já existe um plano com esse nome.');
       } else {
-        showToast.error('Erro ao atualizar plano.');
+        showToast.error(err?.message || 'Erro ao atualizar plano.');
       }
     } finally {
       setSavingEdit(false);
@@ -250,6 +274,49 @@ export default function Planos() {
               </Button>
             </div>
 
+            {/* Rateio de Comissão + Plano Livre — campos existentes no banco
+                (validados pela constraint check_soma_comissoes), agora editáveis
+                aqui na criação do plano. */}
+            <div className="border-t border-border pt-6 mt-2 space-y-4 w-full">
+              <Label hint="Soma deve ser 100% ou ficar zerada (0%)">Rateio de Comissão (%)</Label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase">Professor</label>
+                  <Input
+                    type="number" min="0" max="100"
+                    value={novoPlano.comissao_professor}
+                    onChange={e => setNovoPlano({ ...novoPlano, comissao_professor: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase">Espaço</label>
+                  <Input
+                    type="number" min="0" max="100"
+                    value={novoPlano.comissao_espaco}
+                    onChange={e => setNovoPlano({ ...novoPlano, comissao_espaco: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase">Direção</label>
+                  <Input
+                    type="number" min="0" max="100"
+                    value={novoPlano.comissao_diretor}
+                    onChange={e => setNovoPlano({ ...novoPlano, comissao_diretor: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={novoPlano.is_plano_livre}
+                  onChange={e => setNovoPlano({ ...novoPlano, is_plano_livre: e.target.checked })}
+                  className="rounded border-border"
+                />
+                Plano Livre (acesso ilimitado, sem vínculo de regras por área)
+              </label>
+            </div>
+
             <SeletorRegras
               regras={novoPlano.regras_acesso}
               setRegras={(novasRegras) => setNovoPlano({ ...novoPlano, regras_acesso: novasRegras })}
@@ -296,6 +363,12 @@ export default function Planos() {
                     <span className="flex items-center gap-1 text-info font-bold">
                       <Clock size={12} /> {plano.duracao_meses} {plano.duracao_meses > 1 ? 'Meses' : 'Mês'}
                     </span>
+                    {plano.is_plano_livre && (
+                      <>
+                        <span className="w-1 h-1 bg-border rounded-full" />
+                        <Badge tone="primary" variant="soft">Plano Livre</Badge>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -378,6 +451,48 @@ export default function Planos() {
               </div>
             </div>
 
+            {/* Rateio de Comissão + Plano Livre — vinculado a planoEmEdicao,
+                não a novoPlano (bug de integração corrigido nesta versão). */}
+            <div className="border-t border-border pt-6 space-y-4 w-full">
+              <Label hint="Soma deve ser 100% ou ficar zerada (0%)">Rateio de Comissão (%)</Label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase">Professor</label>
+                  <Input
+                    type="number" min="0" max="100"
+                    value={planoEmEdicao.comissao_professor}
+                    onChange={e => setPlanoEmEdicao({ ...planoEmEdicao, comissao_professor: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase">Espaço</label>
+                  <Input
+                    type="number" min="0" max="100"
+                    value={planoEmEdicao.comissao_espaco}
+                    onChange={e => setPlanoEmEdicao({ ...planoEmEdicao, comissao_espaco: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase">Direção</label>
+                  <Input
+                    type="number" min="0" max="100"
+                    value={planoEmEdicao.comissao_diretor}
+                    onChange={e => setPlanoEmEdicao({ ...planoEmEdicao, comissao_diretor: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={planoEmEdicao.is_plano_livre}
+                  onChange={e => setPlanoEmEdicao({ ...planoEmEdicao, is_plano_livre: e.target.checked })}
+                  className="rounded border-border"
+                />
+                Plano Livre (acesso ilimitado, sem vínculo de regras por área)
+              </label>
+            </div>
+
             <SeletorRegras
               regras={planoEmEdicao.regras_acesso}
               setRegras={(novasRegras) => setPlanoEmEdicao({ ...planoEmEdicao, regras_acesso: novasRegras })}
@@ -408,7 +523,7 @@ export default function Planos() {
 }
 
 function SeletorRegras({ regras, setRegras }) {
-  const [mod, setMod] = useState('Dança');
+  const [mod, setMod] = useState(AREAS_MODALIDADE[0].valor);
   const [qty, setQty] = useState('1');
 
   const adicionarRegra = () => {
@@ -430,6 +545,11 @@ function SeletorRegras({ regras, setRegras }) {
     setRegras(novas);
   };
 
+  // Áreas que já têm regra cadastrada — evita oferecer opção redundante no select.
+  const areasDisponiveis = AREAS_MODALIDADE.filter(
+    a => !regras.some(r => r.modalidade === a.valor)
+  );
+
   return (
     <div className="space-y-4 border-t border-border pt-6 mt-6 w-full">
       <Label>Regras de Acesso do Pacote</Label>
@@ -441,7 +561,7 @@ function SeletorRegras({ regras, setRegras }) {
         >
           <div className="flex-1 font-bold text-foreground text-sm">Área: {regra.modalidade}</div>
           <div className="font-black text-info bg-card px-3 py-1 rounded-lg border border-border">
-            {regra.limite === 999 ? 'Ilimitado (Livre)' : `${regra.limite}x na semana`}
+            {regra.limite === LIMITE_ILIMITADO_SEMANA ? 'Ilimitado (Livre)' : `${regra.limite}x na semana`}
           </div>
           <button
             type="button"
@@ -453,44 +573,47 @@ function SeletorRegras({ regras, setRegras }) {
         </div>
       ))}
 
-      <div className="grid grid-cols-5 gap-2 items-end bg-info-soft p-4 rounded-3xl border border-dashed border-info/20">
-        <div className="col-span-2 space-y-1.5">
-          <label className="text-[9px] font-black text-info uppercase ml-2 block">Categoria</label>
-          <Input
-            as="select"
-            value={mod}
-            onChange={e => setMod(e.target.value)}
+      {areasDisponiveis.length > 0 && (
+        <div className="grid grid-cols-5 gap-2 items-end bg-info-soft p-4 rounded-3xl border border-dashed border-info/20">
+          <div className="col-span-2 space-y-1.5">
+            <label className="text-[9px] font-black text-info uppercase ml-2 block">Categoria</label>
+            <Input
+              as="select"
+              value={mod}
+              onChange={e => setMod(e.target.value)}
+            >
+              {areasDisponiveis.map(a => (
+                <option key={a.valor} value={a.valor}>{a.label}</option>
+              ))}
+            </Input>
+          </div>
+          <div className="col-span-2 space-y-1.5">
+            <label className="text-[9px] font-black text-info uppercase ml-2 block">Limite na Semana</label>
+            <Input
+              as="select"
+              className="font-black text-info"
+              value={qty}
+              onChange={e => setQty(e.target.value)}
+            >
+              <option value="1">1x</option>
+              <option value="2">2x</option>
+              <option value="3">3x</option>
+              <option value="4">4x</option>
+              <option value="5">5x</option>
+              <option value="6">6x</option>
+              <option value={String(LIMITE_ILIMITADO_SEMANA)}>Ilimitado (Livre)</option>
+            </Input>
+          </div>
+          <Button
+            type="button"
+            variant="info"
+            size="icon"
+            onClick={adicionarRegra}
           >
-            <option value="Dança">Dança</option>
-            <option value="Funcional">Funcional</option>
-          </Input>
+            <Plus size={20} />
+          </Button>
         </div>
-        <div className="col-span-2 space-y-1.5">
-          <label className="text-[9px] font-black text-info uppercase ml-2 block">Limite na Semana</label>
-          <Input
-            as="select"
-            className="font-black text-info"
-            value={qty}
-            onChange={e => setQty(e.target.value)}
-          >
-            <option value="1">1x</option>
-            <option value="2">2x</option>
-            <option value="3">3x</option>
-            <option value="4">4x</option>
-            <option value="5">5x</option>
-            <option value="6">6x</option>
-            <option value="999">Ilimitado (Livre)</option>
-          </Input>
-        </div>
-        <Button
-          type="button"
-          variant="info"
-          size="icon"
-          onClick={adicionarRegra}
-        >
-          <Plus size={20} />
-        </Button>
-      </div>
+      )}
     </div>
   );
 }

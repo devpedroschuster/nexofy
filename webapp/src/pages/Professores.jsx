@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, UserPlus, Edit2, ShieldAlert, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -44,25 +44,38 @@ export default function Professores() {
   const modalForm = useModal();
   const modalStatus = useModal();
 
+  // AUDIT FIX (Critical-2): contador de "operação atual" — mesmo padrão já
+  // usado em ImpersonationContext (opRef). Sem isso, se o usuário digitar
+  // rápido ou trocar de estúdio via impersonation logo após uma busca,
+  // uma resposta antiga que chegue DEPOIS de uma mais nova pode sobrescrever
+  // a lista com dados obsoletos (inclusive de outro estudioId).
+  const opRef = useRef(0);
+
   useEffect(() => {
     carregarProfessores();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buscaDebounced, idEfetivo]);
 
   async function carregarProfessores() {
     if (!idEfetivo) {
+      opRef.current += 1; // invalida qualquer request em voo
       setProfessores([]);
       setLoading(false);
       return;
     }
+
+    const op = ++opRef.current;
     setLoading(true);
     try {
       const data = await professoresService.listar(buscaDebounced, idEfetivo);
+      if (op !== opRef.current) return; // resposta obsoleta — ignora
       setProfessores(data);
     } catch (err) {
+      if (op !== opRef.current) return;
       console.error('[Professores] erro ao carregar lista:', err);
       showToast.error('Erro ao carregar lista.');
     } finally {
-      setLoading(false);
+      if (op === opRef.current) setLoading(false);
     }
   }
 
@@ -102,10 +115,7 @@ export default function Professores() {
       // CR1 FIX: salva SEMPRE os dados básicos primeiro (nome/telefone/pix),
       // preservando email/auth_id atuais. Isso garante um `id` real de
       // professor antes de chamar a Edge Function — que exige `professor_id`
-      // em toda ação (`criar`, `remover`, `trocar_email`). Antes, o cadastro
-      // de um professor novo com e-mail chamava a função com
-      // `professor_id: null`, o que a função sempre rejeitava com
-      // "email e professor_id são obrigatórios".
+      // em toda ação (`criar`, `remover`, `trocar_email`).
       const dadosBase = {
         id: formProfessor.id,
         nome: formProfessor.nome,
@@ -116,6 +126,16 @@ export default function Professores() {
       };
       const professorSalvo = await professoresService.salvar(dadosBase, idEfetivo);
       const professorId = professorSalvo.id;
+
+      // AUDIT FIX (Critical-1): sincroniza o id no state assim que o registro
+      // base é persistido, ANTES de chamar a Edge Function. Sem isso, se a
+      // Edge Function falhar (rede/timeout/500), formProfessor.id continuava
+      // null e um simples "tentar de novo" do usuário caía no branch de
+      // INSERT de novo em professoresService.salvar, duplicando o professor
+      // que já tinha sido criado na primeira tentativa.
+      if (!formProfessor.id) {
+        setFormProfessor((prev) => ({ ...prev, id: professorId }));
+      }
 
       let toastMsg = 'Professor salvo com sucesso!';
 
@@ -137,8 +157,19 @@ export default function Professores() {
             },
           },
         );
-        if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
+        if (funcError) {
+          // AUDIT FIX: loga a causa real (rede, payload, etc.) além da
+          // mensagem genérica mostrada ao usuário — facilita debug em prod.
+          console.error('[Professores] erro na Edge Function gerenciar-acesso-professor:', funcError);
+          throw new Error('Falha na comunicação com o servidor seguro.');
+        }
         if (funcData?.error) throw new Error(funcData.error);
+
+        // Mantém id/email/auth_id sincronizados no state após sucesso da
+        // Edge Function, para que uma eventual reabertura do form (sem
+        // fechar o modal) reflita o acesso recém-criado/trocado.
+        setFormProfessor((prev) => ({ ...prev, email: emailNovo, auth_id: funcData.auth_id ?? prev.auth_id }));
+        setAcessoOriginal({ email: emailNovo, auth_id: funcData.auth_id ?? authIdAtual });
 
         toastMsg = acao === 'criar'
           ? (funcData.reutilizado
@@ -156,8 +187,14 @@ export default function Professores() {
           'gerenciar-acesso-professor',
           { body: { acao: 'remover', professor_id: professorId, auth_id: authIdAtual, estudio_id: idEfetivo } },
         );
-        if (funcError) throw new Error('Falha na comunicação com o servidor seguro.');
+        if (funcError) {
+          console.error('[Professores] erro na Edge Function gerenciar-acesso-professor:', funcError);
+          throw new Error('Falha na comunicação com o servidor seguro.');
+        }
         if (funcData?.error) throw new Error(funcData.error);
+
+        setFormProfessor((prev) => ({ ...prev, email: '', auth_id: null }));
+        setAcessoOriginal({ email: '', auth_id: null });
 
         toastMsg = funcData.user_deletado
           ? 'E-mail removido e acesso excluído.'
@@ -204,11 +241,11 @@ export default function Professores() {
       {/* Cabeçalho */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-black text-foreground">Equipe de Professores</h1>
-          <p className="text-muted-foreground">Gerencie os profissionais e seus acessos ao sistema.</p>
+          <h1 className="text-2xl font-black tracking-tight text-foreground">Professores</h1>
+          <p className="text-sm text-muted-foreground mt-1">Gerencie o corpo docente do estúdio.</p>
         </div>
         {podeGerenciar && (
-          <Button variant="brand" size="lg" leftIcon={<UserPlus size={20} />} onClick={abrirModalCriar}>
+          <Button variant="brand" leftIcon={<UserPlus size={18} />} onClick={abrirModalCriar} disabled={!idEfetivo}>
             Novo Professor
           </Button>
         )}
@@ -343,6 +380,7 @@ export default function Professores() {
               required
               placeholder="Nome do Professor"
               value={formProfessor.nome}
+              disabled={saving}
               onChange={(e) => setFormProfessor({ ...formProfessor, nome: e.target.value })}
             />
           </div>
@@ -353,6 +391,7 @@ export default function Professores() {
               type="email"
               placeholder="email@exemplo.com"
               value={formProfessor.email}
+              disabled={saving}
               onChange={(e) => setFormProfessor({ ...formProfessor, email: e.target.value })}
             />
           </div>
@@ -363,6 +402,7 @@ export default function Professores() {
               <Input
                 placeholder="(00) 00000-0000"
                 value={formProfessor.telefone}
+                disabled={saving}
                 onChange={(e) => setFormProfessor({ ...formProfessor, telefone: e.target.value })}
               />
             </div>
@@ -371,13 +411,14 @@ export default function Professores() {
               <Input
                 placeholder="Para repasses"
                 value={formProfessor.pix_comissao}
+                disabled={saving}
                 onChange={(e) => setFormProfessor({ ...formProfessor, pix_comissao: e.target.value })}
               />
             </div>
           </div>
 
           <Modal.Footer>
-            <Button variant="outline" onClick={modalForm.fechar} type="button">
+            <Button variant="outline" onClick={modalForm.fechar} type="button" disabled={saving}>
               Cancelar
             </Button>
             <Button variant="brand" size="lg" loading={saving} fullWidth type="submit" disabled={!idEfetivo}>

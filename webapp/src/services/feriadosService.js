@@ -1,11 +1,46 @@
 import { supabase } from '../lib/supabase';
 
+// Movido para cá (antes vivia sem uso em ConfiguracoesFeriados.jsx): é o
+// service, não a tela, quem faz a chamada externa e deve controlar seu timeout.
+const TIMEOUT_BRASIL_API_MS = 15000;
+
 export const feriadosService = {
   // Sprint 02: estudioId obrigatório no upsert de feriados nacionais
   async importarFeriadosNacionais(ano, estudioId) {
+    // Defesa em profundidade: não confia apenas no chamador para validar
+    // isso — evita registros órfãos (estudio_id undefined/null) caso este
+    // service seja reutilizado por outro componente no futuro.
+    if (!estudioId) {
+      throw new Error('estudioId é obrigatório para importar feriados.');
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_BRASIL_API_MS);
+
     try {
-      const response = await fetch(`https://brasilapi.com.br/api/feriados/v1/${ano}`);
-      if (!response.ok) throw new Error('Falha ao buscar na Brasil API');
+      let response;
+      try {
+        response = await fetch(
+          `https://brasilapi.com.br/api/feriados/v1/${ano}`,
+          { signal: controller.signal },
+        );
+      } catch (fetchError) {
+        // Diferencia timeout de outras falhas de rede, sem depender de
+        // comparação de string da mensagem no chamador.
+        if (fetchError.name === 'AbortError') {
+          const timeoutError = new Error('Brasil API demorou demais para responder');
+          timeoutError.code = 'BRASIL_API_TIMEOUT';
+          throw timeoutError;
+        }
+        throw fetchError;
+      }
+
+      if (!response.ok) {
+        const httpError = new Error('Falha ao buscar na Brasil API');
+        httpError.code = 'BRASIL_API_UNAVAILABLE';
+        httpError.status = response.status;
+        throw httpError;
+      }
 
       const feriadosApi = await response.json();
 
@@ -24,13 +59,14 @@ export const feriadosService = {
       if (error) throw error;
       return data;
 
-    } catch (error) {
-      console.error('Erro ao importar feriados:', error);
-      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
   },
 
   async listarFeriadosDoAno(ano, estudioId) {
+    if (!estudioId) return [];
+
     const { data, error } = await supabase
       .from('feriados')
       .select('*')

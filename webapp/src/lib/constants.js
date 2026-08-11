@@ -44,6 +44,16 @@ export const TIPOS_AULA = [
   { valor: 'avulsa',       label: 'Aula Avulsa'       },
 ];
 
+// Áreas de modalidade — fonte única, usada em Modalidades.jsx e Planos.jsx.
+export const AREAS_MODALIDADE = [
+  { valor: 'Dança', label: 'Dança' },
+  { valor: 'Funcional', label: 'Funcional' },
+  { valor: 'Livre/Todos', label: 'Livre / Outros' },
+];
+
+// Valor convencionado para "sem limite semanal" em regras de acesso de plano.
+export const LIMITE_ILIMITADO_SEMANA = 999;
+
 export const LIMITES = {
   NOME_MIN:            3,
   NOME_MAX:            100,

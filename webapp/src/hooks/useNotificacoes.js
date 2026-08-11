@@ -1,44 +1,48 @@
+// webapp/src/hooks/useNotificacoes.js
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { startOfDay } from 'date-fns';
 import { useAuth } from './useAuth';
+import { useImpersonation } from '../context/ImpersonationContext'; // FIX: faltava
 import { storageKey } from '../utils/storage';
 
 const slug = import.meta.env.VITE_APP_SLUG ?? 'app';
 
-// FIX (Bug #2): a chave de localStorage agora inclui o estudioId, evitando
-// que "notificações resolvidas" de um estúdio vazem/colidam com outro
-// (o isolamento por subdomínio em produção era acidental, não garantido).
 function chaveResolvidas(estudioId) {
   return storageKey(slug, `notificacoes_resolvidas:${estudioId ?? 'sem-estudio'}`);
 }
 
 export function useNotificacoes() {
   const { estudioId } = useAuth();
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId; // FIX: super_admin em impersonation agora funciona
+
   const [resolvidas, setResolvidas] = useState([]);
 
-  // FIX (Bug #3): agora depende de estudioId, recarregando o estado local
-  // sempre que o contexto de estúdio mudar.
   useEffect(() => {
-    if (!estudioId) return;
-
+    if (!idEfetivo) return;
     try {
-      const salvas = localStorage.getItem(chaveResolvidas(estudioId));
+      const salvas = localStorage.getItem(chaveResolvidas(idEfetivo));
       setResolvidas(salvas ? JSON.parse(salvas) : []);
     } catch {
-      // FIX (edge case): JSON corrompido não deve derrubar a tela —
-      // apenas reseta o estado local de "resolvidas".
       setResolvidas([]);
     }
-  }, [estudioId]);
+  }, [idEfetivo]);
 
-  // FIX (Bug #1): forma funcional do setState evita perder atualizações
-  // quando duas resoluções acontecem em sequência rápida.
+  function persistirResolvidas(novas) {
+    // FIX: setItem agora protegido — quota excedida / modo privado não quebra o clique do usuário
+    try {
+      localStorage.setItem(chaveResolvidas(idEfetivo), JSON.stringify(novas));
+    } catch (e) {
+      console.error('Falha ao persistir notificações resolvidas:', e);
+    }
+  }
+
   const marcarComoResolvida = (idUnico) => {
     setResolvidas(prev => {
       const novas = [...prev, idUnico];
-      localStorage.setItem(chaveResolvidas(estudioId), JSON.stringify(novas));
+      persistirResolvidas(novas);
       return novas;
     });
   };
@@ -46,18 +50,19 @@ export function useNotificacoes() {
   const desfazerResolvida = (idUnico) => {
     setResolvidas(prev => {
       const novas = prev.filter(id => id !== idUnico);
-      localStorage.setItem(chaveResolvidas(estudioId), JSON.stringify(novas));
+      persistirResolvidas(novas);
       return novas;
     });
   };
 
   const query = useQuery({
-    queryKey: ['notificacoes-gerais', estudioId],
+    queryKey: ['notificacoes-gerais', idEfetivo],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('alunos')
-        .select('id, nome_completo, telefone, data_nascimento, data_fim_plano, planos(nome)')
-        .eq('estudio_id', estudioId) // filtro de tenant obrigatório
+        // FIX: removido `telefone` — PII não usada nesta tela, sem motivo pra trafegar
+        .select('id, nome_completo, data_nascimento, data_fim_plano, planos(nome)')
+        .eq('estudio_id', idEfetivo)
         .eq('ativo', true);
 
       if (error) throw error;
@@ -85,8 +90,6 @@ export function useNotificacoes() {
         if (aluno.data_nascimento) {
           const [, mesNasc, diaNasc] = aluno.data_nascimento.split('-');
 
-          // FIX (edge case): aniversariantes de 29/02 em anos não bissextos
-          // caíam em 01/03 por overflow do Date. Ajustamos para 28/02 nesse caso.
           const diaAjustado = Number(mesNasc) === 2 && Number(diaNasc) === 29 && !ehBissexto(anoAtual)
             ? 28
             : Number(diaNasc);
@@ -116,8 +119,8 @@ export function useNotificacoes() {
 
       return notificacoes.sort((a, b) => a.diasFaltando - b.diasFaltando);
     },
-    enabled: !!estudioId,
-    staleTime: 1000 * 60 * 5, // notificações não mudam minuto a minuto
+    enabled: !!idEfetivo, // FIX
+    staleTime: 1000 * 60 * 5,
   });
 
   const todasAsNotificacoes = query.data || [];
@@ -127,8 +130,7 @@ export function useNotificacoes() {
   return {
     ativas,
     concluidas,
-    loading: query.isLoading,
-    // FIX (edge case): expõe o estado de erro em vez de mascará-lo como "sem notificações".
+    loading: query.isPending, // FIX: isPending é o nome correto no v5 pra "primeira carga sem dados"
     error: query.isError ? query.error : null,
     marcarComoResolvida,
     desfazerResolvida,

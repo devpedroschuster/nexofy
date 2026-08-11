@@ -1,15 +1,16 @@
-// webapp/src/pages/ConfiguracoesEstudio.jsx
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Settings, Upload, Save, Globe, Phone, Instagram, MapPin, Mail, Palette } from 'lucide-react';
+import { Settings, Upload, Save, Globe, Phone, Instagram, MapPin, Mail, Palette, LayoutGrid } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
 import { useImpersonation } from '../context/ImpersonationContext';
 import { atualizarEstudio, uploadLogo } from '../services/estudioService';
+import { SEGMENTOS, CHAVES_TERMINOLOGIA, terminologiaPadraoDoSegmento } from '../lib/terminologia';
 import { showToast } from '../components/shared/Toast';
 import Button from '../components/ui/Button';
 import Input, { Label } from '../components/ui/Input';
 import Surface from '../components/ui/Surface';
+import { ModalConfirmacao } from '../components/ui/Modal';
 
 // Timezones brasileiras + internacionais mais comuns
 const TIMEZONES = [
@@ -29,6 +30,30 @@ const TIMEZONES = [
   { value: 'UTC',                  label: 'UTC' },
 ];
 
+// Rótulo de exibição de cada chave de terminologia — só pra montar o
+// formulário; a lógica de fallback em si vive em lib/terminologia.js.
+const LABELS_CHAVE_TERMINOLOGIA = {
+  aluno: 'Aluno',
+  professor: 'Professor',
+  aula: 'Aula',
+  turma: 'Turma',
+  modalidade: 'Modalidade',
+};
+
+// Módulos do núcleo — sempre ativos, mostrados como informação (não como
+// toggle real): não existe hoje nenhum módulo opcional implementado (ver
+// seção 7.5 do PLANO - MULTI SEGMENTO.md — "desempenho do atleta" ainda
+// não foi construído). Expor um toggle "funcional" para algo que não
+// existe seria pior que não expor nada — o admin ligaria algo e nada
+// mudaria na tela, gerando confusão. Quando o primeiro módulo opcional
+// existir de verdade, ele entra nesta lista com toggle habilitado.
+const MODULOS_NUCLEO = [
+  { value: 'alunos', label: 'Alunos' },
+  { value: 'agenda', label: 'Agenda' },
+  { value: 'financeiro', label: 'Financeiro' },
+  { value: 'presenca', label: 'Presença' },
+];
+
 // Regras simples de validação client-side (defesa em profundidade;
 // a validação "de verdade" continua sendo feita no backend/constraints).
 const REGEX_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -36,7 +61,7 @@ const REGEX_WHATSAPP = /^\d{10,15}$/; // código do país + DDD + número, só d
 const REGEX_HEX_COLOR = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/;
 const PROTOCOLOS_URL_PERMITIDOS = ['http:', 'https:'];
 const TAMANHO_MAX_LOGO_MB = 5;
-const TIPOS_LOGO_PERMITIDOS = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
+const TIPOS_LOGO_PERMITIDOS = ['image/png', 'image/jpeg', 'image/webp'];
 
 function urlValidaOuVazia(valor) {
   if (!valor) return true; // campo opcional
@@ -55,17 +80,20 @@ function FieldGroup({ children, className = '' }) {
 export default function ConfiguracoesEstudio() {
   const queryClient = useQueryClient();
   const { estudioId, perfil } = useAuth();
-  // CR1 FIX: em modo impersonation, useAuth().estudioId é null (o super_admin
-  // não tem estudio_id próprio) — o estúdio "ativo" vem do ImpersonationContext.
   const { estudioAtivo } = useImpersonation();
   const idEfetivo = estudioAtivo?.id ?? estudioId;
 
-  // CR1 FIX: useEstudio precisa do id, senão a query fica `enabled: false`
-  // para sempre e a tela nunca carrega dados (falha silenciosa).
   const { data: estudio, isLoading, isError, error } = useEstudio(idEfetivo);
 
   const fileInputRef = useRef(null);
-  const objectUrlRef = useRef(null); // CR3 FIX: para revogar blob URLs
+  const objectUrlRef = useRef(null);
+  const montadoRef = useRef(true);
+
+useEffect(() => {
+    montadoRef.current = true;
+    return () => { montadoRef.current = false; };
+  }, []);
+
   const [salvando, setSalvando] = useState(false);
   const [uploadandoLogo, setUploadandoLogo] = useState(false);
   const [previewLogo, setPreviewLogo] = useState(null);
@@ -80,6 +108,18 @@ export default function ConfiguracoesEstudio() {
     cor_primaria:   '#7c3aed',
     timezone:       'America/Sao_Paulo',
   });
+
+  // Item 2 do plano multi-segmento (seção 4 do PLANO_ITEM_2.md): estado
+  // separado do `form` acima de propósito — segmento/terminologia têm
+  // fluxo de salvamento e validação próprios (troca de segmento pede
+  // confirmação explícita antes de reescrever a terminologia).
+  const [segmento, setSegmento] = useState('danca_fitness');
+  const [terminologia, setTerminologia] = useState({});
+
+  // Confirmação de troca de segmento: nunca sobrescreve a terminologia
+  // customizada silenciosamente (seção 3.1 do PLANO - MULTI SEGMENTO.md).
+  // `pendente` guarda o novo segmento até o admin confirmar ou cancelar.
+  const [trocaSegmentoPendente, setTrocaSegmentoPendente] = useState(null);
 
   // Somente admin do estúdio pode editar (defesa em profundidade além do RLS).
   const podeEditar = perfil === 'admin' || perfil === 'super_admin';
@@ -97,6 +137,8 @@ export default function ConfiguracoesEstudio() {
       timezone:      estudio.timezone      ?? 'America/Sao_Paulo',
     });
     setPreviewLogo(estudio.logo_url ?? null);
+    setSegmento(estudio.segmento ?? 'danca_fitness');
+    setTerminologia(estudio.terminologia ?? {});
   }, [estudio]);
 
   // CR3 FIX: revoga a última blob URL criada ao desmontar o componente.
@@ -112,6 +154,44 @@ export default function ConfiguracoesEstudio() {
     const { name, value } = e.target;
     setForm(prev => ({ ...prev, [name]: value }));
     if (erros[name]) setErros(prev => ({ ...prev, [name]: undefined }));
+  }
+
+  // Troca de segmento: não aplica na hora — abre confirmação. O <select>
+  // fica "controlado" pelo `segmento` atual (não pelo valor escolhido),
+  // então visualmente ele só muda depois que o admin confirma.
+  function handleSegmentoChange(e) {
+    const novoSegmento = e.target.value;
+    if (novoSegmento === segmento) return;
+    setTrocaSegmentoPendente(novoSegmento);
+  }
+
+  // Confirmado: aplica o segmento novo e PRÉ-PREENCHE a terminologia com
+  // o padrão daquele segmento — mas só nos campos que o admin ainda não
+  // customizou. Campo já customizado (ex.: trocou "Aluno" por "Membro")
+  // não é sobrescrito só porque o segmento mudou; o objetivo da troca de
+  // segmento é ajustar os PADRÕES, não apagar customização manual.
+  function confirmarTrocaSegmento() {
+    const novoSegmento = trocaSegmentoPendente;
+    const padraoAntigo = terminologiaPadraoDoSegmento(segmento);
+    const padraoNovo = terminologiaPadraoDoSegmento(novoSegmento);
+
+    setTerminologia((prev) => {
+      const proximo = { ...prev };
+      for (const chave of CHAVES_TERMINOLOGIA) {
+        const eraPadraoAntigo = !prev[chave] || prev[chave] === padraoAntigo[chave];
+        if (eraPadraoAntigo) {
+          proximo[chave] = padraoNovo[chave];
+        }
+      }
+      return proximo;
+    });
+
+    setSegmento(novoSegmento);
+    setTrocaSegmentoPendente(null);
+  }
+
+  function handleTerminologiaChange(chave, valor) {
+    setTerminologia((prev) => ({ ...prev, [chave]: valor }));
   }
 
   const validarForm = useCallback(() => {
@@ -142,7 +222,6 @@ export default function ConfiguracoesEstudio() {
 
   async function handleSalvar() {
     if (!idEfetivo) {
-      // CR2 FIX: nunca chama o service sem um estudioId válido.
       showToast.error('Não foi possível identificar o estúdio. Recarregue a página.');
       return;
     }
@@ -157,25 +236,35 @@ export default function ConfiguracoesEstudio() {
 
     setSalvando(true);
     try {
-      await atualizarEstudio(idEfetivo, form);
-      // Invalida as duas chaves para refletir imediatamente no Sidebar,
-      // nesta própria tela e nos demais componentes que leem o estúdio.
+      // Terminologia: só grava chaves com valor preenchido — string vazia
+      // vira "ausente" (cai no fallback de resolverRotulo) em vez de
+      // gravar '' e o fallback nunca mais entrar em ação pra aquele campo.
+      const terminologiaLimpa = Object.fromEntries(
+        Object.entries(terminologia).filter(([, v]) => v && v.trim())
+      );
+
+      await atualizarEstudio(idEfetivo, {
+        ...form,
+        segmento,
+        terminologia: terminologiaLimpa,
+      });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['estudio-atual'] }),
         queryClient.invalidateQueries({ queryKey: ['estudio', idEfetivo] }),
       ]);
-      showToast.success('Configurações salvas com sucesso!');
+      if (montadoRef.current) showToast.success('Configurações salvas com sucesso!');
     } catch (err) {
       console.error('[ConfiguracoesEstudio] Erro ao salvar:', err);
+      if (!montadoRef.current) return;
       if (err?.code === '42501' || err?.status === 403) {
         showToast.error('Sem permissão para salvar estas configurações.');
-      } else if (err?.message?.toLowerCase().includes('network')) {
+      } else if (err?.message?.toLowerCase().includes('network') || err?.message?.toLowerCase().includes('fetch')) {
         showToast.error('Falha de conexão. Verifique sua internet e tente novamente.');
       } else {
-        showToast.error('Erro ao salvar. Tente novamente.');
+        showToast.error(err?.message || 'Erro ao salvar. Tente novamente.');
       }
     } finally {
-      setSalvando(false);
+      if (montadoRef.current) setSalvando(false);
     }
   }
 
@@ -188,11 +277,8 @@ export default function ConfiguracoesEstudio() {
       e.target.value = '';
       return;
     }
-
-    // Validações client-side (defesa em profundidade — o Storage/backend
-    // também deve validar tipo e tamanho).
     if (!TIPOS_LOGO_PERMITIDOS.includes(file.type)) {
-      showToast.error('Formato inválido. Use PNG, JPG, WEBP ou SVG.');
+      showToast.error('Formato inválido. Use PNG, JPG ou WEBP.'); // SVG removido — ver nota de segurança
       e.target.value = '';
       return;
     }
@@ -202,7 +288,6 @@ export default function ConfiguracoesEstudio() {
       return;
     }
 
-    // CR3 FIX: revoga a blob URL anterior antes de criar uma nova.
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current);
     }
@@ -213,21 +298,31 @@ export default function ConfiguracoesEstudio() {
     setUploadandoLogo(true);
     try {
       const url = await uploadLogo(idEfetivo, file);
-      setPreviewLogo(url);
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current); // revoga assim que a URL remota está disponível
+        objectUrlRef.current = null;
+      }
+      if (montadoRef.current) setPreviewLogo(url);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['estudio-atual'] }),
         queryClient.invalidateQueries({ queryKey: ['estudio', idEfetivo] }),
       ]);
-      showToast.success('Logo atualizado com sucesso!');
+      if (montadoRef.current) showToast.success('Logo atualizado com sucesso!');
     } catch (err) {
       console.error('[ConfiguracoesEstudio] Erro ao enviar logo:', err);
+      if (!montadoRef.current) return;
       showToast.error('Erro ao enviar o logo. Tente novamente.');
       setPreviewLogo(estudio?.logo_url ?? null);
     } finally {
-      setUploadandoLogo(false);
-      e.target.value = ''; // permite reenviar o mesmo arquivo depois de um erro
+      if (montadoRef.current) setUploadandoLogo(false);
+      e.target.value = '';
     }
   }
+
+  const nomeSegmentoPendente = useMemo(
+    () => SEGMENTOS.find((s) => s.value === trocaSegmentoPendente)?.label ?? '',
+    [trocaSegmentoPendente]
+  );
 
   if (isLoading) {
     return (
@@ -305,7 +400,7 @@ export default function ConfiguracoesEstudio() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              accept="image/png,image/jpeg,image/webp"
               className="hidden"
               onChange={handleLogoChange}
               disabled={!podeEditar}
@@ -395,6 +490,73 @@ export default function ConfiguracoesEstudio() {
               <p className="text-xs text-destructive font-medium">{erros.cor_primaria}</p>
             )}
           </FieldGroup>
+        </div>
+      </Surface>
+
+      {/* Segmento, terminologia e módulos — item 2 do plano multi-segmento */}
+      <Surface variant="card" padding="xl">
+        <h2 className="text-base font-black text-foreground mb-2 flex items-center gap-2">
+          <LayoutGrid size={18} className="text-primary" />
+          Segmento e Nomenclatura
+        </h2>
+        <p className="text-xs text-muted-foreground font-medium mb-6">
+          O segmento não altera nenhuma regra de negócio — só sugere rótulos padrão e decide
+          quais módulos aparecem no menu. Os nomes abaixo podem ser customizados livremente.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <FieldGroup>
+            <Label htmlFor="segmento">Segmento do Estúdio</Label>
+            <Input
+              as="select"
+              id="segmento"
+              name="segmento"
+              value={segmento}
+              onChange={handleSegmentoChange}
+              className="font-medium"
+              disabled={!podeEditar}
+            >
+              {SEGMENTOS.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </Input>
+          </FieldGroup>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
+          {CHAVES_TERMINOLOGIA.map((chave) => (
+            <FieldGroup key={chave}>
+              <Label htmlFor={`terminologia_${chave}`}>
+                Como chamar &quot;{LABELS_CHAVE_TERMINOLOGIA[chave] ?? chave}&quot;
+              </Label>
+              <Input
+                id={`terminologia_${chave}`}
+                name={`terminologia_${chave}`}
+                value={terminologia[chave] ?? ''}
+                onChange={(e) => handleTerminologiaChange(chave, e.target.value)}
+                placeholder={terminologiaPadraoDoSegmento(segmento)[chave]}
+                disabled={!podeEditar}
+              />
+            </FieldGroup>
+          ))}
+        </div>
+
+        <div className="mt-6 pt-5 border-t border-border">
+          <Label className="mb-3 block">Módulos Ativos</Label>
+          <div className="flex flex-wrap gap-2">
+            {MODULOS_NUCLEO.map((m) => (
+              <span
+                key={m.value}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-muted text-xs font-bold text-muted-foreground"
+              >
+                {m.label}
+              </span>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground font-medium mt-2">
+            Módulos do núcleo, sempre disponíveis. Módulos opcionais por segmento aparecerão
+            aqui conforme forem lançados.
+          </p>
         </div>
       </Surface>
 
@@ -493,6 +655,18 @@ export default function ConfiguracoesEstudio() {
           {salvando ? 'Salvando...' : 'Salvar Configurações'}
         </Button>
       </div>
+
+      {/* Confirmação de troca de segmento */}
+      <ModalConfirmacao
+        aberto={!!trocaSegmentoPendente}
+        fechar={() => setTrocaSegmentoPendente(null)}
+        titulo="Trocar segmento do estúdio?"
+        mensagem={`Isso vai atualizar os rótulos padrão para "${nomeSegmentoPendente}" nos campos que você ainda não personalizou. Nomes já customizados não serão alterados. A troca só é salva ao clicar em "Salvar Configurações".`}
+        textoConfirmar="Trocar segmento"
+        textoCancelar="Cancelar"
+        tipo="warning"
+        onConfirm={confirmarTrocaSegmento}
+      />
     </div>
   );
 }

@@ -9,6 +9,9 @@ import { supabase } from '../lib/supabase';
 import { financeiroService } from '../services/financeiroService';
 import { useFinanceiro } from '../hooks/useFinanceiro';
 import { useAuth } from '../hooks/useAuth';
+import { useImpersonation } from '../context/ImpersonationContext'; // FIX: impersonation
+import { useTabelaColunas } from '../hooks/useTabelaColunas';
+import { TABLE_COLUMNS_ESTATICO } from '../lib/tabelaColunas';
 import SelectFormaPagamento from '../components/SelectFormaPagamento';
 import RepasseAlunoCard from '../components/RepasseAlunoCard';
 import { TIPOS_AULA } from '../lib/constants';
@@ -51,8 +54,119 @@ function calcularStatusReal(item) {
 const ORDEM_STATUS = { atrasado: 0, pendente: 1, pago: 2 };
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ---------------------------------------------------------------------
+// Renderers das 6 colunas fixas de negócio de Financeiro (item 3 do
+// plano multi-segmento — tabela configurável). Cada função recebe a
+// linha `item` (mensalidade) inteira — mesmo JSX/lógica que já existia
+// inline na tabela, só extraído para ser despachado pelo column_key
+// configurado em tabela_colunas_config. NENHUMA lógica de negócio foi
+// alterada aqui. Financeiro não tem colunas dinâmicas (catálogo 100%
+// estático — ver TABLE_COLUMNS_ESTATICO.financeiro em lib/tabelaColunas.js).
+// ---------------------------------------------------------------------
+
+function CelulaFinAlunoFixa({ item }) {
+  return (
+    <div className="flex items-center gap-2 font-bold text-foreground">
+      {item.alunos?.nome_completo || item.nome_visitante || 'Visitante'}
+      {!item.alunos && item.nome_visitante && (
+        <Badge tone="neutral" variant="soft" className="text-[9px]">Avulso</Badge>
+      )}
+    </div>
+  );
+}
+
+function CelulaFinVencimentoFixa({ item, statusReal, diasAtraso }) {
+  return (
+    <>
+      <span className={statusReal === 'atrasado' ? 'text-destructive font-bold' : 'text-muted-foreground'}>
+        {new Date(item.data_vencimento + 'T12:00:00').toLocaleDateString('pt-BR')}
+      </span>
+      {statusReal === 'atrasado' && (
+        <p className="text-[10px] text-destructive font-bold mt-0.5">
+          há {diasAtraso} {diasAtraso === 1 ? 'dia' : 'dias'}
+        </p>
+      )}
+    </>
+  );
+}
+
+function CelulaFinValorFixa({ item }) {
+  return (
+    <span className="font-bold text-foreground">
+      {item.status === 'pago'
+        ? formatarMoeda(item.valor_pago !== null ? item.valor_pago : item.planos?.preco)
+        : formatarMoeda(item.planos?.preco)}
+    </span>
+  );
+}
+
+function CelulaFinFormaPagamentoFixa({ item }) {
+  return item.status === 'pago' && item.forma_pagamento ? (
+    <Badge tone="neutral" variant="soft" className="capitalize">
+      {item.forma_pagamento}
+    </Badge>
+  ) : (
+    <span className="text-muted-foreground text-xs">—</span>
+  );
+}
+
+function CelulaFinDataPagamentoFixa({ item }) {
+  return item.data_pagamento
+    ? <span className="text-muted-foreground font-medium text-sm">{new Date(item.data_pagamento + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
+    : <span className="text-muted-foreground font-medium text-sm text-xs">—</span>;
+}
+
+function CelulaFinStatusFixa({ statusReal }) {
+  return (
+    <Badge
+      tone={
+        statusReal === 'pago'     ? 'success'     :
+        statusReal === 'atrasado' ? 'destructive' : 'warning'
+      }
+    >
+      {statusReal === 'atrasado' ? 'ATRASADO'
+        : statusReal === 'pago'  ? 'PAGO'
+        : 'PENDENTE'}
+    </Badge>
+  );
+}
+
+// Fallback usado enquanto tabela_colunas_config ainda não carregou —
+// mesma ordem/labels que a tabela sempre teve, todas visíveis. Evita
+// adicionar um novo estado de loading só pra isso (ver mesmo padrão em
+// pages/Alunos.jsx).
+const COLUNAS_FINANCEIRO_FALLBACK = TABLE_COLUMNS_ESTATICO.financeiro.map((c, i) => ({
+  id: `fallback-${c.key}`,
+  column_key: c.key,
+  label: c.defaultLabel,
+  is_visible: true,
+  display_order: i + 1,
+  origin: c.origin,
+}));
+
+/**
+ * Despacha o render de uma célula de Financeiro pro renderer fixo
+ * correspondente. Diferente de Alunos, aqui não existe branch "dynamic"
+ * — todas as colunas de Financeiro são fixas (catálogo estático).
+ */
+function renderCelulaFinanceiro(coluna, item, statusInfo) {
+  const { tipo: statusReal, diasAtraso } = statusInfo;
+  switch (coluna.column_key) {
+    case 'aluno':           return <CelulaFinAlunoFixa item={item} />;
+    case 'vencimento':      return <CelulaFinVencimentoFixa item={item} statusReal={statusReal} diasAtraso={diasAtraso} />;
+    case 'valor':            return <CelulaFinValorFixa item={item} />;
+    case 'forma_pagamento':  return <CelulaFinFormaPagamentoFixa item={item} />;
+    case 'data_pagamento':   return <CelulaFinDataPagamentoFixa item={item} />;
+    case 'status':            return <CelulaFinStatusFixa statusReal={statusReal} />;
+    default:                  return null; // não deveria acontecer — coluna fixa desconhecida
+  }
+}
+
 export default function Financeiro() {
   const { estudioId } = useAuth();
+  const { estudioAtivo } = useImpersonation();       // FIX: impersonation
+  const idEfetivo = estudioAtivo?.id ?? estudioId;   // FIX: idEfetivo usado em todo o componente
+
   const dataAtual = new Date();
   const [filtros, setFiltros] = useState({
     mes: dataAtual.getMonth() + 1,
@@ -66,6 +180,15 @@ export default function Financeiro() {
 
   const { mensalidades, loading, refetch } = useFinanceiro(filtros);
   const [busca, setBusca] = useState('');
+
+  // Item 3 (tabela configurável): visibilidade/ordem das colunas, com
+  // fallback pro layout padrão (idêntico ao anterior) enquanto a config
+  // ainda não carregou — não bloqueia o carregamento normal da tabela.
+  const { colunas: colunasConfig } = useTabelaColunas('financeiro');
+  const colunasVisiveis = (colunasConfig.length > 0 ? colunasConfig : COLUNAS_FINANCEIRO_FALLBACK)
+    .filter((c) => c.is_visible)
+    .sort((a, b) => a.display_order - b.display_order);
+
   const modalPagamento = useModal();
   const modalResultado = useModal();
   const modalGerarMensalidades = useModal();
@@ -91,28 +214,30 @@ export default function Financeiro() {
   const [totalAtivos, setTotalAtivos] = useState(null);
 
   useEffect(() => {
-  if (!estudioId) return;
-  async function carregarProfessores() {
-    const { data, error } = await supabase
-      .from('professores')
-      .select('id, nome')
-      .eq('ativo', true)
-      .eq('estudio_id', estudioId);
-    if (error) {
-      console.error('[Financeiro] carregarProfessores:', error);
-      showToast.error('Erro ao carregar professores.');
-      return;
+    if (!idEfetivo) return; // FIX: idEfetivo
+    let cancelado = false;  // FIX: guard contra setState após unmount
+    async function carregarProfessores() {
+      const { data, error } = await supabase
+        .from('professores')
+        .select('id, nome')
+        .eq('ativo', true)
+        .eq('estudio_id', idEfetivo); // FIX: idEfetivo
+      if (cancelado) return;
+      if (error) {
+        console.error('[Financeiro] carregarProfessores:', error);
+        showToast.error('Erro ao carregar professores.');
+        return;
+      }
+      setProfessores(data || []);
     }
-    setProfessores(data || []);
-  }
-  carregarProfessores();
-}, [estudioId]);
+    carregarProfessores();
+    return () => { cancelado = true; };
+  }, [idEfetivo]);
 
   const metricas = useMemo(() => {
     if (!mensalidades) return { recebido: 0, pendente: 0, atrasado: 0, total: 0 };
     // Usa data local (não UTC) — mesma lógica de calcularStatusReal
-    const _d = new Date();
-    const hoje = `${_d.getFullYear()}-${String(_d.getMonth() + 1).padStart(2, '0')}-${String(_d.getDate()).padStart(2, '0')}`;
+    const hoje = hojeLocal();
     return mensalidades.reduce((acc, m) => {
       const valorOriginal = Number(m.planos?.preco) || 0;
       const valorReal = m.valor_pago !== null ? Number(m.valor_pago) : valorOriginal;
@@ -137,61 +262,68 @@ export default function Financeiro() {
     setTipoAula(mensalidade.planos?.is_plano_livre ? 'plano_livre' : 'regular');
     setProfessorId('');
     setModalidadeNome('');
-    const d = new Date();
-    const hoje = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    setDataPagamentoConfirmar(hoje);
+    setDataPagamentoConfirmar(hojeLocal()); // FIX: reaproveita helper em vez de recalcular
     modalPagamento.abrir();
   };
 
   const handleConfirmarPagamento = async (e) => {
-  e.preventDefault();
-  if (!estudioId) {
-    showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
-    return;
-  }
-  const valorFormatado = parseFloat(valorPago.replace(/\./g, '').replace(',', '.'));
-  if (Number.isNaN(valorFormatado) || valorFormatado <= 0) {
-    showToast.error('Informe um valor válido.');
-    return;
-  }
-  try {
-    const payload = {
-      valor_pago: valorFormatado,
-      forma_pagamento: formaPagamento,
-      tipo_aula: tipoAula,
-      professor_id: (tipoAula === 'experimental' || tipoAula === 'avulsa') ? professorId : null,
-      modalidade_nome: (tipoAula === 'experimental' || tipoAula === 'avulsa') ? modalidadeNome : null,
-      data_pagamento: dataPagamentoConfirmar,
-    };
-    const res = await financeiroService.confirmarPagamento(pagamentoSelecionado.id, payload, estudioId);
-    showToast.success('Pagamento processado com sucesso!');
-    refetch();
-    modalPagamento.fechar();
-    setResultadoRepasse(res.resultado);
-    setDadosPagamento({
-      valor_pago: valorFormatado,
-      forma_pagamento: formaPagamento,
-      data_pagamento: dataPagamentoConfirmar,
-    });
-    modalResultado.abrir();
-  } catch (error) {
-    console.error('[Financeiro] handleConfirmarPagamento:', error);
-    showToast.error('Erro ao processar pagamento');
-  }
-};
+    e.preventDefault();
+    if (!idEfetivo) { // FIX: idEfetivo
+      showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
+      return;
+    }
+    const valorFormatado = parseFloat(valorPago.replace(/\./g, '').replace(',', '.'));
+    if (Number.isNaN(valorFormatado) || valorFormatado <= 0) {
+      showToast.error('Informe um valor válido.');
+      return;
+    }
+    try {
+      const payload = {
+        valor_pago: valorFormatado,
+        forma_pagamento: formaPagamento,
+        tipo_aula: tipoAula,
+        professor_id: (tipoAula === 'experimental' || tipoAula === 'avulsa') ? professorId : null,
+        modalidade_nome: (tipoAula === 'experimental' || tipoAula === 'avulsa') ? modalidadeNome : null,
+        data_pagamento: dataPagamentoConfirmar,
+      };
+      const res = await financeiroService.confirmarPagamento(pagamentoSelecionado.id, payload, idEfetivo); // FIX: idEfetivo
+      refetch();
+      modalPagamento.fechar();
 
-   const handleGerarMensalidades = async () => {
-    if (!estudioId) {
+      // FIX: o sucesso do pagamento em si é sempre exibido, independente do repasse
+      showToast.success('Pagamento processado com sucesso!');
+
+      if (res.resultado) {
+        setResultadoRepasse(res.resultado);
+        setDadosPagamento({
+          valor_pago: valorFormatado,
+          forma_pagamento: formaPagamento,
+          data_pagamento: dataPagamentoConfirmar,
+        });
+        modalResultado.abrir();
+      } else if (res._avisoRepasse) {
+        // FIX: aviso de repasse não gerado não é mais descartado silenciosamente
+        setTimeout(() => showToast.warning(`⚠️ ${res._avisoRepasse}`), 600);
+      }
+    } catch (error) {
+      console.error('[Financeiro] handleConfirmarPagamento:', error);
+      showToast.error('Erro ao processar pagamento');
+    }
+  };
+
+  const handleGerarMensalidades = async () => {
+    if (!idEfetivo) { // FIX: idEfetivo
       showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
       return;
     }
     setGerando(true);
     try {
-      await financeiroService.gerarMensalidades(filtros.mes, filtros.ano, estudioId);
+      await financeiroService.gerarMensalidades(filtros.mes, filtros.ano, idEfetivo); // FIX: idEfetivo
       showToast.success('Mensalidades criadas com sucesso!');
       refetch();
       modalGerarMensalidades.fechar();
     } catch (error) {
+      console.error('[Financeiro] handleGerarMensalidades:', error); // FIX: log real do erro
       showToast.error('Erro ao criar mensalidades');
     } finally {
       setGerando(false);
@@ -199,21 +331,28 @@ export default function Financeiro() {
   };
 
   const handleAbrirGerarMensalidades = async () => {
-  setTotalAtivos(null);
-  modalGerarMensalidades.abrir();
-  const { count, error } = await supabase
-    .from('alunos')
-    .select('id', { count: 'exact', head: true })
-    .eq('ativo', true)
-    .eq('estudio_id', estudioId);
-  if (error) {
-    console.error('[Financeiro] handleAbrirGerarMensalidades:', error);
-    showToast.error('Erro ao contar alunos ativos.');
-    modalGerarMensalidades.fechar();
-    return;
-  }
-  setTotalAtivos(count ?? 0);
-};
+    setTotalAtivos(null);
+    modalGerarMensalidades.abrir();
+    let cancelado = false; // FIX: guard contra setState após fechamento/unmount
+    try {
+      const { count, error } = await supabase
+        .from('alunos')
+        .select('id', { count: 'exact', head: true })
+        .eq('ativo', true)
+        .eq('estudio_id', idEfetivo); // FIX: idEfetivo
+      if (cancelado) return;
+      if (error) {
+        console.error('[Financeiro] handleAbrirGerarMensalidades:', error);
+        showToast.error('Erro ao contar alunos ativos.');
+        modalGerarMensalidades.fechar();
+        return;
+      }
+      setTotalAtivos(count ?? 0);
+    } finally {
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }
+    return () => { cancelado = true; };
+  };
 
   const handleAbrirEdicao = (item) => {
     setLancamentoEditando(item);
@@ -229,6 +368,10 @@ export default function Financeiro() {
 
   const handleSalvarEdicao = async (e) => {
     e.preventDefault();
+    if (!idEfetivo) { // FIX: idEfetivo
+      showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
+      return;
+    }
     setSalvandoEdicao(true);
     try {
       const payload = {
@@ -244,15 +387,22 @@ export default function Financeiro() {
         payload.forma_pagamento = null;
         payload.data_pagamento = null;
       }
-      const { error } = await supabase
+      // FIX: .eq('estudio_id', idEfetivo) — sem isso, o update confiava só na RLS (IDOR)
+      // FIX: .select().maybeSingle() para detectar 0 linhas afetadas (tentativa de IDOR ou id inexistente)
+      const { data, error } = await supabase
         .from('mensalidades')
         .update(payload)
-        .eq('id', lancamentoEditando.id);
+        .eq('id', lancamentoEditando.id)
+        .eq('estudio_id', idEfetivo)
+        .select()
+        .maybeSingle();
       if (error) throw error;
+      if (!data) throw new Error('Lançamento não encontrado neste estúdio.');
       showToast.success('Lançamento atualizado com sucesso!');
       refetch();
       modalEditar.fechar();
     } catch (error) {
+      console.error('[Financeiro] handleSalvarEdicao:', error); // FIX: log real do erro
       showToast.error('Erro ao atualizar lançamento');
     } finally {
       setSalvandoEdicao(false);
@@ -265,19 +415,40 @@ export default function Financeiro() {
   };
 
   const handleConfirmarExclusao = async () => {
+    if (!idEfetivo) { // FIX: idEfetivo
+      showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
+      return;
+    }
     setExcluindo(true);
     try {
-      // Remove repasses vinculados primeiro
-      await supabase.from('repasses').delete().eq('mensalidade_id', lancamentoExcluindo.id);
-      const { error } = await supabase
+      // FIX: tabela correta é `repasses_lancamentos` (a tabela `repasses` não existe
+      // mais em nenhum outro lugar do código — era resquício de antes de um rename
+      // e fazia os repasses reais ficarem órfãos após a exclusão do lançamento).
+      // FIX: filtro por estudio_id + erro tratado (antes era um "fire and forget").
+      const { error: errRepasses } = await supabase
+        .from('repasses_lancamentos')
+        .delete()
+        .eq('mensalidade_id', lancamentoExcluindo.id)
+        .eq('estudio_id', idEfetivo);
+      if (errRepasses) throw errRepasses;
+
+      // FIX: .eq('estudio_id', idEfetivo) — sem isso, o delete confiava só na RLS (IDOR destrutivo)
+      // FIX: .select().maybeSingle() para detectar 0 linhas afetadas
+      const { data, error } = await supabase
         .from('mensalidades')
         .delete()
-        .eq('id', lancamentoExcluindo.id);
+        .eq('id', lancamentoExcluindo.id)
+        .eq('estudio_id', idEfetivo)
+        .select()
+        .maybeSingle();
       if (error) throw error;
+      if (!data) throw new Error('Lançamento não encontrado neste estúdio.');
+
       showToast.success('Lançamento excluído com sucesso!');
       refetch();
       modalExcluir.fechar();
     } catch (error) {
+      console.error('[Financeiro] handleConfirmarExclusao:', error); // FIX: log real do erro
       showToast.error('Erro ao excluir lançamento');
     } finally {
       setExcluindo(false);
@@ -431,18 +602,18 @@ export default function Financeiro() {
           <table className="w-full text-left">
             <thead>
               <tr className="bg-muted border-b border-border">
-                <th className="p-4 font-bold text-muted-foreground uppercase text-xs">Aluno</th>
-                <th className="p-4 font-bold text-muted-foreground uppercase text-xs">Vencimento</th>
-                <th className="p-4 font-bold text-muted-foreground uppercase text-xs">Valor</th>
-                <th className="p-4 font-bold text-muted-foreground uppercase text-xs">Forma Pag.</th>
-                <th className="p-4 font-bold text-muted-foreground uppercase text-xs">Dt. Pagamento</th>
-                <th className="p-4 font-bold text-muted-foreground uppercase text-xs">Status</th>
+                {colunasVisiveis.map((coluna) => (
+                  <th key={coluna.id} className="p-4 font-bold text-muted-foreground uppercase text-xs">
+                    {coluna.label}
+                  </th>
+                ))}
                 <th className="p-4 font-bold text-muted-foreground uppercase text-xs text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {alunosFiltrados.map((item) => {
-                const { tipo: statusReal, diasAtraso } = calcularStatusReal(item);
+                const statusInfo = calcularStatusReal(item);
+                const { tipo: statusReal } = statusInfo;
                 return (
                   <tr
                     key={item.id}
@@ -450,53 +621,11 @@ export default function Financeiro() {
                       statusReal === 'atrasado' ? 'bg-destructive-soft/20' : ''
                     }`}
                   >
-                    <td className="p-4 font-bold text-foreground flex items-center gap-2">
-                      {item.alunos?.nome_completo || item.nome_visitante || 'Visitante'}
-                      {!item.alunos && item.nome_visitante && (
-                        <Badge tone="neutral" variant="soft" className="text-[9px]">Avulso</Badge>
-                      )}
-                    </td>
-                    <td className="p-4 font-medium">
-                      <span className={statusReal === 'atrasado' ? 'text-destructive font-bold' : 'text-muted-foreground'}>
-                        {new Date(item.data_vencimento + 'T12:00:00').toLocaleDateString('pt-BR')}
-                      </span>
-                      {statusReal === 'atrasado' && (
-                        <p className="text-[10px] text-destructive font-bold mt-0.5">
-                          há {diasAtraso} {diasAtraso === 1 ? 'dia' : 'dias'}
-                        </p>
-                      )}
-                    </td>
-                    <td className="p-4 font-bold text-foreground">
-                      {item.status === 'pago'
-                        ? formatarMoeda(item.valor_pago !== null ? item.valor_pago : item.planos?.preco)
-                        : formatarMoeda(item.planos?.preco)}
-                    </td>
-                    <td className="p-4">
-                      {item.status === 'pago' && item.forma_pagamento ? (
-                        <Badge tone="neutral" variant="soft" className="capitalize">
-                          {item.forma_pagamento}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="p-4 text-muted-foreground font-medium text-sm">
-                      {item.data_pagamento
-                        ? new Date(item.data_pagamento + 'T12:00:00').toLocaleDateString('pt-BR')
-                        : <span className="text-xs">—</span>}
-                    </td>
-                    <td className="p-4">
-                      <Badge
-                        tone={
-                          statusReal === 'pago'     ? 'success'     :
-                          statusReal === 'atrasado' ? 'destructive' : 'warning'
-                        }
-                      >
-                        {statusReal === 'atrasado' ? 'ATRASADO'
-                          : statusReal === 'pago'  ? 'PAGO'
-                          : 'PENDENTE'}
-                      </Badge>
-                    </td>
+                    {colunasVisiveis.map((coluna) => (
+                      <td key={coluna.id} className="p-4">
+                        {renderCelulaFinanceiro(coluna, item, statusInfo)}
+                      </td>
+                    ))}
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-1">
                         {item.status !== 'pago' && (
@@ -538,7 +667,7 @@ export default function Financeiro() {
                   {alunosFiltrados.length}{' '}
                   {alunosFiltrados.length === 1 ? 'registro' : 'registros'}
                 </td>
-                <td colSpan={5} />
+                <td colSpan={Math.max(colunasVisiveis.length - 1, 1)} />
                 <td className="p-4 text-right">
                   <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide mr-2">
                     Total
@@ -750,7 +879,8 @@ export default function Financeiro() {
                 />
               </div>
             )}
-            {formEdicao.status === 'pendente' && (              <Surface variant="muted" padding="sm">
+            {formEdicao.status === 'pendente' && (
+              <Surface variant="muted" padding="sm">
                 <p className="text-xs text-muted-foreground">
                   Ao definir como <strong>Pendente</strong>, os dados de pagamento serão removidos.
                 </p>

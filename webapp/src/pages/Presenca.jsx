@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useImpersonation } from '../context/ImpersonationContext';
 import { presencaService } from '../services/presencaService';
@@ -8,7 +8,6 @@ import {
   Download, BarChart2, ArrowRight
 } from 'lucide-react';
 import { showToast } from '../components/shared/Toast';
-import Modal, { useModal } from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Surface from '../components/ui/Surface';
@@ -26,14 +25,33 @@ import EmptyState from '../components/ui/EmptyState';
 // de dados de presença gravados aqui não aparecerem em nenhum outro lugar
 // do sistema. Esta página agora é só o relatório/dashboard, lendo do
 // mesmo `presencaService` usado pelo resto do app.
+//
+// FIX (auditoria — timezone): todo cálculo de "hoje"/período usa o fuso
+// America/Sao_Paulo explicitamente. Antes, `new Date().toISOString()`
+// convertia para UTC, fazendo "hoje" virar o dia seguinte entre ~21h e
+// meia-noite no horário de Brasília — o card "Presentes Hoje" e o filtro
+// "Hoje" mostravam o dia errado nesse intervalo.
 // ─────────────────────────────────────────────────────────────────────────
 
+const TZ_ESTUDIO = 'America/Sao_Paulo';
+const isoFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: TZ_ESTUDIO }); // en-CA => YYYY-MM-DD
+
+function hojeISO() {
+  return isoFormatter.format(new Date());
+}
+
+function paraISO(data) {
+  return isoFormatter.format(data);
+}
+
 function obterPeriodo(periodo) {
-  const hoje = new Date();
+  const hoje = new Date(`${hojeISO()}T12:00:00`); // meio-dia: evita virada de dia por causa de DST/fuso ao usar setDate/setMonth
   const inicio = new Date(hoje);
   const fim = new Date(hoje);
+
   if (periodo === 'hoje') {
-    // sem alteração de horas — comparamos apenas a parte de data (YYYY-MM-DD)
+    const h = hojeISO();
+    return { inicio: h, fim: h };
   } else if (periodo === 'semana') {
     inicio.setDate(hoje.getDate() - hoje.getDay());
     fim.setDate(inicio.getDate() + 6);
@@ -41,8 +59,7 @@ function obterPeriodo(periodo) {
     inicio.setDate(1);
     fim.setMonth(fim.getMonth() + 1, 0);
   }
-  const toISODate = d => d.toISOString().split('T')[0];
-  return { inicio: toISODate(inicio), fim: toISODate(fim) };
+  return { inicio: paraISO(inicio), fim: paraISO(fim) };
 }
 
 const ICON_TONE = {
@@ -75,6 +92,50 @@ function escaparCampoCsv(valor) {
   return v;
 }
 
+// presenca.status: 'agendado' | 'presente' | 'falta_justificada' | 'falta_nao_avisada'
+// presenca.data_aula: date (YYYY-MM-DD) — não é timestamp de check-in.
+function calcularMetricas(presencasData, alunosData) {
+  const hojeStr = hojeISO(); // FIX: fuso do estúdio, não UTC
+  const alunosAtivos = alunosData.length;
+  const seteDiasAtras = new Date(`${hojeStr}T00:00:00`);
+  seteDiasAtras.setDate(seteDiasAtras.getDate() - 7);
+
+  let presentesHoje = 0;
+  const presencasPorAluno = new Map();
+  const presencasPorDia = new Array(7).fill(0);
+
+  for (const p of presencasData) {
+    if (p.status !== 'presente' || !p.data_aula) continue;
+    if (p.data_aula === hojeStr) presentesHoje++;
+
+    const dataAula = new Date(`${p.data_aula}T00:00:00`);
+    if (dataAula >= seteDiasAtras) {
+      if (p.aluno_id != null) {
+        presencasPorAluno.set(p.aluno_id, (presencasPorAluno.get(p.aluno_id) || 0) + 1);
+      }
+      presencasPorDia[dataAula.getDay()]++;
+    }
+  }
+
+  const taxasIndividuais = alunosData.map(aluno => {
+    const esperado = Number(aluno.planos?.frequencia_semanal) || 1;
+    const real = presencasPorAluno.get(aluno.id) || 0;
+    return Math.min(real / esperado, 1);
+  });
+
+  const frequenciaMedia = alunosAtivos > 0
+    ? ((taxasIndividuais.reduce((acc, taxa) => acc + taxa, 0) / alunosAtivos) * 100).toFixed(1)
+    : 0;
+
+  const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  const presencaPorDia = diasSemana.map((dia, idx) => ({ dia, total: presencasPorDia[idx] }));
+
+  const totalSemana = presencaPorDia.reduce((acc, v) => acc + v.total, 0);
+  const mediaDiaria = Math.round(totalSemana / 7);
+
+  return { presentesHoje, frequenciaMedia, alunosAtivos, presencaSemana: presencaPorDia, mediaDiaria };
+}
+
 export default function Presenca() {
   // CR1 FIX: mesmo padrão de useAuth + useImpersonation usado no resto do app —
   // sem isso, super_admin em impersonation não tem estúdio efetivo, e sem
@@ -87,11 +148,6 @@ export default function Presenca() {
   const [aulas, setAulas] = useState([]);
   const [presencas, setPresencas] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  const [metricas, setMetricas] = useState({
-    presentesHoje: 0, frequenciaMedia: 0, alunosAtivos: 0,
-    presencaSemana: [], mediaDiaria: 0
-  });
   const [filtros, setFiltros] = useState({ periodo: 'hoje', aluno: 'todos', aula: 'todas' });
 
   // Guarda contra race conditions: só aplica a resposta da requisição mais recente.
@@ -139,9 +195,8 @@ export default function Presenca() {
       setAlunos(alunosData || []);
       setAulas(aulasData || []);
       setPresencas(presencasData || []);
-      calcularMetricas(presencasData || [], alunosData || []);
     } catch (err) {
-      console.error('[Presenca] erro ao carregar dados:', err);
+      console.error('[Presenca] erro ao carregar dados:', err?.code, err?.message, err);
       if (fetchId === fetchIdRef.current) {
         showToast.error('Erro ao carregar dados de presença.');
       }
@@ -152,49 +207,24 @@ export default function Presenca() {
 
   useEffect(() => { fetchDados(); }, [fetchDados]);
 
-  // presenca.status: 'agendado' | 'presente' | 'falta_justificada' | 'falta_nao_avisada'
-  // presenca.data_aula: date (YYYY-MM-DD) — não é timestamp de check-in.
-  function calcularMetricas(presencasData, alunosData) {
-    const hojeStr = new Date().toISOString().split('T')[0];
-    const alunosAtivos = alunosData.length;
-    const seteDiasAtras = new Date();
-    seteDiasAtras.setDate(seteDiasAtras.getDate() - 7);
+  // FIX (performance): cálculo derivado memoizado — evita reprocessar todo o
+  // array de presenças a cada render que não mude `presencas`/`alunos`.
+  const metricas = useMemo(
+    () => calcularMetricas(presencas, alunos),
+    [presencas, alunos]
+  );
 
-    let presentesHoje = 0;
-    const presencasPorAluno = new Map();
-    const presencasPorDia = new Array(7).fill(0);
+  // FIX (performance): filtragem derivada memoizada.
+  const presencasFiltradas = useMemo(() => presencas.filter(p => {
+    const matchAluno = filtros.aluno === 'todos' || String(p.aluno_id) === String(filtros.aluno);
+    const matchAula = filtros.aula === 'todas' || String(p.aula_id) === String(filtros.aula);
+    return matchAluno && matchAula;
+  }), [presencas, filtros.aluno, filtros.aula]);
 
-    for (const p of presencasData) {
-      if (p.status !== 'presente' || !p.data_aula) continue;
-      if (p.data_aula === hojeStr) presentesHoje++;
-
-      const dataAula = new Date(`${p.data_aula}T00:00:00`);
-      if (dataAula >= seteDiasAtras) {
-        if (p.aluno_id != null) {
-          presencasPorAluno.set(p.aluno_id, (presencasPorAluno.get(p.aluno_id) || 0) + 1);
-        }
-        presencasPorDia[dataAula.getDay()]++;
-      }
-    }
-
-    const taxasIndividuais = alunosData.map(aluno => {
-      const esperado = Number(aluno.planos?.frequencia_semanal) || 1;
-      const real = presencasPorAluno.get(aluno.id) || 0;
-      return Math.min(real / esperado, 1);
-    });
-
-    const frequenciaMedia = alunosAtivos > 0
-      ? ((taxasIndividuais.reduce((acc, taxa) => acc + taxa, 0) / alunosAtivos) * 100).toFixed(1)
-      : 0;
-
-    const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-    const presencaPorDia = diasSemana.map((dia, idx) => ({ dia, total: presencasPorDia[idx] }));
-
-    const totalSemana = presencasPorDia.reduce((acc, v) => acc + v, 0);
-    const mediaDiaria = Math.round(totalSemana / 7);
-
-    setMetricas({ presentesHoje, frequenciaMedia, alunosAtivos, presencaSemana: presencaPorDia, mediaDiaria });
-  }
+  const maxAltura = useMemo(
+    () => Math.max(1, ...metricas.presencaSemana.map(d => d.total)),
+    [metricas.presencaSemana]
+  );
 
   function exportarRelatorio() {
     const dadosExport = presencasFiltradas.map(p => ({
@@ -221,14 +251,6 @@ export default function Presenca() {
     URL.revokeObjectURL(url);
     showToast.success('Relatório exportado!');
   }
-
-  const presencasFiltradas = presencas.filter(p => {
-    const matchAluno = filtros.aluno === 'todos' || String(p.aluno_id) === String(filtros.aluno);
-    const matchAula = filtros.aula === 'todas' || String(p.aula_id) === String(filtros.aula);
-    return matchAluno && matchAula;
-  });
-
-  const maxAltura = Math.max(1, ...metricas.presencaSemana.map(d => d.total));
 
   return (
     <div className="p-4 md:p-8 space-y-6 animate-in fade-in duration-500">
@@ -321,12 +343,12 @@ export default function Presenca() {
               </button>
             ))}
           </div>
-          <Input as="select" className="w-auto" value={filtros.aluno}
+          <Input as="select" className="w-auto" aria-label="Filtrar por aluno" value={filtros.aluno}
             onChange={e => setFiltros({ ...filtros, aluno: e.target.value })}>
             <option value="todos">Todos os Alunos</option>
             {alunos.map(a => <option key={a.id} value={a.id}>{a.nome_completo}</option>)}
           </Input>
-          <Input as="select" className="w-auto" value={filtros.aula}
+          <Input as="select" className="w-auto" aria-label="Filtrar por aula" value={filtros.aula}
             onChange={e => setFiltros({ ...filtros, aula: e.target.value })}>
             <option value="todas">Todas as Aulas</option>
             {aulas.map(a => <option key={a.id} value={a.id}>{a.atividade} - {a.horario}</option>)}

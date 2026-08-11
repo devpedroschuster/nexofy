@@ -12,10 +12,15 @@ export const gradeService = {
     return data;
   },
 
+  // Allowlist de colunas: único consumidor é Agenda.jsx/ModalNovaAula.jsx,
+  // que usa apenas id, nome, area (sugestão automática de espaço),
+  // professor_id (auto-preenche professor) e capacidade_padrao (auto-
+  // preenche vagas). Substitui select('*'), alinhando com o padrão já
+  // aplicado nos demais services do módulo.
   async listarModalidades(estudioId) {
     const { data, error } = await supabase
       .from('modalidades')
-      .select('*')
+      .select('id, nome, area, professor_id, capacidade_padrao')
       .eq('estudio_id', estudioId)
       .order('nome');
     if (error) throw error;

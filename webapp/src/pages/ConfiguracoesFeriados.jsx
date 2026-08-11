@@ -1,5 +1,5 @@
 // webapp/src/pages/ConfiguracoesFeriados.jsx
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Calendar, DownloadCloud, AlertCircle, CheckCircle } from 'lucide-react';
 import { feriadosService } from '../services/feriadosService';
 import { useAuth } from '../hooks/useAuth';
@@ -10,7 +10,6 @@ import Input from '../components/ui/Input';
 import Surface from '../components/ui/Surface';
 
 const ANOS_DISPONIVEIS = [2024, 2025, 2026, 2027, 2028];
-const TIMEOUT_BRASIL_API_MS = 15000;
 
 export default function ConfiguracoesFeriados() {
   const { estudioId, perfil } = useAuth();
@@ -24,6 +23,7 @@ export default function ConfiguracoesFeriados() {
 
   const [ano, setAno] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(false);
+  const [carregandoLista, setCarregandoLista] = useState(false);
   const [feriadosImportados, setFeriadosImportados] = useState([]);
 
   // Evita atualizar estado se o componente desmontar durante o fetch/import.
@@ -32,6 +32,36 @@ export default function ConfiguracoesFeriados() {
     montadoRef.current = true;
     return () => { montadoRef.current = false; };
   }, []);
+
+  // BUG-1 FIX: hidrata a tabela com os feriados JÁ existentes no banco para
+  // o ano/estúdio selecionados. Sem isso, a tabela só mostrava dados de uma
+  // importação feita na sessão atual — ao recarregar a página, ou ao
+  // reimportar um ano já importado (upsert com ignoreDuplicates não retorna
+  // as linhas que colidiram), a lista ficava vazia mesmo com feriados
+  // corretamente bloqueados na agenda.
+  const carregarFeriadosExistentes = useCallback(async () => {
+    if (!idEfetivo) {
+      setFeriadosImportados([]);
+      return;
+    }
+    setCarregandoLista(true);
+    try {
+      const existentes = await feriadosService.listarFeriadosDoAno(ano, idEfetivo);
+      if (!montadoRef.current) return;
+      setFeriadosImportados(existentes);
+    } catch (error) {
+      console.error('[ConfiguracoesFeriados] Erro ao carregar feriados existentes:', error);
+      // Falha aqui é silenciosa por design: não é uma ação disparada pelo
+      // usuário, então um toast seria intrusivo. A tabela simplesmente não
+      // é populada e o botão de importar continua disponível.
+    } finally {
+      if (montadoRef.current) setCarregandoLista(false);
+    }
+  }, [ano, idEfetivo]);
+
+  useEffect(() => {
+    carregarFeriadosExistentes();
+  }, [carregarFeriadosExistentes]);
 
   const importarDaBrasilAPI = async () => {
     // CR1 FIX: nunca chama o service sem um estudioId válido — é ele que
@@ -63,19 +93,26 @@ export default function ConfiguracoesFeriados() {
       if (!montadoRef.current) return;
 
       const novos = feriadosInseridos ?? [];
-      setFeriadosImportados(novos);
 
       if (novos.length === 0) {
-        // Distingue "já estava tudo importado" de "deu erro".
+        // Distingue "já estava tudo importado" de "deu erro". A lista pode
+        // já ter itens vindos de carregarFeriadosExistentes — não a zera.
         showToast.success(`Os feriados nacionais de ${anoNumerico} já estavam importados na agenda.`);
       } else {
         showToast.success(`${novos.length} feriados nacionais de ${anoNumerico} importados para a agenda!`);
       }
+
+      // Recarrega do banco em vez de usar apenas `novos`: garante que a
+      // tabela sempre reflete o estado real (incluindo feriados já
+      // existentes de importações anteriores), não só os recém-inseridos.
+      await carregarFeriadosExistentes();
     } catch (error) {
       console.error('[ConfiguracoesFeriados] Erro ao importar feriados:', error);
       if (!montadoRef.current) return;
 
-      if (error?.message === 'Falha ao buscar na Brasil API') {
+      if (error?.code === 'BRASIL_API_TIMEOUT') {
+        showToast.error('A Brasil API demorou demais para responder. Tente novamente em instantes.');
+      } else if (error?.code === 'BRASIL_API_UNAVAILABLE') {
         showToast.error('A Brasil API está indisponível no momento. Tente novamente em instantes.');
       } else if (error?.code === '42501' || error?.status === 403) {
         showToast.error('Sem permissão para importar feriados neste estúdio.');
@@ -160,8 +197,8 @@ export default function ConfiguracoesFeriados() {
         </div>
       </Surface>
 
-      {/* Resultado da importação */}
-      {feriadosImportados.length > 0 && (
+      {/* Resultado / estado atual */}
+      {!carregandoLista && feriadosImportados.length > 0 && (
         <Surface
           variant="card"
           padding="none"
@@ -170,7 +207,7 @@ export default function ConfiguracoesFeriados() {
           {/* Cabeçalho da tabela */}
           <div className="px-6 py-4 border-b border-border bg-success-soft flex items-center gap-2 text-success font-bold">
             <CheckCircle size={20} />
-            Bloqueios inseridos na agenda com sucesso:
+            Bloqueios de {ano} na agenda:
           </div>
 
           {/* Tabela */}

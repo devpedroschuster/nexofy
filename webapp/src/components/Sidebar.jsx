@@ -5,9 +5,21 @@
 // Borda esquerda no item ativo (indicador de posição visual).
 // Avatar com inicial do nome para todos os perfis no rodapé.
 // Overlay mobile com backdrop-blur.
+//
+// Item 2 do plano multi-segmento (seção 6 do PLANO_ITEM_2.md): primeiro
+// consumo real de useTerminologia(). Dois efeitos:
+//   1. Rótulos de menu que correspondem a uma CHAVE_TERMINOLOGIA (aluno,
+//      professor, modalidade) usam t.rotuloPlural(...) em vez de string
+//      fixa — reagem à terminologia customizada do tenant/segmento.
+//   2. Itens marcados com `modulo` só aparecem se aquele módulo estiver
+//      em modulosAtivos do tenant — com uma salvaguarda: lista vazia
+//      (ex.: super_admin fora de impersonation, ou estado de loading)
+//      NUNCA esconde item, só filtra quando a lista está de fato
+//      populada. Preferimos mostrar um item "a mais" a um sidebar em
+//      branco por corrida de carregamento — ver nota junto ao filtro.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Calendar, Download, LogOut,
@@ -18,6 +30,7 @@ import {
 import { supabase } from '../lib/supabase';
 import ThemeToggle from './ui/ThemeToggle';
 import { usePWA } from '../hooks/usePWA';
+import { useTerminologia } from '../hooks/useTerminologia';
 import { cn } from '../lib/cn';
 
 /* ── Helpers ────────────────────────────────────────────────────────────────── */
@@ -33,36 +46,40 @@ function inicialNome(nome) {
 }
 
 /* ── Menus ──────────────────────────────────────────────────────────────────── */
-const MENU_ADMIN = [
+// Viram funções de `t` (retorno de useTerminologia()) em vez de arrays
+// estáticos, para o `name` reagir à terminologia do tenant. `modulo`
+// (quando presente) referencia uma chave de modulos_ativos — ver filtro
+// dentro do componente.
+const construirMenuAdmin = (t) => [
   { label: 'Visão Geral' },
-  { name: 'Painel',            path: '/dashboard',                  icon: LayoutDashboard },
-  { name: 'Notificações',      path: '/notificacoes',               icon: Bell            },
-  { name: 'Leads',             path: '/leads',                      icon: Clock           },
-  { name: 'Aniversariantes',   path: '/aniversariantes',            icon: Gift            },
+  { name: 'Painel',                 path: '/dashboard',                  icon: LayoutDashboard },
+  { name: 'Notificações',           path: '/notificacoes',               icon: Bell            },
+  { name: 'Leads',                  path: '/leads',                      icon: Clock           },
+  { name: 'Aniversariantes',        path: '/aniversariantes',            icon: Gift            },
 
   { label: 'Gestão e Operação' },
-  { name: 'Alunos',            path: '/alunos',                     icon: Users           },
-  { name: 'Planos',            path: '/planos',                     icon: CreditCard      },
-  { name: 'Professores',       path: '/professores',                icon: UserCheck       },
-  { name: 'Modalidades',       path: '/modalidades',                icon: Package         },
-  { name: 'Agenda',            path: '/agenda',                     icon: Calendar        },
-  { name: 'Presença',          path: '/presenca',                   icon: Clock           },
-  { name: 'Feriados',          path: '/configuracoes/feriados',     icon: CalendarCog     },
+  { name: t.rotuloPlural('aluno'),      path: '/alunos',                     icon: Users,     modulo: 'alunos'     },
+  { name: 'Planos',                     path: '/planos',                     icon: CreditCard                     },
+  { name: t.rotuloPlural('professor'),  path: '/professores',                icon: UserCheck                      },
+  { name: t.rotuloPlural('modalidade'), path: '/modalidades',                icon: Package                         },
+  { name: 'Agenda',                     path: '/agenda',                     icon: Calendar,  modulo: 'agenda'     },
+  { name: 'Presença',                   path: '/presenca',                   icon: Clock,     modulo: 'presenca'   },
+  { name: 'Feriados',                   path: '/configuracoes/feriados',     icon: CalendarCog                     },
 
   { label: 'Financeiro' },
-  { name: 'Mensalidades',      path: '/financeiro',                 icon: DollarSign      },
-  { name: 'Despesas',          path: '/despesas',                   icon: TrendingDown    },
-  { name: 'Resultado',         path: '/resultado-financeiro',       icon: Calculator      },
-  { name: 'Comissões',         path: '/comissoes',                  icon: Percent         },
-  { name: 'Regras de Repasse', path: '/configuracoes/repasse',      icon: Calculator      },
-  { name: 'Configurações',     path: '/configuracoes/estudio',      icon: Settings        },
+  { name: 'Mensalidades',      path: '/financeiro',                 icon: DollarSign,   modulo: 'financeiro' },
+  { name: 'Despesas',          path: '/despesas',                   icon: TrendingDown, modulo: 'financeiro' },
+  { name: 'Resultado',         path: '/resultado-financeiro',       icon: Calculator,   modulo: 'financeiro' },
+  { name: 'Comissões',         path: '/comissoes',                  icon: Percent,      modulo: 'financeiro' },
+  { name: 'Regras de Repasse', path: '/configuracoes/repasse',      icon: Calculator,   modulo: 'financeiro' },
+  { name: 'Configurações',     path: '/configuracoes/estudio',      icon: Settings },
   { name: 'Espaços',           path: '/configuracoes/espacos',      icon: MapPin },
 ];
 
-const MENU_PROFESSOR = [
+const construirMenuProfessor = (t) => [
   { label: 'Minha Área' },
-  { name: 'Minha Agenda', path: '/agenda',           icon: Calendar },
-  { name: 'Meus Alunos',  path: '/professor/alunos', icon: Users    },
+  { name: 'Minha Agenda',                     path: '/agenda',           icon: Calendar, modulo: 'agenda' },
+  { name: `Meus ${t.rotuloPlural('aluno')}`,  path: '/professor/alunos', icon: Users,    modulo: 'alunos' },
 ];
 
 const PERFIS_COM_MENU_ADMIN = ['admin', 'super_admin'];
@@ -71,6 +88,7 @@ const PERFIS_COM_MENU_ADMIN = ['admin', 'super_admin'];
 function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const t = useTerminologia();
 
   const perfilResolvido = resolverPerfil(perfil);
   const isProfessor = perfilResolvido === 'professor';
@@ -78,7 +96,26 @@ function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }
 
   const { canInstall, install } = usePWA();
 
-  const itensMenu = isProfessor ? MENU_PROFESSOR : isAdmin ? MENU_ADMIN : [];
+  // Recalcula só quando terminologia/segmento ou o tipo de menu (admin vs
+  // professor) mudam — evita reconstruir o array (e recriar closures dos
+  // `name`) a cada render por causa de outro estado do componente pai.
+  const itensMenuBase = useMemo(
+    () => (isProfessor ? construirMenuProfessor(t) : isAdmin ? construirMenuAdmin(t) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isProfessor, isAdmin, t.segmento, t.terminologia]
+  );
+
+  // Filtra por módulo ativo. Salvaguarda deliberada: `modulosAtivos`
+  // vazio (super_admin fora de impersonation, ou frame de loading antes
+  // do useAuth resolver) NÃO esconde nenhum item — só filtra quando a
+  // lista está de fato populada. Prefere um item a mais temporariamente
+  // a um sidebar vazio por corrida de carregamento.
+  const itensMenu = useMemo(() => {
+    if (t.modulosAtivos.length === 0) return itensMenuBase;
+    return itensMenuBase.filter(
+      (item) => item.label || !item.modulo || t.moduloAtivo(item.modulo)
+    );
+  }, [itensMenuBase, t]);
 
   async function handleLogout() {
     try {
@@ -130,7 +167,7 @@ function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }
               </p>
               {isProfessor && (
                 <p className="text-[10px] font-medium text-sidebar-muted-foreground uppercase tracking-wider mt-0.5">
-                  Área do Professor
+                  Área do {t.rotulo('professor')}
                 </p>
               )}
             </div>
@@ -221,7 +258,7 @@ function Sidebar({ perfil, nomeUsuario, nomeEstudio, menuAberto, setMenuAberto }
               </div>
               <div className="min-w-0">
                 <p className="text-[10px] text-sidebar-muted-foreground font-medium leading-none mb-0.5">
-                  {isProfessor ? 'Professor' : 'Administrador'}
+                  {isProfessor ? t.rotulo('professor') : 'Administrador'}
                 </p>
                 <p className="text-sm font-semibold text-sidebar-foreground truncate leading-tight">
                   {nomeUsuario}

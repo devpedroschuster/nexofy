@@ -3,7 +3,7 @@
 // Contexto global de impersonation de estúdio para super_admin.
 //
 // Responsabilidades:
-//   - Armazena { estudio: { id, nome, slug } | null } em memória (não em localStorage)
+//   - Armazena { estudio: { id, nome, slug, segmento, terminologia, modulos_ativos } | null } em memória (não em localStorage)
 //   - Chama set_estudio_override / clear_estudio_override via RPC do Supabase
 //   - Invalida o cache do React Query ao entrar/sair do modo impersonation
 //   - Reseta automaticamente ao detectar SIGNED_OUT (evita contaminação entre sessões)
@@ -23,6 +23,22 @@
 //   não tem estudio_id próprio). O override existe apenas no lado do Supabase/RLS.
 //   Componentes que precisam saber "qual estúdio estou vendo agora" devem usar
 //   useImpersonation().estudioAtivo em vez de useAuth().estudioId.
+//
+// Item 2 do plano multi-segmento (seção 3.1 do PLANO_ITEM_2.md):
+//   estudioAtivo passa a incluir segmento/terminologia/modulos_ativos, para
+//   que useTerminologia() resolva rótulos corretos do tenant IMPERSONADO,
+//   não do perfil do super_admin.
+//
+//   Trade-off deliberado (foge do "zero round-trip extra" que useAuth
+//   conseguiu via join): o objeto `estudio` recebido por acessarEstudio()
+//   vem de `superAdminService.listarEstudios` (RPC `listar_estudios_admin`),
+//   cujo retorno não temos como garantir que já inclua as 3 colunas novas
+//   sem editar essa RPC (fora do escopo deste item — RPC de agregação,
+//   não faz parte dos arquivos deste plano). Por isso, ao entrar em
+//   impersonation, buscamos `estudios` direto pelo id logo após confirmar
+//   o override — 1 SELECT leve, só quando o admin efetivamente troca de
+//   estúdio (não em toda navegação), garantindo dado sempre correto e
+//   atual independente do que a RPC de listagem retornar.
 
 import React, {
   createContext,
@@ -42,7 +58,7 @@ const ImpersonationContext = createContext(null);
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function ImpersonationProvider({ children }) {
-  // estudioAtivo: { id, nome, slug } | null
+  // estudioAtivo: { id, nome, slug, segmento, terminologia, modulos_ativos } | null
   const [estudioAtivo, setEstudioAtivo] = useState(null);
   const [carregando,   setCarregando  ] = useState(false);
   const qc = useQueryClient();
@@ -90,7 +106,32 @@ export function ImpersonationProvider({ children }) {
       if (error) throw error;
       if (op !== opRef.current) return; // chamada stale, ignora
 
-      setEstudioAtivo({ id: estudio.id, nome: estudio.nome, slug: estudio.slug });
+      // Busca segmento/terminologia/modulos_ativos direto da fonte (ver
+      // nota de trade-off no cabeçalho do arquivo) — não confia no shape
+      // de `estudio` recebido do chamador, que pode vir de uma RPC de
+      // listagem ainda não atualizada com as colunas novas.
+      const { data: estudioRow, error: errEstudio } = await supabase
+        .from('estudios')
+        .select('segmento, terminologia, modulos_ativos')
+        .eq('id', estudio.id)
+        .maybeSingle();
+
+      if (errEstudio) {
+        // Não bloqueia a impersonation por isso — é dado cosmético
+        // (terminologia/menu), não crítico de segurança. Loga e segue
+        // com os defaults do useTerminologia (fallback em cascata).
+        console.error('[ImpersonationContext] Erro ao buscar segmento do estúdio:', errEstudio);
+      }
+      if (op !== opRef.current) return; // chamada stale, ignora
+
+      setEstudioAtivo({
+        id: estudio.id,
+        nome: estudio.nome,
+        slug: estudio.slug,
+        segmento: estudioRow?.segmento ?? 'danca_fitness',
+        terminologia: estudioRow?.terminologia ?? {},
+        modulos_ativos: estudioRow?.modulos_ativos ?? [],
+      });
 
       // Invalida todo o cache — queries vão reexecutar com o novo override ativo.
       // (Trade-off conhecido: invalida também queries globais não tenant-scoped;

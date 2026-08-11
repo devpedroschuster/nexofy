@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
 import { showToast } from '../components/shared/Toast';
 import { useEstudio } from '../hooks/useEstudio';
+import { formatarMoeda, formatarData as formatarDataUtil } from '../lib/utils';
 
 const NOMES_DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const DIAS_BANCO = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
@@ -294,12 +295,7 @@ export default function AreaAluno() {
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
     return parts[0].substring(0, 2).toUpperCase();
   };
-  const formatarData = (dataStr) => {
-    if (!dataStr) return '--/--/----';
-    const [ano, mes, dia] = dataStr.split('-');
-    return `${dia}/${mes}/${ano}`;
-  };
-  const formatarMoeda = (valor) => Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const formatarData = (dataStr) => (dataStr ? formatarDataUtil(dataStr) : '--/--/----');
   const formatarHorario = (horaStr) => (horaStr ? horaStr.substring(0, 5) : '--:--');
   const getStatusTexto = (status, dataVencimento) =>
     status === 'pago' ? 'Pago' : dataVencimento && new Date(dataVencimento) < new Date() ? 'Atrasado' : 'Pendente';

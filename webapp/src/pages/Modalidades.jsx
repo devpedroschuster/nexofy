@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import React, { useEffect, useRef, useState } from 'react';
 import { Plus, Trash2, Activity, RefreshCw, Edit2, Users, Clock, DollarSign, Calendar, AlertCircle, Tag } from 'lucide-react';
 import { showToast } from '../components/shared/Toast';
-import Modal from '../components/ui/Modal';
+import Modal, { ModalConfirmacao } from '../components/ui/Modal';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Surface from '../components/ui/Surface';
 import { modalidadeService } from '../services/modalidadeService';
-import { useAuth } from '../hooks/useAuth'; // FIX: faltava — é de onde vem o estudioId do tenant logado
+import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../lib/supabase';
+import { useImpersonation } from '../context/ImpersonationContext';
 
 const MODALIDADE_VAZIA = {
   nome: '', area: 'Dança', professor_id: '', capacidade_padrao: 15,
@@ -15,7 +16,9 @@ const MODALIDADE_VAZIA = {
 };
 
 export default function Modalidades() {
-  const { estudioId } = useAuth(); // FIX: estudioId agora existe e é usado em toda chamada ao service
+  const { estudioId } = useAuth();
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId; // FIX: super_admin em impersonation agora funciona
 
   const [modalidades, setModalidades] = useState([]);
   const [professores, setProfessores] = useState([]);
@@ -23,6 +26,7 @@ export default function Modalidades() {
   const [loadingList, setLoadingList] = useState(true);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [confirmandoExclusaoId, setConfirmandoExclusaoId] = useState(null); // FIX: substitui window.confirm
 
   const [novaModalidade, setNovaModalidade] = useState(MODALIDADE_VAZIA);
 
@@ -34,6 +38,7 @@ export default function Modalidades() {
   const [modPerfil, setModPerfil] = useState(null);
   const [dadosPerfil, setDadosPerfil] = useState({ horarios: [], alunos: [] });
   const [loadingPerfil, setLoadingPerfil] = useState(false);
+  const perfilFetchId = useRef(0); // FIX: guarda contra race condition
 
   const totalTaxasNova = Number(novaModalidade.taxa_professor) + Number(novaModalidade.taxa_espaco) + Number(novaModalidade.taxa_direcao);
   const isNovaValida = totalTaxasNova === 100 && novaModalidade.nome.trim().length > 0;
@@ -41,45 +46,46 @@ export default function Modalidades() {
   const totalTaxasEdicao = modalidadeEmEdicao ? (Number(modalidadeEmEdicao.taxa_professor) + Number(modalidadeEmEdicao.taxa_espaco) + Number(modalidadeEmEdicao.taxa_direcao)) : 0;
   const isEdicaoValida = modalidadeEmEdicao ? (totalTaxasEdicao === 100 && modalidadeEmEdicao.nome.trim().length > 0) : false;
 
-  useEffect(() => {
-    // FIX: só busca dados quando já temos o estudioId do tenant — evita a corrida
-    // em que fetchDados dispararia com estudioId ainda undefined no primeiro render.
-    if (estudioId) fetchDados();
-  }, [estudioId]);
+
+ useEffect(() => {
+    if (idEfetivo) fetchDados();
+  }, [idEfetivo]);
 
   async function fetchDados() {
     setLoadingList(true);
     try {
       const [{ data: profs, error: errProfs }, mods] = await Promise.all([
-        // FIX: filtro por estudio_id — antes vazava professores de outros estúdios
-        supabase.from('professores').select('id, nome').eq('estudio_id', estudioId).eq('ativo', true).order('nome'),
-        modalidadeService.listar(estudioId) // FIX: estudioId agora é passado
+        supabase.from('professores').select('id, nome').eq('estudio_id', idEfetivo).eq('ativo', true).order('nome'),
+        modalidadeService.listar(idEfetivo)
       ]);
       if (errProfs) throw errProfs;
       setProfessores(profs || []);
       setModalidades(mods || []);
     } catch (error) {
       console.error('Erro ao carregar dados de Modalidades:', error);
-      showToast.error('Não foi possível carregar as modalidades. Tente novamente.'); // FIX: falha deixava de dar qualquer feedback ao usuário
+      showToast.error('Não foi possível carregar as modalidades. Tente novamente.');
     } finally {
       setLoadingList(false);
     }
   }
 
-  async function abrirPerfil(mod) {
+   async function abrirPerfil(mod) {
+    const fetchId = ++perfilFetchId.current;
     setModPerfil(mod);
     setModalPerfilAberto(true);
     setLoadingPerfil(true);
-    setDadosPerfil({ horarios: [], alunos: [] }); // FIX: limpa dados da modalidade anterior antes de buscar os novos
+    setDadosPerfil({ horarios: [], alunos: [] });
     try {
-      // FIX: segundo argumento era `mod.nome` por engano; o service espera estudioId
-      const dados = await modalidadeService.buscarPerfil(mod.id, estudioId);
+      const dados = await modalidadeService.buscarPerfil(mod.id, idEfetivo);
+      if (fetchId !== perfilFetchId.current) return;
       setDadosPerfil(dados);
     } catch (error) {
-      console.error('Erro ao carregar Raio-X:', error);
-      showToast.error('Erro ao carregar Raio-X da modalidade.');
+      if (fetchId === perfilFetchId.current) {
+        console.error('Erro ao carregar Raio-X:', error);
+        showToast.error('Erro ao carregar Raio-X da modalidade.');
+      }
     } finally {
-      setLoadingPerfil(false);
+      if (fetchId === perfilFetchId.current) setLoadingPerfil(false);
     }
   }
 
@@ -87,39 +93,42 @@ export default function Modalidades() {
     e.preventDefault();
     if (creating || !isNovaValida) return;
     setCreating(true);
-
     try {
       const payload = {
         ...novaModalidade,
-        nome: novaModalidade.nome.trim(), // FIX: evita nomes só com espaços
+        nome: novaModalidade.nome.trim(),
         capacidade_padrao: Number(novaModalidade.capacidade_padrao)
       };
-      await modalidadeService.salvar(payload, estudioId); // FIX: estudioId agora é passado
+      await modalidadeService.salvar(payload, idEfetivo);
       showToast.success('Modalidade adicionada com sucesso!');
       setNovaModalidade(MODALIDADE_VAZIA);
       fetchDados();
     } catch (err) {
       console.error('Erro ao criar modalidade:', err);
-      // FIX: mensagem reflete a causa real quando disponível, em vez de sempre supor nome duplicado
       showToast.error(err?.code === '23505' ? 'Já existe uma modalidade com esse nome.' : 'Erro ao adicionar modalidade.');
     } finally {
       setCreating(false);
     }
   }
 
-  async function excluirModalidade(id, e) {
-    e.stopPropagation();
-    if (!confirm('Tem certeza que deseja remover esta modalidade?')) return;
+  async function confirmarExclusao() {
+    const id = confirmandoExclusaoId;
     setDeletingId(id);
     try {
-      await modalidadeService.excluir(id, estudioId); // FIX: estudioId agora é passado
+      await modalidadeService.excluir(id, idEfetivo);
       showToast.success('Modalidade removida.');
       fetchDados();
     } catch (err) {
       console.error('Erro ao excluir modalidade:', err);
-      showToast.error('Erro ao excluir. Pode haver aulas atreladas a ela.');
+      showToast.error(
+        err?.code === '23503'
+          ? 'Não é possível excluir: há aulas atreladas a esta modalidade.'
+          : 'Erro ao excluir modalidade.'
+      );
+      throw err;
     } finally {
       setDeletingId(null);
+      setConfirmandoExclusaoId(null);
     }
   }
 
@@ -142,14 +151,13 @@ export default function Modalidades() {
     e.preventDefault();
     if (!isEdicaoValida) return;
     setSavingEdit(true);
-
     try {
       const payload = {
         ...modalidadeEmEdicao,
         nome: modalidadeEmEdicao.nome.trim(),
         capacidade_padrao: Number(modalidadeEmEdicao.capacidade_padrao)
       };
-      await modalidadeService.salvar(payload, estudioId); // FIX: estudioId agora é passado — sem isso o update afetava 0 linhas e ainda mostrava sucesso
+      await modalidadeService.salvar(payload, idEfetivo);
       showToast.success('Modalidade atualizada com sucesso!');
       setModalEdicaoAberto(false);
       if (modPerfil && modPerfil.id === modalidadeEmEdicao.id) {
@@ -300,7 +308,7 @@ export default function Modalidades() {
               <button onClick={(e) => abrirEdicao(mod, e)} className="p-3 text-muted-foreground hover:text-info hover:bg-info-soft rounded-xl transition-all" title="Editar">
                 <Edit2 size={18} />
               </button>
-              <button onClick={(e) => excluirModalidade(mod.id, e)} disabled={deletingId === mod.id} className="p-3 text-muted-foreground hover:text-destructive hover:bg-destructive-soft rounded-xl transition-all" title="Excluir">
+              <button onClick={(e) => { e.stopPropagation(); setConfirmandoExclusaoId(mod.id); }} className="p-3 text-muted-foreground hover:text-destructive hover:bg-destructive-soft rounded-xl transition-all" title="Excluir">
                 {deletingId === mod.id ? <RefreshCw className="animate-spin text-destructive" size={18} /> : <Trash2 size={18} />}
               </button>
             </div>
@@ -451,15 +459,15 @@ export default function Modalidades() {
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <span className="text-[10px] uppercase font-bold text-info mb-1 block">Prof</span>
-                  <Input type="number" className="text-center font-bold focus-visible:ring-info" value={modalidadeEmEdicao.taxa_professor} onChange={e => setModalidadeEmEdicao({ ...modalidadeEmEdicao, taxa_professor: e.target.value })} />
+                  <Input type="number" min="0" max="100" className="text-center font-bold focus-visible:ring-info" value={modalidadeEmEdicao.taxa_professor} onChange={e => setModalidadeEmEdicao({ ...modalidadeEmEdicao, taxa_professor: e.target.value })} />
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-warning mb-1 block">Espaço</span>
-                  <Input type="number" className="text-center font-bold focus-visible:ring-warning" value={modalidadeEmEdicao.taxa_espaco} onChange={e => setModalidadeEmEdicao({ ...modalidadeEmEdicao, taxa_espaco: e.target.value })} />
+                  <Input type="number" min="0" max="100" className="text-center font-bold focus-visible:ring-warning" value={modalidadeEmEdicao.taxa_espaco} onChange={e => setModalidadeEmEdicao({ ...modalidadeEmEdicao, taxa_espaco: e.target.value })} />
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-purple mb-1 block">Diretor</span>
-                  <Input type="number" className="text-center font-bold focus-visible:ring-purple" value={modalidadeEmEdicao.taxa_direcao} onChange={e => setModalidadeEmEdicao({ ...modalidadeEmEdicao, taxa_direcao: e.target.value })} />
+                  <Input type="number" min="0" max="100" className="text-center font-bold focus-visible:ring-purple" value={modalidadeEmEdicao.taxa_direcao} onChange={e => setModalidadeEmEdicao({ ...modalidadeEmEdicao, taxa_direcao: e.target.value })} />
                 </div>
               </div>
               {!isEdicaoValida && <p className="text-[10px] font-bold text-destructive mt-2 flex items-center gap-1"><AlertCircle size={12} /> A soma das 3 partes deve dar 100%.</p>}
@@ -471,6 +479,16 @@ export default function Modalidades() {
           </form>
         )}
       </Modal>
+
+      <ModalConfirmacao
+  isOpen={!!confirmandoExclusaoId}
+  onClose={() => setConfirmandoExclusaoId(null)}
+  onConfirm={confirmarExclusao}
+  titulo="Remover modalidade?"
+  mensagem="Essa ação não pode ser desfeita. Se houver aulas atreladas, a exclusão será bloqueada."
+  tipo="danger"
+  loading={!!deletingId}
+/>
 
     </div>
   );

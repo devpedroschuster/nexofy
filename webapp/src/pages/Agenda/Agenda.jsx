@@ -50,8 +50,15 @@ const INITIAL_FORM_STATE = {
 };
 
 export default function Agenda() {
-  const { perfil, professorId: professorIdLogado, ...pageState } = useAgendaPage();
-  const { estudioId } = useAuth();
+  // Fix: `perfil` deixa de vir do Outlet context (canal de prop-drilling
+  // separado, hoje incompleto — ver comentário em useAgendaPage.js sobre
+  // `professorId` nunca chegar por ali) e passa a vir de useAuth(), a
+  // mesma fonte única já usada para `estudioId`. Evita duas fontes de
+  // verdade divergentes decidindo `isAdmin`, que controla todo o acesso
+  // administrativo da tela. `professorId` do Outlet era desestruturado
+  // e nunca usado — removido junto (código morto).
+  const { ...pageState } = useAgendaPage();
+  const { perfil, estudioId } = useAuth();
   const isAdmin = perfil === 'admin';
 
 const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
@@ -191,7 +198,20 @@ const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
           {isAdmin && (
             <button
               onClick={() => {
-                hookAgendamento.setAgendamentoForm({ ...hookAgendamento.agendamentoForm, aula_id: '', data_aula: '' });
+                // Fix: reset completo do form, não só aula_id/data_aula.
+                // Antes, tipo/aluno_id/nome_visitante de uma abertura
+                // anterior do modal (ex.: via ModalAcoesEvento) sobreviviam
+                // silenciosamente e podiam ser submetidos junto com a nova
+                // aula/data escolhidas, agendando a pessoa errada.
+                hookAgendamento.setAgendamentoForm({
+                  tipo: 'cadastrado',
+                  aluno_id: '',
+                  nome_visitante: '',
+                  aula_id: '',
+                  data_aula: '',
+                  _nomeAluno: '',
+                  _nomeAtividade: '',
+                });
                 modais.agendamento.abrir();
               }}
               className={btnInfo}

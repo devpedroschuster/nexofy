@@ -5,10 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Building2, Users, DollarSign, TrendingUp } from 'lucide-react';
 import { superAdminService } from '../../../services/superAdminService';
 import Skeleton from '../../../components/ui/Skeleton';
-
-function formatarMoeda(valor) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
+import { formatarMoeda } from '../../../lib/utils';
 
 function CardMetrica({ icon: Icon, label, valor, corIcone, corFundo, loading }) {
   return (

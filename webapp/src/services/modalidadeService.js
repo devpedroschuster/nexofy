@@ -1,10 +1,14 @@
+// webapp/src/services/modalidadeService.js
 import { supabase } from '../lib/supabase';
+
+const COLUNAS_MODALIDADE =
+  'id, nome, area, professor_id, capacidade_padrao, taxa_professor, taxa_espaco, taxa_direcao, estudio_id, professores(nome)';
 
 export const modalidadeService = {
   async listar(estudioId) {
     const { data, error } = await supabase
       .from('modalidades')
-      .select('*, professores (nome)')
+      .select(COLUNAS_MODALIDADE)
       .eq('estudio_id', estudioId)
       .order('area')
       .order('nome');
@@ -13,29 +17,36 @@ export const modalidadeService = {
   },
 
   async buscarPerfil(id, estudioId) {
-    const { data: horarios } = await supabase
-      .from('agenda')
-      .select('dia_semana, horario')
-      .eq('estudio_id', estudioId)
-      .eq('modalidade_id', id)
-      .eq('eh_recorrente', true)
-      .order('dia_semana')
-      .order('horario');
+    const [{ data: horarios, error: errHorarios }, { data: alunos, error: errAlunos }] = await Promise.all([
+      supabase
+        .from('agenda')
+        .select('dia_semana, horario')
+        .eq('estudio_id', estudioId)
+        .eq('modalidade_id', id)
+        .eq('eh_recorrente', true)
+        .order('dia_semana')
+        .order('horario'),
+      supabase
+        .from('alunos')
+        .select('id, nome_completo, planos(nome)')
+        .eq('estudio_id', estudioId)
+        .eq('ativo', true)
+        .contains('modalidades_selecionadas', [id])
+        .order('nome_completo'),
+    ]);
 
-    const { data: alunos, error: errAlunos } = await supabase
-      .from('alunos')
-      .select('id, nome_completo, planos(nome)')
-      .eq('estudio_id', estudioId)
-      .eq('ativo', true)
-      .contains('modalidades_selecionadas', [id])
-      .order('nome_completo');
-
+    if (errHorarios) throw errHorarios;
     if (errAlunos) throw errAlunos;
     return { horarios: horarios || [], alunos: alunos || [] };
   },
 
-  // Sprint 02: estudioId obrigatório no INSERT de modalidades
   async salvar(modalidade, estudioId) {
+    const totalTaxas =
+      Number(modalidade.taxa_professor) + Number(modalidade.taxa_espaco) + Number(modalidade.taxa_direcao);
+    if (totalTaxas !== 100) {
+      throw new Error('A soma das taxas de repasse deve ser exatamente 100%.');
+    }
+
     const payload = {
       nome: modalidade.nome,
       area: modalidade.area || 'Dança',
@@ -47,7 +58,6 @@ export const modalidadeService = {
     };
 
     if (modalidade.id) {
-      // UPDATE: estudio_id não precisa ser alterado
       const { error } = await supabase
         .from('modalidades')
         .update(payload)
@@ -71,5 +81,5 @@ export const modalidadeService = {
       .eq('estudio_id', estudioId);
     if (error) throw error;
     return true;
-  }
+  },
 };

@@ -87,9 +87,9 @@ export default function Notificacoes() {
 
                         {/* Conteúdo */}
                         <div className="min-w-0">
-                          <h3 className="font-black text-foreground truncate">
-                            {notif.aluno?.nome_completo /* FIX: optional chaining defensivo */}
-                          </h3>
+<h3 className="font-black text-foreground truncate">
+  {notif.aluno?.nome_completo || 'Aluno sem nome cadastrado'} {/* FIX */}
+</h3>
                           <p className={cn(
                             'text-sm mt-1 flex items-center gap-1 font-bold',
                             isAtrasado

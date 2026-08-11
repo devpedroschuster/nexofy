@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { dreService } from '../services/dreService';
 import { useAuth } from '../hooks/useAuth';
+import { useImpersonation } from '../context/ImpersonationContext';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, Legend, Cell,
@@ -11,7 +12,7 @@ import {
   ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownRight,
   Receipt, PiggyBank, BarChart2, Minus,
 } from 'lucide-react';
-import { format, subMonths, addMonths, startOfMonth } from 'date-fns';
+import { format, subMonths, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatarMoeda } from '../lib/utils';
 import Surface from '../components/ui/Surface';
@@ -128,10 +129,13 @@ function CustomTooltip({ active, payload, label }) {
 // ── Página principal ──────────────────────────────────────────────────────────
 export default function ResultadoFinanceiro() {
   const { estudioId } = useAuth();
+  const { estudioAtivo } = useImpersonation(); // FIX
+  const idEfetivo = estudioAtivo?.id ?? estudioId; // FIX: funciona também em impersonation
+
   const agora = new Date();
   const [mesRef, setMesRef] = useState(new Date(agora.getFullYear(), agora.getMonth(), 1));
 
-  const mes = mesRef.getMonth();   // 0-indexed
+  const mes = mesRef.getMonth();
   const ano = mesRef.getFullYear();
 
   const navAnterior = () => setMesRef(m => subMonths(m, 1));
@@ -144,11 +148,11 @@ export default function ResultadoFinanceiro() {
     isLoading: loadingDRE,
     isError: errorDRE,
   } = useQuery({
-    queryKey: ['dre', estudioId, mes, ano], // FIX: estudioId no cache key
-    queryFn: () => dreService.obterDRE(mes, ano, estudioId), // FIX: estudioId propagado
-    enabled: !!estudioId, // FIX: nunca dispara sem tenant resolvido
+    queryKey: ['dre', idEfetivo, mes, ano],        // FIX: idEfetivo no cache key
+    queryFn: () => dreService.obterDRE(mes, ano, idEfetivo), // FIX
+    enabled: !!idEfetivo,                           // FIX
     staleTime: 1000 * 60 * 5,
-    placeholderData: keepPreviousData, // FIX: evita flash de skeleton ao trocar de mês
+    placeholderData: keepPreviousData,
   });
 
   const {
@@ -156,9 +160,9 @@ export default function ResultadoFinanceiro() {
     isLoading: loadingHistorico,
     isError: errorHistorico,
   } = useQuery({
-    queryKey: ['dre-historico', estudioId], // FIX
-    queryFn: () => dreService.obterHistorico(6, estudioId), // FIX
-    enabled: !!estudioId, // FIX
+    queryKey: ['dre-historico', idEfetivo], // FIX
+    queryFn: () => dreService.obterHistorico(6, idEfetivo), // FIX
+    enabled: !!idEfetivo, // FIX
     staleTime: 1000 * 60 * 10,
   });
 

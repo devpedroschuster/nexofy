@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Search, Users, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
@@ -26,46 +26,56 @@ function formatarUltimaPresenca(isoDate) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
 }
 
-// Formata telefone para wa.me (remove tudo que não é dígito, adiciona 55 se não tiver)
+// Formata telefone para wa.me (remove tudo que não é dígito, adiciona 55 se necessário).
+// FIX C-DDD55: decide pelo TAMANHO do número, não pelo prefixo — um telefone local
+// com DDD 55 (Rio Grande do Sul) começa com "55" e antes era erroneamente tratado
+// como se já tivesse o DDI do Brasil, gerando link wa.me com um dígito faltando.
 function formatarWhatsApp(telefone) {
   if (!telefone) return null;
   const digits = telefone.replace(/\D/g, '');
-  return digits.startsWith('55') ? digits : `55${digits}`;
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`; // DDD + número, sem DDI
+  if (digits.length === 12 || digits.length === 13) return digits;        // já inclui DDI 55
+  return digits.length > 0 ? digits : null;
 }
 
 export default function ProfessorAlunos() {
-  const { professorId } = useAuth();
+  // FIX C1: estudioId agora é lido e usado como segunda camada de isolamento
+  // de tenant em TODAS as queries — este era o único arquivo do projeto que
+  // acessava lib/supabase diretamente sem essa defesa em profundidade.
+  const { professorId, estudioId, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
   const [alunos, setAlunos] = useState([]);
   const [ultimaPresencaMap, setUltimaPresencaMap] = useState({});
-  const [modalidades, setModalidades] = useState([]); // para o filtro
-  const [modalidadesMap, setModalidadesMap] = useState(new Map()); // id→{id,nome} para resolver nomes
+  const [modalidades, setModalidades] = useState([]);
+  const [modalidadesMap, setModalidadesMap] = useState(new Map());
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState(null);
   const [busca, setBusca] = useState('');
   const [filtroModalidade, setFiltroModalidade] = useState('');
   const [pagina, setPagina] = useState(1);
+  const [presencaLoading, setPresencaLoading] = useState(false);
 
   const buscaDebounced = useDebounce(busca, 300);
 
-  useEffect(() => {
-    if (professorId) carregarAlunos();
-  }, [professorId]);
-
-  async function carregarAlunos() {
+  const carregarAlunos = useCallback(async (getCancelled) => {
     setLoading(true);
+    setErro(null);
     try {
-      // Busca modalidades do professor (por ownership e por aulas na agenda)
       const [{ data: modalidadesOwn }, { data: aulasDoProf }] = await Promise.all([
         supabase
           .from('modalidades')
           .select('id, nome')
-          .eq('professor_id', professorId),
+          .eq('professor_id', professorId)
+          .eq('estudio_id', estudioId), // FIX C1
         supabase
           .from('agenda')
           .select('modalidade_id')
-          .eq('professor_id', professorId),
+          .eq('professor_id', professorId)
+          .eq('estudio_id', estudioId), // FIX C1
       ]);
+
+      if (getCancelled()) return;
 
       const idsModalidades = [
         ...new Set([
@@ -77,10 +87,11 @@ export default function ProfessorAlunos() {
       if (idsModalidades.length === 0) {
         setAlunos([]);
         setModalidades([]);
+        setModalidadesMap(new Map());
+        setUltimaPresencaMap({});
         return;
       }
 
-      // Busca nomes das modalidades da agenda que ainda não estão em modalidadesOwn
       const idsApenasAgenda = (aulasDoProf || [])
         .map(a => a.modalidade_id)
         .filter(Boolean)
@@ -91,61 +102,63 @@ export default function ProfessorAlunos() {
         const { data } = await supabase
           .from('modalidades')
           .select('id, nome')
+          .eq('estudio_id', estudioId) // FIX C1
           .in('id', idsApenasAgenda);
         modalidadesAgenda = data || [];
       }
 
-      // Mapa id → nome para resolver nomes na renderização sem FK join
-      const modalidadesMap = new Map([
+      if (getCancelled()) return;
+
+      const novoModalidadesMap = new Map([
         ...(modalidadesOwn || []).map(m => [m.id, m]),
         ...modalidadesAgenda.map(m => [m.id, m]),
       ]);
 
-      const todasModalidades = [...modalidadesMap.values()];
-      setModalidades(todasModalidades);
-      setModalidadesMap(modalidadesMap);
+      setModalidades([...novoModalidadesMap.values()]);
+      setModalidadesMap(novoModalidadesMap);
 
       const { data: alunosFiltrados, error } = await supabase
         .from('alunos')
         .select(
           'id, nome_completo, email, telefone, ativo, planos(nome), modalidades_selecionadas'
         )
+        .eq('estudio_id', estudioId) // FIX C1 — segunda camada além da RLS
         .eq('ativo', true)
         .eq('role', 'aluno')
-        // Usa .overlaps() — traduzido pelo PostgREST para o operador && do Postgres (uuid[])
         .overlaps('modalidades_selecionadas', idsModalidades)
         .order('nome_completo');
 
       if (error) throw error;
+      if (getCancelled()) return;
 
-      const listaAlunos = alunosFiltrados || [];
-      setAlunos(listaAlunos);
-
-      // Busca última presença de cada aluno em paralelo (batch único)
-      if (listaAlunos.length > 0) {
-        const alunoIds = listaAlunos.map(a => a.id);
-        const { data: presencas } = await supabase
-          .from('presencas')
-          .select('aluno_id, data_checkin')
-          .in('aluno_id', alunoIds)
-          .order('data_checkin', { ascending: false });
-
-        // Mantém apenas a última presença por aluno (O(n) com Map)
-        const mapa = {};
-        for (const p of presencas || []) {
-          if (!mapa[p.aluno_id]) {
-            mapa[p.aluno_id] = p.data_checkin;
-          }
-        }
-        setUltimaPresencaMap(mapa);
-      }
+      setAlunos(alunosFiltrados || []);
     } catch (err) {
+      if (getCancelled()) return;
+      console.error('[ProfessorAlunos] Erro ao carregar alunos:', err);
+      if (err?.code === '42501' || err?.status === 403) {
+        setErro('Sem permissão para visualizar estes alunos.');
+      } else if (err?.message?.toLowerCase().includes('network') || err?.message?.toLowerCase().includes('fetch')) {
+        setErro('Falha de conexão. Verifique sua internet e tente novamente.');
+      } else {
+        setErro('Erro ao carregar alunos. Tente novamente.');
+      }
       showToast.error('Erro ao carregar alunos.');
-      console.error(err);
     } finally {
-      setLoading(false);
+      if (!getCancelled()) setLoading(false);
     }
-  }
+  }, [professorId, estudioId]);
+
+  // FIX C2: guarda de corrida (cancelled) para evitar que uma resposta antiga
+  // sobrescreva uma mais recente quando professorId/estudioId mudam rápido.
+  useEffect(() => {
+    if (!professorId || !estudioId) return;
+    let cancelled = false;
+    carregarAlunos(() => cancelled);
+    return () => { cancelled = true; };
+  }, [professorId, estudioId, carregarAlunos]);
+
+  // Reseta para página 1 quando filtros mudam
+  useEffect(() => { setPagina(1); }, [buscaDebounced, filtroModalidade]);
 
   // Filtragem client-side: busca + modalidade
   const alunosFiltrados = useMemo(() => {
@@ -156,29 +169,85 @@ export default function ProfessorAlunos() {
         a.email?.toLowerCase().includes(buscaDebounced.toLowerCase());
 
       const matchModalidade =
-  !filtroModalidade ||
-  (Array.isArray(a.modalidades_selecionadas) &&
-    a.modalidades_selecionadas.includes(filtroModalidade));
+        !filtroModalidade ||
+        (Array.isArray(a.modalidades_selecionadas) &&
+          a.modalidades_selecionadas.includes(filtroModalidade));
 
       return matchBusca && matchModalidade;
     });
   }, [alunos, buscaDebounced, filtroModalidade]);
 
-  // Reseta para página 1 quando filtros mudam
-  useEffect(() => { setPagina(1); }, [buscaDebounced, filtroModalidade]);
-
-  // T3 FIX: paginação client-side
   const totalPaginas = Math.max(1, Math.ceil(alunosFiltrados.length / PAGE_SIZE));
   const paginaAtual = Math.min(pagina, totalPaginas);
-  const alunosPagina = alunosFiltrados.slice(
-    (paginaAtual - 1) * PAGE_SIZE,
-    paginaAtual * PAGE_SIZE
+  const alunosPagina = useMemo(
+    () => alunosFiltrados.slice((paginaAtual - 1) * PAGE_SIZE, paginaAtual * PAGE_SIZE),
+    [alunosFiltrados, paginaAtual]
   );
 
-  // Título com contador
+  // FIX P1/P2: busca de última presença agora é feita SOMENTE para os alunos
+  // exibidos na página atual (até PAGE_SIZE ids), em vez de todos os alunos
+  // filtrados. Isso evita:
+  //  (a) buscar presença de gente que nem está sendo exibida;
+  //  (b) o corte silencioso de 1000 linhas do PostgREST quando um professor
+  //      tem muitos alunos com muito histórico — antes a ordenação era global
+  //      e um aluno pouco frequente podia nunca aparecer no corte de 1000.
+  useEffect(() => {
+    if (!estudioId || alunosPagina.length === 0) {
+      setUltimaPresencaMap(prev => (Object.keys(prev).length ? {} : prev));
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setPresencaLoading(true);
+      try {
+        const alunoIds = alunosPagina.map(a => a.id);
+        // Uma linha por aluno é suficiente — não precisamos do histórico
+        // completo, então limitamos por aluno via loop pequeno (PAGE_SIZE
+        // é no máximo 10, então isso é barato e elimina o risco de corte).
+        const resultados = await Promise.all(
+          alunoIds.map(id =>
+            supabase
+              .from('presencas')
+              .select('aluno_id, data_checkin')
+              .eq('estudio_id', estudioId) // FIX C1
+              .eq('aluno_id', id)
+              .order('data_checkin', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+          )
+        );
+        if (cancelled) return;
+        const mapa = {};
+        resultados.forEach(({ data }) => {
+          if (data) mapa[data.aluno_id] = data.data_checkin;
+        });
+        setUltimaPresencaMap(mapa);
+      } catch (err) {
+        if (!cancelled) console.error('[ProfessorAlunos] Erro ao carregar presenças:', err);
+      } finally {
+        if (!cancelled) setPresencaLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [alunosPagina, estudioId]);
+
   const titulo = loading
     ? 'Meus Alunos'
     : `Meus Alunos · ${alunosFiltrados.length} ativo${alunosFiltrados.length !== 1 ? 's' : ''}`;
+
+  // FIX C3: se o perfil terminou de carregar mas não há professorId associado,
+  // não fica em skeleton eterno — mostra estado explicativo.
+  if (!authLoading && !professorId) {
+    return (
+      <div className="p-4 md:p-8">
+        <EmptyState
+          icon={<Users size={28} />}
+          title="Não foi possível identificar seu cadastro de professor"
+          description="Fale com o administrador do estúdio para vincular seu acesso."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-8 space-y-6 animate-in fade-in duration-500">
@@ -219,6 +288,10 @@ export default function ProfessorAlunos() {
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
         </div>
+      ) : erro ? (
+        <Surface variant="card" className="flex items-center gap-3 p-5 border border-destructive/30 bg-destructive-soft">
+          <p className="font-bold text-destructive text-sm">{erro}</p>
+        </Surface>
       ) : alunosFiltrados.length === 0 ? (
         <EmptyState
           icon={<Users size={28} />}
@@ -269,7 +342,6 @@ export default function ProfessorAlunos() {
                         )}
                       </td>
 
-                      {/* T4 FIX: plano em Badge destacado */}
                       <td className="px-8 py-5">
                         <p className="text-sm font-bold text-foreground">
                           {Array.isArray(aluno.modalidades_selecionadas) && aluno.modalidades_selecionadas.length > 0
@@ -314,7 +386,9 @@ export default function ProfessorAlunos() {
                       </td>
 
                       <td className="px-8 py-5">
-                        {ultimaPresenca ? (
+                        {presencaLoading ? (
+                          <Skeleton className="h-4 w-16" />
+                        ) : ultimaPresenca ? (
                           <span
                             className={`text-sm font-medium ${
                               (new Date() - new Date(ultimaPresenca)) / 86400000 > 14
@@ -333,7 +407,6 @@ export default function ProfessorAlunos() {
                         <Badge tone="success" variant="soft">Ativo</Badge>
                       </td>
 
-                      {/* T5 FIX: botão de acesso ao perfil */}
                       <td className="px-8 py-5">
                         <button
                           className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
@@ -423,7 +496,7 @@ export default function ProfessorAlunos() {
             })}
           </div>
 
-          {/* T3: Paginação */}
+          {/* Paginação */}
           {totalPaginas > 1 && (
             <div className="flex items-center justify-between pt-2">
               <p className="text-sm text-muted-foreground">

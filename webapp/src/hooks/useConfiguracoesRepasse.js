@@ -21,7 +21,10 @@ export function useSalvarConfiguracoesRepasse() {
   const key = ['config-repasse', estudioId];
 
   return useMutation({
-    mutationFn: (payload) => configuracoesRepasseService.salvar(payload, estudioId),
+    mutationFn: (payload) => {
+      if (!estudioId) return Promise.reject(new Error('estudioId ausente ao salvar configurações.'));
+      return configuracoesRepasseService.salvar(payload, estudioId);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key });
       toast.success('Configurações de repasse atualizadas.');

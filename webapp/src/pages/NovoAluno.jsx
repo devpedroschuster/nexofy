@@ -16,8 +16,13 @@ import { formatarCPF, validarCPF } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
+import { useImpersonation } from '../hooks/useImpersonation';
+import { useBuscaCep } from '../hooks/useBuscaCep';
+import { useCamposDinamicos } from '../hooks/useCamposDinamicos';
+import { construirSchemaMetadata } from '../lib/camposDinamicosValidation';
 import { showToast } from '../components/shared/Toast';
 import Modal from '../components/ui/Modal';
+import { CamposDinamicosGrid } from '../components/shared/CampoDinamicoInput';
 
 const STEPS = [
   { id: 1, label: 'Pessoal',   icon: User     },
@@ -127,9 +132,16 @@ export default function NovoAluno() {
   const alunoParaEditar   = location.state?.alunoParaEditar   || null;
   const leadParaConversao = location.state?.leadParaConversao || null;
 
-  const { data: estudio } = useEstudio();
   const { estudioId } = useAuth();
-const nomeEstudio = estudio?.nome;
+  const { estudioAtivo } = useImpersonation();
+  // FIX: super_admin em impersonation tem estudioId === null vindo de useAuth();
+  // sem compor com o estúdio ativo da impersonation, todo o formulário ficava
+  // travado silenciosamente para esse perfil.
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
+  // FIX: useEstudio precisa do id para a query ficar habilitada — antes era
+  // chamado sem argumento e "estudio" nunca carregava (nomeEstudio sempre undefined).
+  const { data: estudio } = useEstudio(idEfetivo);
+  const nomeEstudio = estudio?.nome;
 
   const [abaAtiva,                setAbaAtiva]                = useState('dados');
   const [planos,                  setPlanos]                  = useState([]);
@@ -144,7 +156,6 @@ const nomeEstudio = estudio?.nome;
 
   const [copiado,                 setCopiado]                 = useState(false);
   const [dadosCriados,            setDadosCriados]            = useState(null);
-  const [buscandoCep,             setBuscandoCep]             = useState(false);
   const [dataVencimento,          setDataVencimento]          = useState(
     new Date().toISOString().split('T')[0]
   );
@@ -154,7 +165,14 @@ const nomeEstudio = estudio?.nome;
   const [cpfDisplay, setCpfDisplay] = useState('');
   const [cpfErro,    setCpfErro]    = useState('');
 
-  const [cepErro, setCepErro] = useState('');
+  // Item 1 do plano multi-segmento: valores dos campos dinâmicos do estúdio.
+  // Fica em state separado (não dentro do react-hook-form) porque o schema
+  // fixo (alunoSchema) não conhece o catálogo dinâmico por tenant — mesma
+  // razão pela qual o service faz merge no backend em vez de o form tentar
+  // validar um schema variável.
+  const { campos: camposDinamicos } = useCamposDinamicos('aluno');
+  const [metadataForm, setMetadataForm] = useState({});
+  const [errosMetadata, setErrosMetadata] = useState({});
 
   const [cadastroSalvo,  setCadastroSalvo]  = useState(false);
   const [alunoSalvoId,   setAlunoSalvoId]   = useState(null);
@@ -193,6 +211,7 @@ const nomeEstudio = estudio?.nome;
       setCepErro('');
       setStepAtual(1);
       setCadastroSalvo(false);
+      setMetadataForm({});
     }
   }, [location.pathname, reset, alunoParaEditar, leadParaConversao]);
 
@@ -213,38 +232,52 @@ const nomeEstudio = estudio?.nome;
   }, [planoSelecionadoObj, dataInicioPlano, setValue]);
 
   useEffect(() => {
-    async function carregarDados() {
-      // FIX: sem .eq('estudio_id', estudioId) esta busca trazia planos e
-      // modalidades de TODOS os estúdios do sistema para o formulário.
-      if (!estudioId) return;
-      try {
-        const { data: planosData, error: errPlanos } = await supabase
-          .from('planos').select('*').eq('estudio_id', estudioId).order('nome');
-        if (errPlanos) throw errPlanos;
-        setPlanos(planosData || []);
+    let cancelled = false; // FIX: evita setState em componente desmontado (navegação rápida)
 
-        const { data: modData, error: errMod } = await supabase
-          .from('modalidades').select('id, nome, area').eq('estudio_id', estudioId)
-          .order('area').order('nome');
+    async function carregarDados() {
+      if (!idEfetivo) return;
+      try {
+        // FIX (performance): as duas queries são independentes entre si,
+        // rodavam em série (await sequencial) sem necessidade — agora em paralelo.
+        const [
+          { data: planosData, error: errPlanos },
+          { data: modData, error: errMod },
+        ] = await Promise.all([
+          supabase.from('planos').select('*').eq('estudio_id', idEfetivo).order('nome'),
+          supabase.from('modalidades').select('id, nome, area').eq('estudio_id', idEfetivo)
+            .order('area').order('nome'),
+        ]);
+        if (errPlanos) throw errPlanos;
         if (errMod) throw errMod;
-        setModalidades(modData || []);
+        if (!cancelled) {
+          setPlanos(planosData || []);
+          setModalidades(modData || []);
+        }
       } catch (error) {
-        console.error('Erro ao carregar planos/modalidades:', error);
-        showToast.error('Erro ao carregar planos e modalidades.');
+        if (!cancelled) {
+          console.error('Erro ao carregar planos/modalidades:', error);
+          showToast.error('Erro ao carregar planos e modalidades.');
+        }
       }
     }
     carregarDados();
 
     async function carregarFichaCompleta() {
+      // FIX: sem essa guarda, a busca disparava com estudio_id vazio antes do
+      // useAuth/impersonation resolverem, gerando um toast de erro falso-positivo.
+      if (!idEfetivo) return;
+
       if (alunoParaEditar?.id) {
-        // FIX: filtro de tenant também na busca da ficha completa do aluno
         const { data: aluno, error } = await supabase
-          .from('alunos').select('*').eq('id', alunoParaEditar.id).eq('estudio_id', estudioId).single();
+          .from('alunos').select('*').eq('id', alunoParaEditar.id).eq('estudio_id', idEfetivo).single();
         if (error) {
-          console.error('Erro ao carregar ficha do aluno:', error);
-          showToast.error('Não foi possível carregar os dados deste aluno.');
+          if (!cancelled) {
+            console.error('Erro ao carregar ficha do aluno:', error);
+            showToast.error('Não foi possível carregar os dados deste aluno.');
+          }
+          return;
         }
-        if (aluno && !error) {
+        if (aluno && !cancelled) {
           reset({
             nome_completo:    aluno.nome_completo    || '',
             email:            aluno.email            || '',
@@ -265,8 +298,9 @@ const nomeEstudio = estudio?.nome;
           });
           if (aluno.cpf) setCpfDisplay(formatarCPF(aluno.cpf));
           setModalidadesSelecionadas(aluno.modalidades_selecionadas || []);
+          setMetadataForm(aluno.metadata || {});
         }
-      } else if (leadParaConversao) {
+      } else if (leadParaConversao && !cancelled) {
         reset({
           nome_completo: leadParaConversao.nome_visitante     || '',
           telefone:      leadParaConversao.telefone_visitante || '',
@@ -275,7 +309,9 @@ const nomeEstudio = estudio?.nome;
       }
     }
     carregarFichaCompleta();
-  }, [alunoParaEditar, reset, estudioId]);
+
+    return () => { cancelled = true; };
+  }, [alunoParaEditar, reset, idEfetivo, leadParaConversao]);
 
   useEffect(() => {
     if (abaAtiva === 'agenda' && alunoParaEditar) carregarAgendaFixa();
@@ -285,11 +321,11 @@ const nomeEstudio = estudio?.nome;
   async function carregarAgendaFixa() {
     setLoadingAgenda(true);
     try {
-      // FIX: sem filtro de estudio_id, esta busca trazia a grade de aulas de
-      // TODOS os estúdios, permitindo matricular o aluno numa turma de outro tenant.
-      const { data: aulas } = await supabase
+      const { data: aulas, error: errAulas } = await supabase
         .from('agenda').select('*, modalidades(id, nome)')
-        .eq('estudio_id', estudioId).eq('eh_recorrente', true);
+        .eq('estudio_id', idEfetivo).eq('eh_recorrente', true);
+      if (errAulas) throw errAulas;
+
       const diasOrdem = {
         'Domingo': 0, 'Segunda-feira': 1, 'Terça-feira': 2,
         'Quarta-feira': 3, 'Quinta-feira': 4, 'Sexta-feira': 5, 'Sábado': 6,
@@ -301,39 +337,29 @@ const nomeEstudio = estudio?.nome;
           return a.horario.localeCompare(b.horario);
         })
       );
-      const { data: matriculas } = await supabase
-        .from('agenda_fixa').select('aula_id').eq('aluno_id', alunoParaEditar.id);
+
+      // FIX: filtro de estudio_id adicionado por defesa em profundidade,
+      // consistente com o padrão já usado no INSERT/DELETE desta mesma tabela
+      // logo abaixo (executarMatricula/executarRemocao).
+      const { data: matriculas, error: errMat } = await supabase
+        .from('agenda_fixa').select('aula_id')
+        .eq('aluno_id', alunoParaEditar.id).eq('estudio_id', idEfetivo);
+      if (errMat) throw errMat;
       setMatriculasAluno(matriculas?.map(m => m.aula_id) || []);
-    } catch {
+    } catch (error) {
+      console.error('Erro ao carregar grade fixa:', error);
       showToast.error('Erro ao carregar grade fixa.');
     } finally {
       setLoadingAgenda(false);
     }
   }
 
-  const buscarCep = async (cep) => {
-    const cepLimpo = cep.replace(/\D/g, '');
-    if (cepLimpo.length !== 8) return;
-    setBuscandoCep(true);
-    setCepErro('');
-    try {
-      const response = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
-      if (!response.ok) throw new Error('http');
-      const data = await response.json();
-      if (data.erro) {
-        setCepErro('CEP não encontrado. Preencha o endereço manualmente.');
-        return;
-      }
-      setValue('rua',    data.logradouro, { shouldValidate: true });
-      setValue('bairro', data.bairro,     { shouldValidate: true });
-      setValue('cidade', data.localidade, { shouldValidate: true });
-      document.getElementById('input-numero')?.focus();
-    } catch {
-      setCepErro('Serviço de CEP indisponível. Preencha o endereço manualmente.');
-    } finally {
-      setBuscandoCep(false);
-    }
-  };
+  const { buscarCep, buscandoCep, cepErro } = useBuscaCep((data) => {
+    setValue('rua',    data.logradouro, { shouldValidate: true });
+    setValue('bairro', data.bairro,     { shouldValidate: true });
+    setValue('cidade', data.localidade, { shouldValidate: true });
+    document.getElementById('input-numero')?.focus();
+  });
 
   // ─────────────────────────────────────────────────────────
   const handleCpfChange = (e) => {
@@ -480,7 +506,7 @@ const nomeEstudio = estudio?.nome;
       // seguro, mas gravar o estudio_id aqui também evita que uma futura
       // regressão volte a permitir matrícula cruzada de tenant.
       const { error } = await supabase.from('agenda_fixa')
-        .insert({ aluno_id: alunoParaEditar.id, aula_id: aula.id, estudio_id: estudioId });
+        .insert({ aluno_id: alunoParaEditar.id, aula_id: aula.id, estudio_id: idEfetivo });
       if (error) throw error;
       showToast.success('Aluno matriculado na turma!');
       carregarAgendaFixa();
@@ -493,7 +519,7 @@ const nomeEstudio = estudio?.nome;
   async function executarRemocao(aula) {
     try {
       const { error } = await supabase.from('agenda_fixa')
-        .delete().match({ aluno_id: alunoParaEditar.id, aula_id: aula.id, estudio_id: estudioId });
+        .delete().match({ aluno_id: alunoParaEditar.id, aula_id: aula.id, estudio_id: idEfetivo });
       if (error) throw error;
       showToast.success('Aluno removido da turma.');
       carregarAgendaFixa();
@@ -526,8 +552,13 @@ const nomeEstudio = estudio?.nome;
 
   const calcularDataFim = (dataVencimentoStr, mesesAdicionais) => {
     if (!dataVencimentoStr || !mesesAdicionais) return '';
+    // FIX: antes somava "meses * 30 dias" fixos, divergindo do cálculo usado
+    // no preview (useEffect acima, que usa setMonth com meses de calendário
+    // reais). Em meses != 30 dias (fevereiro, 31 dias) a data salva podia
+    // ficar diferente da que era exibida ao usuário no formulário.
     const d = new Date(dataVencimentoStr + 'T12:00:00');
-    d.setDate(d.getDate() + Number(mesesAdicionais) * 30);
+    d.setMonth(d.getMonth() + Number(mesesAdicionais));
+    d.setDate(d.getDate() - 1);
     return d.toISOString().split('T')[0];
   };
 
@@ -537,6 +568,27 @@ const nomeEstudio = estudio?.nome;
   // ─────────────────────────────────────────────────────────
   async function onSubmit(data) {
     try {
+      // Fase 7: valida metadata (campos dinâmicos) antes de prosseguir.
+      // Fica fora do yupResolver porque metadataForm não é um campo
+      // registrado no react-hook-form (ver comentário na declaração do
+      // state acima). Path de erro sai como field_name puro aqui —
+      // CamposDinamicosGrid espera o mapa nesse formato (não
+      // 'metadata.<field_name>'), então usamos err.path direto.
+      const schemaMetadata = construirSchemaMetadata(camposDinamicos);
+      try {
+        await schemaMetadata.validate(metadataForm, { abortEarly: false });
+        setErrosMetadata({});
+      } catch (errValidacao) {
+        const erros = {};
+        (errValidacao.inner ?? []).forEach((e) => {
+          if (e.path && !erros[e.path]) erros[e.path] = e.message;
+        });
+        setErrosMetadata(erros);
+        showToast.error('Confira os campos adicionais destacados antes de continuar.');
+        setStepAtual(1); // campos dinâmicos são renderizados no step 1
+        return;
+      }
+
       // SEC-01 — nunca aceitar role do formulário; fixar sempre como 'aluno'.
       // Promoção a admin deve ocorrer via console Supabase ou Edge Function dedicada.
       const roleSanitizado = 'aluno';
@@ -558,6 +610,7 @@ const nomeEstudio = estudio?.nome;
         bairro:                    data.bairro            || null,
         cidade:                    data.cidade            || null,
         contato_emergencia:        data.contato_emergencia|| null,
+        metadata:                  metadataForm,
       };
 
       if (planoFinal) {
@@ -572,7 +625,7 @@ const nomeEstudio = estudio?.nome;
       if (alunoParaEditar) {
         await alunosService.atualizar(alunoParaEditar.id, {
           ...payloadBase, nome_completo: data.nome_completo,
-        }, estudioId);
+        }, idEfetivo);
         showToast.success('Cadastro atualizado com sucesso!');
         await queryClient.invalidateQueries({ queryKey: ['alunos'] });
         navigate('/alunos');
@@ -586,7 +639,7 @@ const nomeEstudio = estudio?.nome;
       // a esse professor de outro tenant acesso como aluno neste estúdio.
       const { data: profExistente } = await supabase
         .from('professores').select('auth_id').eq('email', data.email.trim())
-        .eq('estudio_id', estudioId).maybeSingle();
+        .eq('estudio_id', idEfetivo).maybeSingle();
 
       let novoAlunoId = null;
 
@@ -598,11 +651,11 @@ const nomeEstudio = estudio?.nome;
         // adicionado depois via update escopado por tenant.
         const alunoInserido = await alunosService.criar(
           { ...payloadBase, nome_completo: data.nome_completo, email: data.email.trim() },
-          estudioId
+          idEfetivo
         );
         const { error: errVinculo } = await supabase
           .from('alunos').update({ auth_id: profExistente.auth_id })
-          .eq('id', alunoInserido.id).eq('estudio_id', estudioId);
+          .eq('id', alunoInserido.id).eq('estudio_id', idEfetivo);
         if (errVinculo) throw new Error('Erro ao criar vínculo de aluno.');
         novoAlunoId = alunoInserido.id;
         showToast.success('Perfil vinculado ao professor com sucesso!');
@@ -612,37 +665,46 @@ const nomeEstudio = estudio?.nome;
         // FIX: estudio_id agora é sempre gravado, via alunosService.criar.
         const alunoInserido = await alunosService.criar(
           { ...payloadBase, nome_completo: data.nome_completo, email: data.email.trim() },
-          estudioId
+          idEfetivo
         );
         novoAlunoId = alunoInserido.id;
       }
 
       // Financial records
-      if (novoAlunoId && planoFinal && planoInfos) {
-        const { error: errHist } = await supabase.from('historico_planos').insert([{
-          aluno_id:    novoAlunoId,
-          plano_id:    planoFinal,
-          data_inicio: payloadBase.data_inicio_plano,
-          data_fim:    payloadBase.data_fim_plano,
-          status:      'ativo',
-          valor_pago:  planoInfos.preco || 0,
-        }]);
-        if (errHist) console.error('Erro no histórico:', errHist);
-
-        const { error: errMensalidade } = await supabase.from('mensalidades').insert([{
-          aluno_id:        novoAlunoId,
-          plano_id:        planoFinal,
-          data_vencimento: dataVencimento,
-          status:          'pendente',
-        }]);
-        if (errMensalidade) console.error('Erro na mensalidade:', errMensalidade);
+      // FIX: os dois INSERTs manuais (historico_planos + mensalidades) foram
+      // substituídos pela RPC atômica já existente em alunosService.matricular
+      // (matricular_aluno). Antes, se um dos dois inserts falhasse, o outro
+      // já tinha sido persistido e o erro era só logado — aluno ficava criado
+      // com estado financeiro inconsistente e sem aviso ao operador. Agora,
+      // ou os dois registros são gravados juntos, ou a transação inteira
+      // faz rollback e o erro é reportado explicitamente.
+      if (novoAlunoId && planoFinal) {
+        try {
+          await alunosService.matricular(
+            novoAlunoId,
+            planoFinal,
+            { dataVencimento, modalidades: modalidadesFinais },
+            idEfetivo
+          );
+        } catch (errMatricula) {
+          console.error('Erro ao matricular no plano:', errMatricula);
+          showToast.error(
+            'Aluno criado, mas houve um erro ao gerar o plano/mensalidade. Verifique manualmente.'
+          );
+        }
       }
 
       // Lead conversion
+      // FIX: sem .eq('estudio_id', idEfetivo) qualquer id de "presenca" informado
+      // via location.state poderia ser atualizado, mesmo de outro tenant (IDOR).
+      // O erro também deixa de ser ignorado silenciosamente.
       if (leadParaConversao?.id) {
         const payload = { status_conversao: 'convertido' };
         if (novoAlunoId) payload.aluno_id = novoAlunoId;
-        await supabase.from('presencas').update(payload).eq('id', leadParaConversao.id);
+        const { error: errConversao } = await supabase
+          .from('presencas').update(payload)
+          .eq('id', leadParaConversao.id).eq('estudio_id', idEfetivo);
+        if (errConversao) console.error('Erro ao converter lead:', errConversao);
       }
 
       await queryClient.invalidateQueries({ queryKey: ['alunos', 'professores', 'presencas'] });
@@ -672,7 +734,7 @@ const nomeEstudio = estudio?.nome;
             aluno_id: alunoSalvoId,
             email: alunoSalvoEmail,
             nome: alunoSalvoNome,
-            estudio_id: estudioId,
+            estudio_id: idEfetivo,
           },
         }
       );
@@ -956,6 +1018,20 @@ const nomeEstudio = estudio?.nome;
             />
           </div>
         </div>
+
+        {camposDinamicos.length > 0 && (
+          <div className="pt-2">
+            <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4">
+              Campos Adicionais
+            </h3>
+            <CamposDinamicosGrid
+              campos={camposDinamicos}
+              metadata={metadataForm}
+              onChangeMetadata={setMetadataForm}
+              erros={errosMetadata}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -1143,6 +1219,20 @@ const nomeEstudio = estudio?.nome;
               />
             </div>
           </div>
+
+          {camposDinamicos.length > 0 && (
+            <div className="pt-2">
+              <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">
+                Campos Adicionais
+              </h4>
+              <CamposDinamicosGrid
+                campos={camposDinamicos}
+                metadata={metadataForm}
+                onChangeMetadata={setMetadataForm}
+                erros={errosMetadata}
+              />
+            </div>
+          )}
         </div>
 
         {/* Endereço */}

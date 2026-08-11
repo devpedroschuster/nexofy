@@ -1,21 +1,61 @@
 import { supabase } from '../lib/supabase';
+import { sanitizarMetadata } from '../lib/camposSistema';
 
 // Campos que o cliente pode efetivamente gravar em `alunos` a partir destes
 // dois métodos. `role`, `estudio_id`, `id`, `auth_id` e afins nunca entram
 // por aqui — mudança de papel/tenant deve passar por um fluxo dedicado e
 // autorizado no backend (Edge Function/RPC), nunca por um update genérico.
+//
+// 'metadata' foi adicionado para suportar campos_dinamicos (item 1 do plano
+// multi-segmento). O valor passado aqui NUNCA é gravado direto — sempre
+// passa por sanitizarMetadata() (remove chaves reservadas do sistema) e,
+// em atualizar(), por um merge com o metadata já existente (ver função
+// mesclarMetadata abaixo), para uma edição parcial não apagar campos
+// dinâmicos que não fazem parte do form que originou esta chamada.
 const CAMPOS_ATUALIZAVEIS = [
   'nome_completo', 'email', 'cpf', 'telefone', 'data_nascimento',
   'plano_id', 'data_inicio_plano', 'data_fim_plano',
   'modalidades_selecionadas', 'contato_emergencia',
   'cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade',
   'link_anamnese', 'observacoes_medicas',
+  'metadata',
 ];
 
 function filtrarCamposPermitidos(dados) {
-  return Object.fromEntries(
+  const filtrado = Object.fromEntries(
     Object.entries(dados).filter(([chave]) => CAMPOS_ATUALIZAVEIS.includes(chave))
   );
+
+  if ('metadata' in filtrado) {
+    filtrado.metadata = sanitizarMetadata(filtrado.metadata ?? {});
+  }
+
+  return filtrado;
+}
+
+/**
+ * Faz merge raso entre o metadata já gravado no banco e os valores novos
+ * enviados nesta chamada. Sem isso, um `update` parcial (ex.: só o form de
+ * "dados médicos") sobrescreveria o jsonb inteiro e apagaria valores de
+ * outros campos dinâmicos que não estavam nesse form específico.
+ *
+ * Só é chamada dentro de `atualizar` — em `criar` não há metadata prévio,
+ * então o valor sanitizado já é o final.
+ */
+async function mesclarMetadata(alunoId, estudioId, metadataNovo) {
+  const { data, error } = await supabase
+    .from('alunos')
+    .select('metadata')
+    .eq('id', alunoId)
+    .eq('estudio_id', estudioId)
+    .single();
+
+  if (error) throw error;
+
+  return {
+    ...(data?.metadata ?? {}),
+    ...metadataNovo,
+  };
 }
 
 export const alunosService = {
@@ -98,9 +138,19 @@ export const alunosService = {
 
   async atualizar(id, dados, estudioId) {
     try {
+      const payload = filtrarCamposPermitidos(dados);
+
+      // Merge parcial: só entra em ação se este update de fato tocar em
+      // metadata. Uma edição que não envolve campos dinâmicos (ex.: só
+      // trocar o telefone) nem chama mesclarMetadata, evitando um SELECT
+      // extra desnecessário no caminho mais comum.
+      if ('metadata' in payload) {
+        payload.metadata = await mesclarMetadata(id, estudioId, payload.metadata);
+      }
+
       const { data, error } = await supabase
         .from('alunos')
-        .update(filtrarCamposPermitidos(dados))
+        .update(payload)
         .eq('id', id)
         .eq('estudio_id', estudioId) // Bug #4: impede UPDATE cross-tenant
         .select()

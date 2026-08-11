@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData } from '@tanstack/react-query';
 import {
   User, CreditCard, Calendar, Activity,
   ArrowLeft, ExternalLink, FileText, CheckCircle, MapPin, Edit2, AlertTriangle,
@@ -11,6 +12,10 @@ import { supabase } from '../lib/supabase';
 import { alunosService } from '../services/alunosService';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
+import { useBuscaCep } from '../hooks/useBuscaCep';
+import { useImpersonation } from '../context/ImpersonationContext';
+import { useCamposDinamicos } from '../hooks/useCamposDinamicos';
+import { construirSchemaMetadata } from '../lib/camposDinamicosValidation';
 import { TableSkeleton } from '../components/shared/Loading';
 import { showToast } from '../components/shared/Toast';
 import ModalRenovarPlano from '../components/ModalRenovarPlano';
@@ -18,6 +23,7 @@ import Surface from '../components/ui/Surface';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Input from '../components/ui/Input';
+import { CamposDinamicosGrid } from '../components/shared/CampoDinamicoInput';
 
 // ─────────────────────────────────────────────────────────────
 // Avatar
@@ -122,12 +128,36 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
     bairro:       aluno?.bairro       ?? '',
     cidade:       aluno?.cidade       ?? '',
   });
+  // Item 1 do plano multi-segmento: valores dos campos dinâmicos do estúdio,
+  // separado de `form` (que segue o schema fixo) pelo mesmo motivo do
+  // NovoAluno.jsx — o merge parcial com o metadata já gravado acontece no
+  // service (alunosService.atualizar → mesclarMetadata), não aqui.
+  const { campos: camposDinamicos } = useCamposDinamicos('aluno');
+  const [metadataForm, setMetadataForm] = useState(aluno?.metadata ?? {});
+  const [errosMetadata, setErrosMetadata] = useState({});
   const set = (campo) => (e) => setForm(f => ({ ...f, [campo]: e.target.value }));
   const handleSalvar = async () => {
     if (!form.nome_completo.trim()) {
       showToast.error('Nome completo é obrigatório.');
       return;
     }
+
+    // Fase 7: valida os campos dinâmicos antes de gravar. Mesmo racional do
+    // NovoAluno.jsx — metadataForm não é gerenciado por react-hook-form/yupResolver.
+    const schemaMetadata = construirSchemaMetadata(camposDinamicos);
+    try {
+      await schemaMetadata.validate(metadataForm, { abortEarly: false });
+      setErrosMetadata({});
+    } catch (errValidacao) {
+      const erros = {};
+      (errValidacao.inner ?? []).forEach((e) => {
+        if (e.path && !erros[e.path]) erros[e.path] = e.message;
+      });
+      setErrosMetadata(erros);
+      showToast.error('Confira os campos adicionais destacados antes de salvar.');
+      return;
+    }
+
     setSalvando(true);
     try {
       await alunosService.atualizar(alunoId, {
@@ -143,6 +173,7 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
         complemento:        form.complemento.trim()        || null,
         bairro:             form.bairro.trim()             || null,
         cidade:             form.cidade.trim()             || null,
+        metadata:           metadataForm,
       }, estudioId);
       queryClient.invalidateQueries(['aluno', alunoId]);
       showToast.success('Cadastro atualizado com sucesso!');
@@ -154,24 +185,14 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
       setSalvando(false);
     }
   };
-  const buscarCep = async (cep) => {
-    const cepLimpo = cep.replace(/\D/g, '');
-    if (cepLimpo.length !== 8) return;
-    try {
-      const res = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
-      const data = await res.json();
-      if (!data.erro) {
-        setForm(f => ({
-          ...f,
-          rua:    data.logradouro || f.rua,
-          bairro: data.bairro     || f.bairro,
-          cidade: data.localidade || f.cidade,
-        }));
-      }
-    } catch (error) {
-      console.error('[PerfilAluno] Erro ao buscar CEP:', error);
-    }
-  };
+  const { buscarCep, buscandoCep, cepErro } = useBuscaCep((data) => {
+    setForm(f => ({
+      ...f,
+      rua:    data.logradouro || f.rua,
+      bairro: data.bairro     || f.bairro,
+      cidade: data.localidade || f.cidade,
+    }));
+  });
   const labelClass = 'text-[10px] uppercase font-black text-muted-foreground tracking-widest block mb-1.5';
   const inputClass = 'w-full border border-border rounded-xl px-4 py-2.5 text-sm font-medium text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground';
   return (
@@ -240,6 +261,9 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
                 <label className={labelClass}>CEP</label>
                 <input className={inputClass} value={form.cep} onChange={set('cep')}
                   onBlur={(e) => buscarCep(e.target.value)} placeholder="00000-000" maxLength={9} />
+                  {cepErro && (
+                  <p className="text-xs text-orange-600 mt-1.5 font-medium">{cepErro}</p>
+                )}
               </div>
               <div className="col-span-2">
                 <label className={labelClass}>Logradouro</label>
@@ -267,6 +291,20 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
               </div>
             </div>
           </div>
+
+          {camposDinamicos.length > 0 && (
+            <div className="space-y-5">
+              <h3 className="font-black text-foreground flex items-center gap-2 text-sm uppercase tracking-wider text-muted-foreground">
+                Campos Adicionais
+              </h3>
+              <CamposDinamicosGrid
+                campos={camposDinamicos}
+                metadata={metadataForm}
+                onChangeMetadata={setMetadataForm}
+                erros={errosMetadata}
+              />
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-end gap-3 px-8 py-5 border-t border-border shrink-0">
           <Button variant="ghost" size="md" onClick={onClose} disabled={salvando}>Cancelar</Button>
@@ -1194,13 +1232,21 @@ export default function PerfilAluno() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+ 
   const { estudioId } = useAuth();
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
+
+  // Item 1 do plano multi-segmento: catálogo de campos ativos, para exibir
+  // rótulo+valor na aba Resumo a partir de aluno.metadata.
+  const { campos: camposDinamicos } = useCamposDinamicos('aluno');
+
   const [abaAtiva, setAbaAtiva] = useState('resumo');
   const [modalRenovarAberto, setModalRenovarAberto] = useState(false);
   const [modalEditarAberto, setModalEditarAberto] = useState(false);
   const [observacoesMedicas, setObservacoesMedicas] = useState('');
   const [salvandoMedico, setSalvandoMedico] = useState(false);
-
+ 
   const hoje = new Date();
   const noventa = new Date(hoje);
   noventa.setDate(hoje.getDate() - 90);
@@ -1209,21 +1255,22 @@ export default function PerfilAluno() {
   const [filtroFim,    setFiltroFim]    = useState(fmt(hoje));
 
   const { data: aluno, isLoading: loadingAluno } = useQuery({
-    queryKey: ['aluno', id],
-    queryFn: () => alunosService.buscarPerfilCompleto(id, estudioId),
-      enabled: !!estudioId,
+    queryKey: ['aluno', id, idEfetivo],
+    queryFn: () => alunosService.buscarPerfilCompleto(id, idEfetivo),
+    enabled: !!idEfetivo,
+    placeholderData: keepPreviousData, // evita skeleton completo ao trocar de aluno
   });
   const { data: planos } = useQuery({
-    queryKey: ['aluno-planos', id],
-    queryFn: () => alunosService.buscarHistoricoPlanos(id, estudioId),
-    enabled: !!aluno,
+    queryKey: ['aluno-planos', id, idEfetivo],
+    queryFn: () => alunosService.buscarHistoricoPlanos(id, idEfetivo),
+    enabled: !!aluno && !!idEfetivo,
   });
   const { data: frequencia } = useQuery({
-    queryKey: ['aluno-frequencia', id],
-    queryFn: () => alunosService.buscarHistoricoFrequencia(id, estudioId),
-    enabled: !!aluno,
+    queryKey: ['aluno-frequencia', id, idEfetivo],
+    queryFn: () => alunosService.buscarHistoricoFrequencia(id, idEfetivo),
+    enabled: !!aluno && !!idEfetivo,
   });
-  const { data: estudio } = useEstudio();
+  const { data: estudio } = useEstudio(idEfetivo);
   const nomeEstudio = estudio?.nome;
 
   React.useEffect(() => {
@@ -1233,15 +1280,15 @@ export default function PerfilAluno() {
   }, [aluno?.observacoes_medicas]);
 
   const handleRenovacaoSucesso = () => {
-    queryClient.invalidateQueries(['aluno', id]);
-    queryClient.invalidateQueries(['aluno-planos', id]);
+    queryClient.invalidateQueries({ queryKey: ['aluno', id, idEfetivo] });
+    queryClient.invalidateQueries({ queryKey: ['aluno-planos', id, idEfetivo] });
   };
-
+ 
   if (loadingAluno) return <TableSkeleton />;
-
+ 
   const planoAtivo   = planos?.find(p => p.status === 'ativo') ?? null;
   const semHistorico = Array.isArray(planos) && planos.length === 0 && aluno?.plano_id;
-
+ 
   const abas = [
     { id: 'resumo',      label: 'Dados Gerais',    icon: <FileText size={18} />    },
     { id: 'modalidades', label: 'Modalidades',      icon: <BookOpen size={18} />    },
@@ -1377,18 +1424,37 @@ export default function PerfilAluno() {
                 </div>
               </div>
             </Surface>
+
+            {camposDinamicos.length > 0 && (
+              <Surface variant="card" padding="xl" className="space-y-8 md:col-span-2">
+                <h3 className="font-black text-foreground flex items-center gap-2">
+                  Campos Adicionais
+                </h3>
+                <div className="grid grid-cols-2 gap-8">
+                  {camposDinamicos.map((campo) => {
+                    const valor = aluno?.metadata?.[campo.field_name];
+                    const valorExibido = campo.field_type === 'boolean'
+                      ? (valor ? 'Sim' : 'Não')
+                      : valor;
+                    return (
+                      <LabelDado key={campo.id} titulo={campo.label} valor={valorExibido} />
+                    );
+                  })}
+                </div>
+              </Surface>
+            )}
           </div>
         )}
 
         {/* ABA: Modalidades */}
         {abaAtiva === 'modalidades' && (
-          <AbaModalidades aluno={aluno} alunoId={id} estudioId={estudioId} queryClient={queryClient} />
-        )}
+        <AbaModalidades aluno={aluno} alunoId={id} estudioId={idEfetivo} queryClient={queryClient} />
+      )}
 
         {/* ABA: Agenda Fixa */}
         {abaAtiva === 'agenda' && (
-          <AbaAgendaFixa aluno={aluno} alunoId={id} estudioId={estudioId} />
-        )}
+        <AbaAgendaFixa aluno={aluno} alunoId={id} estudioId={idEfetivo} />
+      )}
 
         {/* ABA: Frequência */}
         {abaAtiva === 'frequencia' && (() => {
@@ -1521,17 +1587,17 @@ export default function PerfilAluno() {
 
         {/* ABA: Saúde / Anamnese */}
         {abaAtiva === 'anamnese' && (
-          <AbaAnamnese
-            aluno={aluno}
-            alunoId={id}
-            estudioId={estudioId}
-            queryClient={queryClient}
-            observacoesMedicas={observacoesMedicas}
-            setObservacoesMedicas={setObservacoesMedicas}
-            salvandoMedico={salvandoMedico}
-            setSalvandoMedico={setSalvandoMedico}
-          />
-        )}
+        <AbaAnamnese
+          aluno={aluno}
+          alunoId={id}
+          estudioId={idEfetivo}
+          queryClient={queryClient}
+          observacoesMedicas={observacoesMedicas}
+          setObservacoesMedicas={setObservacoesMedicas}
+          salvandoMedico={salvandoMedico}
+          setSalvandoMedico={setSalvandoMedico}
+        />
+      )}
       </div>
 
       {/* MODAL: Renovar Plano */}
@@ -1547,7 +1613,7 @@ export default function PerfilAluno() {
         <ModalEditarCadastro
           aluno={aluno}
           alunoId={id}
-          estudioId={estudioId}
+          estudioId={idEfetivo}
           queryClient={queryClient}
           onClose={() => setModalEditarAberto(false)}
         />

@@ -4,6 +4,7 @@ import { alunosService } from '../services/alunosService';
 import { useNomeEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
 import { Gift, CalendarDays, Search, PartyPopper, Cake, MessageCircle } from 'lucide-react';
+import { showToast } from '../components/shared/Toast';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
@@ -103,9 +104,15 @@ export default function Aniversariantes() {
   );
  
   const abrirWhatsApp = (telefone, nome) => {
-    if (!telefone) return;
+    if (!telefone) {
+      showToast.error('Aluno sem telefone cadastrado.');
+      return;
+    }
     const numeroLimpo = telefone.replace(/\D/g, '');
-    if (numeroLimpo.length < 10) return; // TODO: expor feedback (toast) ao usuário aqui
+    if (numeroLimpo.length < 10) {
+      showToast.error('Telefone inválido. Verifique o cadastro do aluno.');
+      return;
+    }
  
     const primeiroNome = (nome ?? '').split(' ')[0] || 'aluno(a)';
     const mensagem = encodeURIComponent(
