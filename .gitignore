@@ -31,6 +31,7 @@ out/
 .vercel
 .env*.local
 
+PLANOS/
 PLANO - MULTI SEGMENTO.md
 repomix-output.xml
 PLANO ITEM 1.md

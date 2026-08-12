@@ -53,6 +53,9 @@ import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
 import ConfiguracoesEstudio from './pages/ConfiguracoesEstudio';
 import ConfiguracoesEspacos from './pages/ConfiguracoesEspacos';
 
+// Bloqueio de acesso por status do estúdio (inativo/suspenso/cancelado)
+import EstudioBloqueado from './pages/EstudioBloqueado';
+
 // Super Admin
 import SuperAdminLayout      from './pages/SuperAdmin';
 import SuperAdminDashboard   from './pages/SuperAdmin/pages/SuperAdminDashboard';
@@ -74,13 +77,18 @@ function Spinner() {
 }
 
 // Destino pós-autenticação, considerando o caso "logado mas ainda sem
-// estudio_membros" (usuário confirmou e-mail mas não terminou o onboarding).
-// Sem esse caso à parte, perfil === null cai no fallback de rotaPorPerfil
-// ('/login'), e como a rota /login redireciona sessão ativa de volta pra
-// rotaPorPerfil(perfil), o resultado é um loop de redirect em /login.
-function destinoPosAuth(sessao, perfil) {
+// estudio_membros" (usuário confirmou e-mail mas não terminou o onboarding)
+// e o caso "logado, com perfil, mas o estúdio está inativo/suspenso/cancelado".
+// Sem o primeiro caso à parte, perfil === null cai no fallback de
+// rotaPorPerfil ('/login'), e como a rota /login redireciona sessão ativa de
+// volta pra rotaPorPerfil(perfil), o resultado é um loop de redirect em
+// /login. O segundo caso evita que um usuário de estúdio bloqueado chegue
+// nas rotas internas e veja telas vazias sem entender por quê — super_admin
+// nunca é bloqueado aqui, pois acessa qualquer estúdio via impersonation.
+function destinoPosAuth(sessao, perfil, estudioBloqueado) {
   if (!sessao) return '/login';
   if (perfil === null) return '/cadastro/estudio';
+  if (estudioBloqueado && perfil !== 'super_admin') return '/estudio-bloqueado';
   return rotaPorPerfil(perfil);
 }
 
@@ -135,11 +143,14 @@ const LayoutComSidebar = ({ perfil, nomeUsuario, estudioId }) => {
 // Guard generico (admin / professor / aluno)
 // Sessão ativa sem perfil (ainda sem estudio_membros) manda pro onboarding,
 // não pra tela de login — o usuário já está autenticado, só falta o
-// segundo passo do cadastro.
-const RotaPrivada = ({ sessao, perfil, loading, allowedRoles }) => {
+// segundo passo do cadastro. Sessão ativa com perfil, mas cujo estúdio está
+// bloqueado (inativo/suspenso/cancelado), manda pra /estudio-bloqueado —
+// super_admin nunca é bloqueado (acessa via impersonation).
+const RotaPrivada = ({ sessao, perfil, loading, allowedRoles, estudioBloqueado }) => {
   if (loading) return <Spinner />;
   if (!sessao) return <Navigate to="/login" replace />;
   if (perfil === null) return <Navigate to="/cadastro/estudio" replace />;
+  if (estudioBloqueado && perfil !== 'super_admin') return <Navigate to="/estudio-bloqueado" replace />;
   if (allowedRoles && !allowedRoles.includes(perfil)) {
     return <Navigate to={rotaPorPerfil(perfil)} replace />;
   }
@@ -173,7 +184,7 @@ const RotaCadastroEstudio = ({ sessao, perfil, loading }) => {
 // "useAuth deve ser usado dentro de <AuthProvider>" e derrubar a aplicação
 // inteira no primeiro render.
 function AppRoutes() {
-  const { sessao, perfil, loading, nomeUsuario, estudioId } = useAuth();
+  const { sessao, perfil, loading, nomeUsuario, estudioId, estudioBloqueado } = useAuth();
 
   if (loading) return <Spinner />;
 
@@ -184,15 +195,24 @@ function AppRoutes() {
 
         {/* Publicas */}
         <Route path="/" element={
-          !sessao ? <Landing /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+          !sessao ? <Landing /> : <Navigate to={destinoPosAuth(sessao, perfil, estudioBloqueado)} replace />
         } />
         <Route path="/login" element={
-          !sessao ? <Login /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+          !sessao ? <Login /> : <Navigate to={destinoPosAuth(sessao, perfil, estudioBloqueado)} replace />
         } />
         <Route path="/cadastro" element={
-          !sessao ? <Cadastro /> : <Navigate to={destinoPosAuth(sessao, perfil)} replace />
+          !sessao ? <Cadastro /> : <Navigate to={destinoPosAuth(sessao, perfil, estudioBloqueado)} replace />
         } />
         <Route path="/redefinir-senha" element={<RedefinirSenha />} />
+
+        {/*
+          Tela de bloqueio por status do estúdio (inativo/suspenso/cancelado).
+          Exige sessão ativa (senão manda pro login), mas não exige perfil
+          resolvido nem estúdio ativo — é justamente pra quem está bloqueado.
+        */}
+        <Route path="/estudio-bloqueado" element={
+          !sessao ? <Navigate to="/login" replace /> : <EstudioBloqueado />
+        } />
 
         {/* Cadastro self-service — passo 2 (dados do estúdio) */}
         <Route element={<RotaCadastroEstudio sessao={sessao} perfil={perfil} loading={loading} />}>
@@ -209,7 +229,7 @@ function AppRoutes() {
         </Route>
 
         {/* Aluno */}
-        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['aluno']} />}>
+        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['aluno']} estudioBloqueado={estudioBloqueado} />}>
           <Route path="/area-aluno" element={<AreaAluno />} />
         </Route>
 
@@ -225,7 +245,7 @@ function AppRoutes() {
             B) Criar um layout de impersonation separado (mais isolado)
           Usamos a opcao A, que e a padrao para ferramentas de suporte.
         */}
-        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'professor', 'super_admin']} />}>
+        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'professor', 'super_admin']} estudioBloqueado={estudioBloqueado} />}>
           <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
             <Route path="/agenda"              element={<Agenda />} />
             <Route path="/professor/alunos"    element={<ProfessorAlunos />} />
@@ -233,7 +253,7 @@ function AppRoutes() {
           </Route>
         </Route>
 
-        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'super_admin']} />}>
+        <Route element={<RotaPrivada sessao={sessao} perfil={perfil} loading={loading} allowedRoles={['admin', 'super_admin']} estudioBloqueado={estudioBloqueado} />}>
           <Route element={<LayoutComSidebar perfil={perfil} nomeUsuario={nomeUsuario} estudioId={estudioId} />}>
             <Route path="/dashboard"             element={<Dashboard />} />
             <Route path="/leads"                 element={<Leads />} />
@@ -259,7 +279,7 @@ function AppRoutes() {
 
         {/* 404 */}
         <Route path="*" element={
-          <PaginaNaoEncontrada destino={destinoPosAuth(sessao, perfil)} />
+          <PaginaNaoEncontrada destino={destinoPosAuth(sessao, perfil, estudioBloqueado)} />
         } />
 
       </Routes>

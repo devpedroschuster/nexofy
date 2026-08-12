@@ -1,5 +1,3 @@
-// webapp/src/context/AuthContext.jsx  (novo arquivo)
-//
 // Fonte única de verdade para sessão/perfil do usuário.
 // Substitui o antigo hook `useAuth` "solto" (sem Provider), que fazia
 // cada componente consumidor rodar sua própria cópia da lógica de
@@ -14,6 +12,17 @@
 // `terminologia` e `modulosAtivos` do estúdio do membro, ampliando a
 // MESMA query que já busca estudio_id/role (join em vez de round-trip
 // novo) — ver seção 3 do PLANO_ITEM_2.md.
+//
+// Bloqueio por status do estúdio: passa a carregar também
+// `estudioBloqueado`/`estudioStatusInfo`, via RPC verificar_status_estudio
+// (SECURITY DEFINER). Essa RPC funciona mesmo com o estúdio já bloqueado
+// no RLS "normal" — meu_estudio_id()/estudio_id_atual() retornam null
+// quando estudios.status <> 'ativo', o que corta em cascata todo o resto
+// dos dados (agenda, alunos, financeiro etc). A RPC é o único jeito do
+// front-end descobrir O MOTIVO do bloqueio para mostrar uma tela clara em
+// vez do usuário simplesmente ver tudo vazio sem explicação.
+// super_admin nunca é bloqueado aqui: ele acessa qualquer estúdio via
+// impersonation (estudio_ativo_via_override()), que é um caminho à parte.
 
 import React, {
   createContext,
@@ -47,6 +56,10 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [erroPerfil, setErroPerfil] = useState(null); // novo: expõe falhas ao consumidor
 
+  // Bloqueio por status do estúdio (inativo/suspenso/cancelado).
+  const [estudioBloqueado, setEstudioBloqueado] = useState(false);
+  const [estudioStatusInfo, setEstudioStatusInfo] = useState(null); // { estudio_id, nome, status, bloqueado }
+
   const perfilJaCarregado = useRef(false);
   const perfilCarregadoParaId = useRef(null);
 
@@ -60,6 +73,15 @@ export function AuthProvider({ children }) {
       setSegmento(SEGMENTO_DEFAULT);
       setTerminologia(TERMINOLOGIA_DEFAULT);
       setModulosAtivos(MODULOS_ATIVOS_DEFAULT);
+    };
+
+    // Helper local: reseta o estado de bloqueio — chamado nos mesmos pontos
+    // que resetarSegmento (logout, erro, super_admin, fallback legado), já
+    // que nesses casos não faz sentido nenhum manter um bloqueio "pendurado"
+    // de uma sessão anterior.
+    const resetarBloqueio = () => {
+      setEstudioBloqueado(false);
+      setEstudioStatusInfo(null);
     };
 
     // Helper local: aplica os dados de `estudios` vindos do join —
@@ -83,6 +105,7 @@ export function AuthProvider({ children }) {
           setEstudioId(null);
           setErroPerfil(null);
           resetarSegmento();
+          resetarBloqueio();
           setLoading(false);
         }
         return;
@@ -130,12 +153,29 @@ export function AuthProvider({ children }) {
             // para o segmento do tenant impersonado é responsabilidade do
             // ImpersonationContext (useTerminologia combina os dois).
             resetarSegmento();
+            // super_admin nunca é bloqueado por status de estúdio — acessa
+            // qualquer um via impersonation (caminho separado no banco).
+            resetarBloqueio();
             setLoading(false);
             return;
           }
 
           setEstudioId(membro.estudio_id);
           aplicarSegmentoDoEstudio(membro.estudios);
+
+          // Bloqueio de acesso por status do estúdio. Roda para todo
+          // membro não-super_admin (admin, professor, etc). A RPC é
+          // SECURITY DEFINER e consulta estudio_membros/estudios
+          // diretamente, sem passar por meu_estudio_id() — por isso
+          // funciona mesmo que o estúdio já esteja bloqueado (que é
+          // justamente quando meu_estudio_id() retornaria null).
+          const { data: statusRows, error: errStatus } = await supabase.rpc('verificar_status_estudio');
+          if (errStatus) {
+            console.error('Erro ao verificar status do estúdio:', errStatus);
+          }
+          const statusInfo = Array.isArray(statusRows) ? statusRows[0] : statusRows;
+          setEstudioStatusInfo(statusInfo ?? null);
+          setEstudioBloqueado(Boolean(statusInfo?.bloqueado));
 
           if (membro.role === 'admin') {
             setPerfil('admin');
@@ -193,6 +233,7 @@ export function AuthProvider({ children }) {
           // Fallback legado não tem join com estudios (não passa por
           // estudio_membros) — fica nos defaults.
           resetarSegmento();
+          resetarBloqueio();
           setLoading(false);
           return;
         }
@@ -211,6 +252,7 @@ export function AuthProvider({ children }) {
           setProfessorId(professor.id);
           setNomeUsuario(professor.nome ?? null);
           resetarSegmento();
+          resetarBloqueio();
           setLoading(false);
           return;
         }
@@ -223,6 +265,7 @@ export function AuthProvider({ children }) {
         setNomeUsuario(null);
         setEstudioId(null);
         resetarSegmento();
+        resetarBloqueio();
       } catch (error) {
         console.error('Erro fatal ao carregar perfil:', error);
         if (cancelled) return;
@@ -235,6 +278,7 @@ export function AuthProvider({ children }) {
         setNomeUsuario(null);
         setEstudioId(null);
         resetarSegmento();
+        resetarBloqueio();
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -259,6 +303,7 @@ export function AuthProvider({ children }) {
         setEstudioId(null);
         setErroPerfil(null);
         resetarSegmento();
+        resetarBloqueio();
         setLoading(false);
 
       } else if (event === 'SIGNED_IN') {
@@ -296,6 +341,8 @@ export function AuthProvider({ children }) {
     segmento,
     terminologia,
     modulosAtivos,
+    estudioBloqueado,
+    estudioStatusInfo,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
