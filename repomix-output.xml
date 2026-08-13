@@ -270,100 +270,6 @@ README.md
 <files>
 This section contains the contents of the repository's files.
 
-<file path="webapp/src/pages/EstudioBloqueado.jsx">
-// webapp/src/pages/EstudioBloqueado.jsx
-//
-// Tela exibida quando o usuário logado (admin/professor) pertence a um
-// estúdio cujo `status` não é 'ativo' (inativo, suspenso ou cancelado).
-// A resolução vem do AuthContext (useAuth) via RPC verificar_status_estudio,
-// que roda SECURITY DEFINER e por isso funciona mesmo com o estúdio
-// bloqueado no RLS (meu_estudio_id()/estudio_id_atual() retornam null
-// nesse cenário, cortando todo o resto dos dados em cascata).
-//
-// super_admin NUNCA cai aqui: ele acessa qualquer estúdio via
-// impersonation (estudio_ativo_via_override()), que é um caminho à parte.
-
-import React from 'react';
-import { AlertTriangle, LogOut, Mail } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { useAuth } from '../hooks/useAuth';
-import Button from '../components/ui/Button';
-
-const MENSAGENS_POR_STATUS = {
-  inativo: {
-    titulo: 'Estúdio inativo',
-    descricao:
-      'O acesso a este estúdio está temporariamente pausado. Se você acredita que isso é um engano, entre em contato com o suporte.',
-  },
-  suspenso: {
-    titulo: 'Estúdio suspenso',
-    descricao:
-      'O acesso a este estúdio foi suspenso pela administração da plataforma. Entre em contato com o suporte para regularizar a situação.',
-  },
-  cancelado: {
-    titulo: 'Estúdio encerrado',
-    descricao:
-      'Este estúdio foi encerrado e não está mais disponível. Entre em contato com o suporte se precisar de mais informações.',
-  },
-};
-
-const MENSAGEM_PADRAO = {
-  titulo: 'Acesso indisponível',
-  descricao:
-    'Não foi possível liberar o acesso a este estúdio no momento. Entre em contato com o suporte.',
-};
-
-export default function EstudioBloqueado() {
-  const { estudioStatusInfo, nomeUsuario } = useAuth();
-
-  const status = estudioStatusInfo?.status;
-  const nomeEstudio = estudioStatusInfo?.nome ?? 'seu estúdio';
-  const { titulo, descricao } = MENSAGENS_POR_STATUS[status] ?? MENSAGEM_PADRAO;
-
-  async function handleSair() {
-    await supabase.auth.signOut();
-    // O AppRoutes reage à mudança de sessão e redireciona pro /login sozinho.
-  }
-
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md rounded-3xl border border-border bg-card shadow-card p-8 text-center">
-        <div className="mx-auto mb-5 w-14 h-14 rounded-2xl bg-warning-soft flex items-center justify-center">
-          <AlertTriangle size={28} className="text-warning" />
-        </div>
-
-        <h1 className="text-xl font-black text-foreground tracking-tight">{titulo}</h1>
-
-        <p className="mt-2 text-sm font-bold text-muted-foreground">{nomeEstudio}</p>
-
-        <p className="mt-4 text-sm text-muted-foreground leading-relaxed">{descricao}</p>
-
-        {nomeUsuario && (
-          <p className="mt-4 text-xs text-muted-foreground">
-            Conectado como <span className="font-bold text-foreground">{nomeUsuario}</span>
-          </p>
-        )}
-
-        <div className="mt-8 flex flex-col gap-3">
-          <a
-            href="mailto:suporte@nexofy.app"
-            className="inline-flex items-center justify-center gap-2 text-sm font-bold text-primary hover:underline"
-          >
-            <Mail size={15} />
-            Falar com o suporte
-          </a>
-
-          <Button variant="ghost" onClick={handleSair} className="w-full">
-            <LogOut size={16} className="mr-2" />
-            Sair
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-</file>
-
 <file path="supabase/functions/criar-acesso-aluno/index.ts">
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -3488,6 +3394,100 @@ export default function ConfiguracoesEspacos() {
           </form>
         )}
       </Modal>
+    </div>
+  );
+}
+</file>
+
+<file path="webapp/src/pages/EstudioBloqueado.jsx">
+// webapp/src/pages/EstudioBloqueado.jsx
+//
+// Tela exibida quando o usuário logado (admin/professor) pertence a um
+// estúdio cujo `status` não é 'ativo' (inativo, suspenso ou cancelado).
+// A resolução vem do AuthContext (useAuth) via RPC verificar_status_estudio,
+// que roda SECURITY DEFINER e por isso funciona mesmo com o estúdio
+// bloqueado no RLS (meu_estudio_id()/estudio_id_atual() retornam null
+// nesse cenário, cortando todo o resto dos dados em cascata).
+//
+// super_admin NUNCA cai aqui: ele acessa qualquer estúdio via
+// impersonation (estudio_ativo_via_override()), que é um caminho à parte.
+
+import React from 'react';
+import { AlertTriangle, LogOut, Mail } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
+import Button from '../components/ui/Button';
+
+const MENSAGENS_POR_STATUS = {
+  inativo: {
+    titulo: 'Estúdio inativo',
+    descricao:
+      'O acesso a este estúdio está temporariamente pausado. Se você acredita que isso é um engano, entre em contato com o suporte.',
+  },
+  suspenso: {
+    titulo: 'Estúdio suspenso',
+    descricao:
+      'O acesso a este estúdio foi suspenso pela administração da plataforma. Entre em contato com o suporte para regularizar a situação.',
+  },
+  cancelado: {
+    titulo: 'Estúdio encerrado',
+    descricao:
+      'Este estúdio foi encerrado e não está mais disponível. Entre em contato com o suporte se precisar de mais informações.',
+  },
+};
+
+const MENSAGEM_PADRAO = {
+  titulo: 'Acesso indisponível',
+  descricao:
+    'Não foi possível liberar o acesso a este estúdio no momento. Entre em contato com o suporte.',
+};
+
+export default function EstudioBloqueado() {
+  const { estudioStatusInfo, nomeUsuario } = useAuth();
+
+  const status = estudioStatusInfo?.status;
+  const nomeEstudio = estudioStatusInfo?.nome ?? 'seu estúdio';
+  const { titulo, descricao } = MENSAGENS_POR_STATUS[status] ?? MENSAGEM_PADRAO;
+
+  async function handleSair() {
+    await supabase.auth.signOut();
+    // O AppRoutes reage à mudança de sessão e redireciona pro /login sozinho.
+  }
+
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center bg-background px-4">
+      <div className="w-full max-w-md rounded-3xl border border-border bg-card shadow-card p-8 text-center">
+        <div className="mx-auto mb-5 w-14 h-14 rounded-2xl bg-warning-soft flex items-center justify-center">
+          <AlertTriangle size={28} className="text-warning" />
+        </div>
+
+        <h1 className="text-xl font-black text-foreground tracking-tight">{titulo}</h1>
+
+        <p className="mt-2 text-sm font-bold text-muted-foreground">{nomeEstudio}</p>
+
+        <p className="mt-4 text-sm text-muted-foreground leading-relaxed">{descricao}</p>
+
+        {nomeUsuario && (
+          <p className="mt-4 text-xs text-muted-foreground">
+            Conectado como <span className="font-bold text-foreground">{nomeUsuario}</span>
+          </p>
+        )}
+
+        <div className="mt-8 flex flex-col gap-3">
+          <a
+            href="mailto:suporte@nexofy.app"
+            className="inline-flex items-center justify-center gap-2 text-sm font-bold text-primary hover:underline"
+          >
+            <Mail size={15} />
+            Falar com o suporte
+          </a>
+
+          <Button variant="ghost" onClick={handleSair} className="w-full">
+            <LogOut size={16} className="mr-2" />
+            Sair
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -9498,47 +9498,6 @@ repomix-output.xml
 }
 </file>
 
-<file path=".gitignore">
-node_modules/
-/.pnp
-.pnp.js
-
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-*.pem
-
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-dist/
-dist-ssr/
-build/
-.expo/
-.next/
-out/
-
-.DS_Store
-.vscode/
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-.vercel
-.env*.local
-
-PLANO - MULTI SEGMENTO.md
-repomix-output.xml
-PLANO ITEM 1.md
-PLANO ITEM 2.md
-PLANO ITEM 3.md
-</file>
-
 <file path="supabase/functions/gerar-mensalidades/config.toml">
 [functions.gerar-mensalidades]
 verify_jwt = false  # Permite chamada do cron sem auth
@@ -10990,366 +10949,6 @@ export function useAgenda() {
     error: queryGrade.error || queryFeriados.error,
     refetch,
   };
-}
-</file>
-
-<file path="webapp/src/hooks/useAuth.jsx">
-// Fonte única de verdade para sessão/perfil do usuário.
-// Substitui o antigo hook `useAuth` "solto" (sem Provider), que fazia
-// cada componente consumidor rodar sua própria cópia da lógica de
-// resolução de sessão/perfil — múltiplas queries redundantes a
-// estudio_membros/professores e múltiplos listeners de auth por página.
-//
-// Uso: <AuthProvider> uma única vez em App.jsx, no topo da árvore.
-// A API pública de useAuth() é idêntica à anterior — nenhum consumidor
-// existente precisa mudar.
-//
-// Item 2 do plano multi-segmento: passa a carregar também `segmento`,
-// `terminologia` e `modulosAtivos` do estúdio do membro, ampliando a
-// MESMA query que já busca estudio_id/role (join em vez de round-trip
-// novo) — ver seção 3 do PLANO_ITEM_2.md.
-//
-// Bloqueio por status do estúdio: passa a carregar também
-// `estudioBloqueado`/`estudioStatusInfo`, via RPC verificar_status_estudio
-// (SECURITY DEFINER). Essa RPC funciona mesmo com o estúdio já bloqueado
-// no RLS "normal" — meu_estudio_id()/estudio_id_atual() retornam null
-// quando estudios.status <> 'ativo', o que corta em cascata todo o resto
-// dos dados (agenda, alunos, financeiro etc). A RPC é o único jeito do
-// front-end descobrir O MOTIVO do bloqueio para mostrar uma tela clara em
-// vez do usuário simplesmente ver tudo vazio sem explicação.
-// super_admin nunca é bloqueado aqui: ele acessa qualquer estúdio via
-// impersonation (estudio_ativo_via_override()), que é um caminho à parte.
-
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
-import { supabase } from '../lib/supabase';
-
-const AuthContext = createContext(null);
-
-// Defaults de segmento/terminologia/modulos_ativos — usados sempre que não
-// há estúdio resolvido ainda (loading, super_admin sem tenant, logout).
-// Mesmos defaults da migration (coluna `segmento` e `modulos_ativos` têm
-// default idêntico no banco) — nunca deve faltar rótulo/menu na tela por
-// ausência momentânea de dado.
-const SEGMENTO_DEFAULT = 'danca_fitness';
-const TERMINOLOGIA_DEFAULT = {};
-const MODULOS_ATIVOS_DEFAULT = [];
-
-export function AuthProvider({ children }) {
-  const [sessao, setSessao] = useState(null);
-  const [perfil, setPerfil] = useState(null);
-  const [professorId, setProfessorId] = useState(null);
-  const [nomeUsuario, setNomeUsuario] = useState(null);
-  const [estudioId, setEstudioId] = useState(null);
-  const [segmento, setSegmento] = useState(SEGMENTO_DEFAULT);
-  const [terminologia, setTerminologia] = useState(TERMINOLOGIA_DEFAULT);
-  const [modulosAtivos, setModulosAtivos] = useState(MODULOS_ATIVOS_DEFAULT);
-  const [loading, setLoading] = useState(true);
-  const [erroPerfil, setErroPerfil] = useState(null); // novo: expõe falhas ao consumidor
-
-  // Bloqueio por status do estúdio (inativo/suspenso/cancelado).
-  const [estudioBloqueado, setEstudioBloqueado] = useState(false);
-  const [estudioStatusInfo, setEstudioStatusInfo] = useState(null); // { estudio_id, nome, status, bloqueado }
-
-  const perfilJaCarregado = useRef(false);
-  const perfilCarregadoParaId = useRef(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    // Helper local: reseta os três campos de segmento pros defaults —
-    // chamado em todo ponto onde estudioId também volta pra null (logout,
-    // erro, super_admin sem tenant, fallback sem membro).
-    const resetarSegmento = () => {
-      setSegmento(SEGMENTO_DEFAULT);
-      setTerminologia(TERMINOLOGIA_DEFAULT);
-      setModulosAtivos(MODULOS_ATIVOS_DEFAULT);
-    };
-
-    // Helper local: reseta o estado de bloqueio — chamado nos mesmos pontos
-    // que resetarSegmento (logout, erro, super_admin, fallback legado), já
-    // que nesses casos não faz sentido nenhum manter um bloqueio "pendurado"
-    // de uma sessão anterior.
-    const resetarBloqueio = () => {
-      setEstudioBloqueado(false);
-      setEstudioStatusInfo(null);
-    };
-
-    // Helper local: aplica os dados de `estudios` vindos do join —
-    // tolera null/undefined (estúdio ainda não migrado, join falho) caindo
-    // nos defaults em vez de deixar `undefined` vazar pra UI.
-    const aplicarSegmentoDoEstudio = (estudioRow) => {
-      setSegmento(estudioRow?.segmento ?? SEGMENTO_DEFAULT);
-      setTerminologia(estudioRow?.terminologia ?? TERMINOLOGIA_DEFAULT);
-      setModulosAtivos(estudioRow?.modulos_ativos ?? MODULOS_ATIVOS_DEFAULT);
-    };
-
-    const carregarPerfilUsuario = async (session) => {
-      if (cancelled) return;
-
-      if (!session) {
-        if (!cancelled) {
-          setSessao(null);
-          setPerfil(null);
-          setProfessorId(null);
-          setNomeUsuario(null);
-          setEstudioId(null);
-          setErroPerfil(null);
-          resetarSegmento();
-          resetarBloqueio();
-          setLoading(false);
-        }
-        return;
-      }
-
-      if (!cancelled) setSessao((prev) => (prev?.user?.id === session.user.id ? prev : session));
-
-      if (perfilJaCarregado.current && perfilCarregadoParaId.current === session.user.id) {
-        if (!cancelled) setLoading(false);
-        return;
-      }
-
-      perfilJaCarregado.current = false;
-      const authId = session.user.id;
-
-      try {
-        // Join direto na query existente (Opção A da seção 3 do
-        // PLANO_ITEM_2.md): zero round-trips adicionais — o dado de
-        // segmento/terminologia/modulos_ativos chega no mesmo response.
-        const { data: membros, error: errMembro } = await supabase
-          .from('estudio_membros')
-          .select('estudio_id, role, estudios(segmento, terminologia, modulos_ativos)')
-          .eq('user_id', authId)
-          .limit(5);
-
-        if (errMembro) {
-          throw errMembro;
-        }
-
-        if (cancelled) return;
-
-        const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ?? null;
-
-        if (membro) {
-          perfilJaCarregado.current = true;
-          perfilCarregadoParaId.current = authId;
-          setErroPerfil(null);
-
-          if (membro.role === 'super_admin') {
-            setPerfil('super_admin');
-            setEstudioId(null);
-            setProfessorId(null);
-            setNomeUsuario(session.user.user_metadata?.nome ?? session.user.email ?? null);
-            // super_admin sem tenant selecionado usa os defaults — troca
-            // para o segmento do tenant impersonado é responsabilidade do
-            // ImpersonationContext (useTerminologia combina os dois).
-            resetarSegmento();
-            // super_admin nunca é bloqueado por status de estúdio — acessa
-            // qualquer um via impersonation (caminho separado no banco).
-            resetarBloqueio();
-            setLoading(false);
-            return;
-          }
-
-          setEstudioId(membro.estudio_id);
-          aplicarSegmentoDoEstudio(membro.estudios);
-
-          // Bloqueio de acesso por status do estúdio. Roda para todo
-          // membro não-super_admin (admin, professor, etc). A RPC é
-          // SECURITY DEFINER e consulta estudio_membros/estudios
-          // diretamente, sem passar por meu_estudio_id() — por isso
-          // funciona mesmo que o estúdio já esteja bloqueado (que é
-          // justamente quando meu_estudio_id() retornaria null).
-          const { data: statusRows, error: errStatus } = await supabase.rpc('verificar_status_estudio');
-          if (errStatus) {
-            console.error('Erro ao verificar status do estúdio:', errStatus);
-          }
-          const statusInfo = Array.isArray(statusRows) ? statusRows[0] : statusRows;
-          setEstudioStatusInfo(statusInfo ?? null);
-          setEstudioBloqueado(Boolean(statusInfo?.bloqueado));
-
-          if (membro.role === 'admin') {
-            setPerfil('admin');
-            setProfessorId(null);
-            setNomeUsuario(null);
-            setLoading(false);
-            return;
-          }
-
-          if (membro.role === 'professor') {
-            const { data: professor, error: errProf } = await supabase
-              .from('professores')
-              .select('id, nome')
-              .eq('auth_id', authId)
-              .maybeSingle();
-
-            if (errProf && errProf.code !== 'PGRST116') {
-              console.error('Erro ao buscar professor:', errProf);
-            }
-
-            if (cancelled) return;
-
-            setPerfil('professor');
-            // Fallback via membro.referencia_id removido: o campo nunca era
-            // selecionado na query de estudio_membros (sempre undefined).
-            // Se o vínculo professores.auth_id existir, use-o; senão, null
-            // explícito — mais seguro que um fallback que nunca funcionou.
-            setProfessorId(professor?.id ?? null);
-            setNomeUsuario(professor?.nome ?? null);
-            setLoading(false);
-            return;
-          }
-
-          setPerfil(membro.role ?? 'aluno');
-          setProfessorId(null);
-          setNomeUsuario(null);
-          setLoading(false);
-          return;
-        }
-
-        // --- Fallback: tabelas legadas ---
-        const { data: usuario, error: errAluno } = await supabase
-          .from('alunos').select('id, role').eq('auth_id', authId).maybeSingle();
-        if (errAluno && errAluno.code !== 'PGRST116') console.error('Erro ao verificar aluno:', errAluno);
-
-        if (cancelled) return;
-
-        if (usuario) {
-          perfilJaCarregado.current = true;
-          perfilCarregadoParaId.current = authId;
-          setErroPerfil(null);
-          setPerfil(usuario.role === 'admin' ? 'admin' : 'aluno');
-          setProfessorId(null);
-          setNomeUsuario(null);
-          // Fallback legado não tem join com estudios (não passa por
-          // estudio_membros) — fica nos defaults.
-          resetarSegmento();
-          resetarBloqueio();
-          setLoading(false);
-          return;
-        }
-
-        const { data: professor, error: errProf } = await supabase
-          .from('professores').select('id, nome').eq('auth_id', authId).maybeSingle();
-        if (errProf && errProf.code !== 'PGRST116') console.error('Erro ao verificar professor:', errProf);
-
-        if (cancelled) return;
-
-        if (professor) {
-          perfilJaCarregado.current = true;
-          perfilCarregadoParaId.current = authId;
-          setErroPerfil(null);
-          setPerfil('professor');
-          setProfessorId(professor.id);
-          setNomeUsuario(professor.nome ?? null);
-          resetarSegmento();
-          resetarBloqueio();
-          setLoading(false);
-          return;
-        }
-
-        perfilJaCarregado.current = true;
-        perfilCarregadoParaId.current = authId;
-        console.warn('Nenhum perfil encontrado para auth_id:', authId);
-        setPerfil(null);
-        setProfessorId(null);
-        setNomeUsuario(null);
-        setEstudioId(null);
-        resetarSegmento();
-        resetarBloqueio();
-      } catch (error) {
-        console.error('Erro fatal ao carregar perfil:', error);
-        if (cancelled) return;
-        // Não trava mais o usuário permanentemente: em erro transitório,
-        // NÃO marca perfilJaCarregado — permite nova tentativa no próximo
-        // evento de auth (ex.: reconexão) em vez de exigir reload manual.
-        setErroPerfil(error);
-        setPerfil(null);
-        setProfessorId(null);
-        setNomeUsuario(null);
-        setEstudioId(null);
-        resetarSegmento();
-        resetarBloqueio();
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!cancelled) carregarPerfilUsuario(session);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (cancelled) return;
-
-      if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') return;
-
-      if (event === 'SIGNED_OUT') {
-        perfilJaCarregado.current = false;
-        perfilCarregadoParaId.current = null;
-        setSessao(null);
-        setPerfil(null);
-        setProfessorId(null);
-        setNomeUsuario(null);
-        setEstudioId(null);
-        setErroPerfil(null);
-        resetarSegmento();
-        resetarBloqueio();
-        setLoading(false);
-
-      } else if (event === 'SIGNED_IN') {
-        if (perfilJaCarregado.current && perfilCarregadoParaId.current === session?.user?.id) {
-          setSessao(session);
-          return;
-        }
-        perfilJaCarregado.current = false;
-        setLoading(true);
-        carregarPerfilUsuario(session);
-
-      } else {
-        if (perfilJaCarregado.current && perfilCarregadoParaId.current === session?.user?.id) {
-          setSessao(session);
-        } else {
-          carregarPerfilUsuario(session);
-        }
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      subscription.unsubscribe();
-    };
-  }, []); // roda uma única vez — agora para a aplicação inteira, não por componente
-
-  const value = {
-    sessao,
-    perfil,
-    professorId,
-    estudioId,
-    nomeUsuario,
-    loading,
-    erroPerfil,
-    segmento,
-    terminologia,
-    modulosAtivos,
-    estudioBloqueado,
-    estudioStatusInfo,
-  };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('useAuth deve ser usado dentro de <AuthProvider>');
-  }
-  return ctx;
 }
 </file>
 
@@ -17681,6 +17280,48 @@ export default {
 };
 </file>
 
+<file path=".gitignore">
+node_modules/
+/.pnp
+.pnp.js
+
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+dist-ssr/
+build/
+.expo/
+.next/
+out/
+
+.DS_Store
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.vercel
+.env*.local
+
+PLANOS/
+PLANO - MULTI SEGMENTO.md
+repomix-output.xml
+PLANO ITEM 1.md
+PLANO ITEM 2.md
+PLANO ITEM 3.md
+</file>
+
 <file path="supabase/functions/gerar-mensalidades/index.ts">
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -18777,6 +18418,366 @@ export function useAlunos(filtros = {}, pagina = 1, estudioIdOverride) {
     temAnterior: pagina > 1,
     temProximo: pagina < totalPaginas,
   };
+}
+</file>
+
+<file path="webapp/src/hooks/useAuth.jsx">
+// Fonte única de verdade para sessão/perfil do usuário.
+// Substitui o antigo hook `useAuth` "solto" (sem Provider), que fazia
+// cada componente consumidor rodar sua própria cópia da lógica de
+// resolução de sessão/perfil — múltiplas queries redundantes a
+// estudio_membros/professores e múltiplos listeners de auth por página.
+//
+// Uso: <AuthProvider> uma única vez em App.jsx, no topo da árvore.
+// A API pública de useAuth() é idêntica à anterior — nenhum consumidor
+// existente precisa mudar.
+//
+// Item 2 do plano multi-segmento: passa a carregar também `segmento`,
+// `terminologia` e `modulosAtivos` do estúdio do membro, ampliando a
+// MESMA query que já busca estudio_id/role (join em vez de round-trip
+// novo) — ver seção 3 do PLANO_ITEM_2.md.
+//
+// Bloqueio por status do estúdio: passa a carregar também
+// `estudioBloqueado`/`estudioStatusInfo`, via RPC verificar_status_estudio
+// (SECURITY DEFINER). Essa RPC funciona mesmo com o estúdio já bloqueado
+// no RLS "normal" — meu_estudio_id()/estudio_id_atual() retornam null
+// quando estudios.status <> 'ativo', o que corta em cascata todo o resto
+// dos dados (agenda, alunos, financeiro etc). A RPC é o único jeito do
+// front-end descobrir O MOTIVO do bloqueio para mostrar uma tela clara em
+// vez do usuário simplesmente ver tudo vazio sem explicação.
+// super_admin nunca é bloqueado aqui: ele acessa qualquer estúdio via
+// impersonation (estudio_ativo_via_override()), que é um caminho à parte.
+
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import { supabase } from '../lib/supabase';
+
+const AuthContext = createContext(null);
+
+// Defaults de segmento/terminologia/modulos_ativos — usados sempre que não
+// há estúdio resolvido ainda (loading, super_admin sem tenant, logout).
+// Mesmos defaults da migration (coluna `segmento` e `modulos_ativos` têm
+// default idêntico no banco) — nunca deve faltar rótulo/menu na tela por
+// ausência momentânea de dado.
+const SEGMENTO_DEFAULT = 'danca_fitness';
+const TERMINOLOGIA_DEFAULT = {};
+const MODULOS_ATIVOS_DEFAULT = [];
+
+export function AuthProvider({ children }) {
+  const [sessao, setSessao] = useState(null);
+  const [perfil, setPerfil] = useState(null);
+  const [professorId, setProfessorId] = useState(null);
+  const [nomeUsuario, setNomeUsuario] = useState(null);
+  const [estudioId, setEstudioId] = useState(null);
+  const [segmento, setSegmento] = useState(SEGMENTO_DEFAULT);
+  const [terminologia, setTerminologia] = useState(TERMINOLOGIA_DEFAULT);
+  const [modulosAtivos, setModulosAtivos] = useState(MODULOS_ATIVOS_DEFAULT);
+  const [loading, setLoading] = useState(true);
+  const [erroPerfil, setErroPerfil] = useState(null); // novo: expõe falhas ao consumidor
+
+  // Bloqueio por status do estúdio (inativo/suspenso/cancelado).
+  const [estudioBloqueado, setEstudioBloqueado] = useState(false);
+  const [estudioStatusInfo, setEstudioStatusInfo] = useState(null); // { estudio_id, nome, status, bloqueado }
+
+  const perfilJaCarregado = useRef(false);
+  const perfilCarregadoParaId = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // Helper local: reseta os três campos de segmento pros defaults —
+    // chamado em todo ponto onde estudioId também volta pra null (logout,
+    // erro, super_admin sem tenant, fallback sem membro).
+    const resetarSegmento = () => {
+      setSegmento(SEGMENTO_DEFAULT);
+      setTerminologia(TERMINOLOGIA_DEFAULT);
+      setModulosAtivos(MODULOS_ATIVOS_DEFAULT);
+    };
+
+    // Helper local: reseta o estado de bloqueio — chamado nos mesmos pontos
+    // que resetarSegmento (logout, erro, super_admin, fallback legado), já
+    // que nesses casos não faz sentido nenhum manter um bloqueio "pendurado"
+    // de uma sessão anterior.
+    const resetarBloqueio = () => {
+      setEstudioBloqueado(false);
+      setEstudioStatusInfo(null);
+    };
+
+    // Helper local: aplica os dados de `estudios` vindos do join —
+    // tolera null/undefined (estúdio ainda não migrado, join falho) caindo
+    // nos defaults em vez de deixar `undefined` vazar pra UI.
+    const aplicarSegmentoDoEstudio = (estudioRow) => {
+      setSegmento(estudioRow?.segmento ?? SEGMENTO_DEFAULT);
+      setTerminologia(estudioRow?.terminologia ?? TERMINOLOGIA_DEFAULT);
+      setModulosAtivos(estudioRow?.modulos_ativos ?? MODULOS_ATIVOS_DEFAULT);
+    };
+
+    const carregarPerfilUsuario = async (session) => {
+      if (cancelled) return;
+
+      if (!session) {
+        if (!cancelled) {
+          setSessao(null);
+          setPerfil(null);
+          setProfessorId(null);
+          setNomeUsuario(null);
+          setEstudioId(null);
+          setErroPerfil(null);
+          resetarSegmento();
+          resetarBloqueio();
+          setLoading(false);
+        }
+        return;
+      }
+
+      if (!cancelled) setSessao((prev) => (prev?.user?.id === session.user.id ? prev : session));
+
+      if (perfilJaCarregado.current && perfilCarregadoParaId.current === session.user.id) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+
+      perfilJaCarregado.current = false;
+      const authId = session.user.id;
+
+      try {
+        // Join direto na query existente (Opção A da seção 3 do
+        // PLANO_ITEM_2.md): zero round-trips adicionais — o dado de
+        // segmento/terminologia/modulos_ativos chega no mesmo response.
+        const { data: membros, error: errMembro } = await supabase
+          .from('estudio_membros')
+          .select('estudio_id, role, estudios(segmento, terminologia, modulos_ativos)')
+          .eq('user_id', authId)
+          .limit(5);
+
+        if (errMembro) {
+          throw errMembro;
+        }
+
+        if (cancelled) return;
+
+        const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ?? null;
+
+        if (membro) {
+          perfilJaCarregado.current = true;
+          perfilCarregadoParaId.current = authId;
+          setErroPerfil(null);
+
+          if (membro.role === 'super_admin') {
+            setPerfil('super_admin');
+            setEstudioId(null);
+            setProfessorId(null);
+            setNomeUsuario(session.user.user_metadata?.nome ?? session.user.email ?? null);
+            // super_admin sem tenant selecionado usa os defaults — troca
+            // para o segmento do tenant impersonado é responsabilidade do
+            // ImpersonationContext (useTerminologia combina os dois).
+            resetarSegmento();
+            // super_admin nunca é bloqueado por status de estúdio — acessa
+            // qualquer um via impersonation (caminho separado no banco).
+            resetarBloqueio();
+            setLoading(false);
+            return;
+          }
+
+          setEstudioId(membro.estudio_id);
+          aplicarSegmentoDoEstudio(membro.estudios);
+
+          // Bloqueio de acesso por status do estúdio. Roda para todo
+          // membro não-super_admin (admin, professor, etc). A RPC é
+          // SECURITY DEFINER e consulta estudio_membros/estudios
+          // diretamente, sem passar por meu_estudio_id() — por isso
+          // funciona mesmo que o estúdio já esteja bloqueado (que é
+          // justamente quando meu_estudio_id() retornaria null).
+          const { data: statusRows, error: errStatus } = await supabase.rpc('verificar_status_estudio');
+          if (errStatus) {
+            console.error('Erro ao verificar status do estúdio:', errStatus);
+          }
+          const statusInfo = Array.isArray(statusRows) ? statusRows[0] : statusRows;
+          setEstudioStatusInfo(statusInfo ?? null);
+          setEstudioBloqueado(Boolean(statusInfo?.bloqueado));
+
+          if (membro.role === 'admin') {
+            setPerfil('admin');
+            setProfessorId(null);
+            setNomeUsuario(null);
+            setLoading(false);
+            return;
+          }
+
+          if (membro.role === 'professor') {
+            const { data: professor, error: errProf } = await supabase
+              .from('professores')
+              .select('id, nome')
+              .eq('auth_id', authId)
+              .maybeSingle();
+
+            if (errProf && errProf.code !== 'PGRST116') {
+              console.error('Erro ao buscar professor:', errProf);
+            }
+
+            if (cancelled) return;
+
+            setPerfil('professor');
+            // Fallback via membro.referencia_id removido: o campo nunca era
+            // selecionado na query de estudio_membros (sempre undefined).
+            // Se o vínculo professores.auth_id existir, use-o; senão, null
+            // explícito — mais seguro que um fallback que nunca funcionou.
+            setProfessorId(professor?.id ?? null);
+            setNomeUsuario(professor?.nome ?? null);
+            setLoading(false);
+            return;
+          }
+
+          setPerfil(membro.role ?? 'aluno');
+          setProfessorId(null);
+          setNomeUsuario(null);
+          setLoading(false);
+          return;
+        }
+
+        // --- Fallback: tabelas legadas ---
+        const { data: usuario, error: errAluno } = await supabase
+          .from('alunos').select('id, role').eq('auth_id', authId).maybeSingle();
+        if (errAluno && errAluno.code !== 'PGRST116') console.error('Erro ao verificar aluno:', errAluno);
+
+        if (cancelled) return;
+
+        if (usuario) {
+          perfilJaCarregado.current = true;
+          perfilCarregadoParaId.current = authId;
+          setErroPerfil(null);
+          setPerfil(usuario.role === 'admin' ? 'admin' : 'aluno');
+          setProfessorId(null);
+          setNomeUsuario(null);
+          // Fallback legado não tem join com estudios (não passa por
+          // estudio_membros) — fica nos defaults.
+          resetarSegmento();
+          resetarBloqueio();
+          setLoading(false);
+          return;
+        }
+
+        const { data: professor, error: errProf } = await supabase
+          .from('professores').select('id, nome').eq('auth_id', authId).maybeSingle();
+        if (errProf && errProf.code !== 'PGRST116') console.error('Erro ao verificar professor:', errProf);
+
+        if (cancelled) return;
+
+        if (professor) {
+          perfilJaCarregado.current = true;
+          perfilCarregadoParaId.current = authId;
+          setErroPerfil(null);
+          setPerfil('professor');
+          setProfessorId(professor.id);
+          setNomeUsuario(professor.nome ?? null);
+          resetarSegmento();
+          resetarBloqueio();
+          setLoading(false);
+          return;
+        }
+
+        perfilJaCarregado.current = true;
+        perfilCarregadoParaId.current = authId;
+        console.warn('Nenhum perfil encontrado para auth_id:', authId);
+        setPerfil(null);
+        setProfessorId(null);
+        setNomeUsuario(null);
+        setEstudioId(null);
+        resetarSegmento();
+        resetarBloqueio();
+      } catch (error) {
+        console.error('Erro fatal ao carregar perfil:', error);
+        if (cancelled) return;
+        // Não trava mais o usuário permanentemente: em erro transitório,
+        // NÃO marca perfilJaCarregado — permite nova tentativa no próximo
+        // evento de auth (ex.: reconexão) em vez de exigir reload manual.
+        setErroPerfil(error);
+        setPerfil(null);
+        setProfessorId(null);
+        setNomeUsuario(null);
+        setEstudioId(null);
+        resetarSegmento();
+        resetarBloqueio();
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!cancelled) carregarPerfilUsuario(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (cancelled) return;
+
+      if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') return;
+
+      if (event === 'SIGNED_OUT') {
+        perfilJaCarregado.current = false;
+        perfilCarregadoParaId.current = null;
+        setSessao(null);
+        setPerfil(null);
+        setProfessorId(null);
+        setNomeUsuario(null);
+        setEstudioId(null);
+        setErroPerfil(null);
+        resetarSegmento();
+        resetarBloqueio();
+        setLoading(false);
+
+      } else if (event === 'SIGNED_IN') {
+        if (perfilJaCarregado.current && perfilCarregadoParaId.current === session?.user?.id) {
+          setSessao(session);
+          return;
+        }
+        perfilJaCarregado.current = false;
+        setLoading(true);
+        carregarPerfilUsuario(session);
+
+      } else {
+        if (perfilJaCarregado.current && perfilCarregadoParaId.current === session?.user?.id) {
+          setSessao(session);
+        } else {
+          carregarPerfilUsuario(session);
+        }
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, []); // roda uma única vez — agora para a aplicação inteira, não por componente
+
+  const value = {
+    sessao,
+    perfil,
+    professorId,
+    estudioId,
+    nomeUsuario,
+    loading,
+    erroPerfil,
+    segmento,
+    terminologia,
+    modulosAtivos,
+    estudioBloqueado,
+    estudioStatusInfo,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error('useAuth deve ser usado dentro de <AuthProvider>');
+  }
+  return ctx;
 }
 </file>
 
@@ -32611,6 +32612,227 @@ async resumoMensal(mesAno, estudioId) {
 };
 </file>
 
+<file path="webapp/src/services/gradeService.js">
+import { supabase } from '../lib/supabase';
+
+export const gradeService = {
+  async listarProfessores(estudioId) {
+    const { data, error } = await supabase
+      .from('professores')
+      .select('id, nome')
+      .eq('estudio_id', estudioId)
+      .eq('ativo', true)
+      .order('nome');
+    if (error) throw error;
+    return data;
+  },
+
+  // Allowlist de colunas: único consumidor é Agenda.jsx/ModalNovaAula.jsx,
+  // que usa apenas id, nome, area (sugestão automática de espaço),
+  // professor_id (auto-preenche professor) e capacidade_padrao (auto-
+  // preenche vagas). Substitui select('*'), alinhando com o padrão já
+  // aplicado nos demais services do módulo.
+  async listarModalidades(estudioId) {
+    const { data, error } = await supabase
+      .from('modalidades')
+      .select('id, nome, area, professor_id, capacidade_padrao')
+      .eq('estudio_id', estudioId)
+      .order('nome');
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * @param {'admin' | 'professor' | 'aluno'} perfil  — vem do useAuth
+   * @param {string | null} professorId                — id do professor logado (se perfil === 'professor')
+   * @param {string} estudioId                          — vem do useAuth
+   * @param {Object} janela                             — objeto com propriedades 'inicio' e 'fim' para filtrar o período
+   */
+async listarGrade(perfil, professorId, estudioId, janela) {
+  // `horario` é coluna `time` (só hora do dia) — não dá pra comparar com
+  // datas completas. `agenda` guarda definições de aula (recorrentes por
+  // dia da semana ou pontuais via `data_especifica`); a janela de período
+  // visível já é aplicada no client por useEventosCalendario/limitesVisiveis
+  // ao expandir a recorrência, então não filtramos por data aqui.
+  void janela; // mantido no parâmetro por compatibilidade de assinatura com o caller
+
+  if (perfil === 'admin') {
+    const { data, error } = await supabase
+      .from('agenda')
+      .select('*, professores(nome), modalidades(id, nome)')
+      .eq('estudio_id', estudioId)
+      .order('horario', { ascending: true });
+    if (error) throw error;
+    return data;
+  }
+
+  if (perfil !== 'professor' || !professorId) return [];
+
+  const { data: modalidadesDoProf } = await supabase
+    .from('modalidades')
+    .select('id')
+    .eq('estudio_id', estudioId)
+    .eq('professor_id', professorId);
+
+  const idsModsDoProf = modalidadesDoProf?.map((m) => m.id) ?? [];
+
+  const [{ data: aulasDiretas, error: errDiretas }, { data: aulasPorMod, error: errMod }] =
+    await Promise.all([
+      supabase
+        .from('agenda')
+        .select('*, professores(nome), modalidades(id, nome)')
+        .eq('estudio_id', estudioId)
+        .eq('professor_id', professorId)
+        .order('horario', { ascending: true }),
+      idsModsDoProf.length > 0
+        ? supabase
+            .from('agenda')
+            .select('*, professores(nome), modalidades(id, nome)')
+            .eq('estudio_id', estudioId)
+            .is('professor_id', null)
+            .in('modalidade_id', idsModsDoProf)
+            .order('horario', { ascending: true })
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+  if (errDiretas) throw errDiretas;
+  if (errMod) throw errMod;
+
+  const vistas = new Set();
+  return [...(aulasDiretas ?? []), ...(aulasPorMod ?? [])].filter((a) => {
+    if (vistas.has(a.id)) return false;
+    vistas.add(a.id);
+    return true;
+  });
+},
+
+  // Sprint 02: estudioId obrigatório em INSERTs de agenda
+  async salvarAula(aula, estudioId) {
+    if (aula.id) {
+      // UPDATE: estudio_id não precisa ser alterado
+      const { id, ...payload } = aula;
+      const { error } = await supabase
+        .from('agenda')
+        .update(payload)
+        .eq('id', id)
+        .eq('estudio_id', estudioId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('agenda')
+        .insert([{ ...aula, estudio_id: estudioId }]);
+      if (error) throw error;
+    }
+    return true;
+  },
+
+  // Bug #2: versão legada com cascata sequencial removida — única implementação
+  // válida usa a RPC excluir_aula_cascata, que executa todas as deleções dentro
+  // de uma transação Postgres. A versão antiga podia deixar o banco inconsistente
+  // se qualquer step falhasse (ex: agenda_fixa e presenca deletadas, agenda não).
+  async excluirAula(id, estudioId) {
+    const { error } = await supabase.rpc('excluir_aula_cascata', {
+      p_aula_id:    id,
+      p_estudio_id: estudioId,
+    });
+    if (error) {
+      console.error('Erro ao excluir aula em cascata:', error);
+      throw error;
+    }
+    return true;
+  },
+
+  async encerrarAula(id, dataEncerramento, estudioId) {
+    const { error } = await supabase
+      .from('agenda')
+      .update({ data_fim: dataEncerramento })
+      .eq('id', id)
+      .eq('estudio_id', estudioId);
+    if (error) throw error;
+    return true;
+  },
+
+  // Bug #5: query sem limite de janela temporal substituída por filtro de ±12 meses.
+  // A versão anterior buscava todos os feriados históricos sem nenhum limite —
+  // um estúdio com anos de operação acumularia centenas de registros trafegados
+  // desnecessariamente a cada carregamento da Agenda.
+  // O calendário raramente precisa navegar além de 12 meses para frente ou atrás,
+  // portanto esta janela cobre todos os casos de uso reais sem desperdício.
+  async listarFeriados(estudioId) {
+    const hoje = new Date();
+    const dozeAtras = new Date(hoje.getFullYear() - 1, hoje.getMonth(), 1)
+      .toISOString().split('T')[0];
+    const dozeFuturos = new Date(hoje.getFullYear() + 1, hoje.getMonth() + 1, 0)
+      .toISOString().split('T')[0];
+
+    const { data, error } = await supabase
+      .from('feriados')
+      .select('*')
+      .eq('estudio_id', estudioId)
+      .gte('data', dozeAtras)
+      .lte('data', dozeFuturos)
+      .order('data', { ascending: true });
+
+    if (error) throw error;
+    return data;
+  },
+
+  // Sprint 02: estudioId obrigatório no INSERT de feriados
+  // Sprint 03: filtro de limpeza trocado de data_checkin (só preenchido após
+  // check-in confirmado — bug antigo: agendamentos pendentes nunca eram
+  // limpos) para data_aula (correto: cobre agendado + presente + falta).
+  async cadastrarFeriado(dados, estudioId) {
+    const { error } = await supabase
+      .from('feriados')
+      .insert([{ ...dados, estudio_id: estudioId }]);
+    if (error) throw error;
+
+    if (dados.bloqueia_agenda) {
+      await supabase
+        .from('presencas')
+        .delete()
+        .eq('estudio_id', estudioId)
+        .eq('data_aula', dados.data);
+
+      await supabase
+        .from('leads')
+        .delete()
+        .eq('estudio_id', estudioId)
+        .eq('data_visita', dados.data);
+    }
+  },
+
+  async excluirFeriado(id, estudioId) {
+    const { error } = await supabase
+      .from('feriados')
+      .delete()
+      .eq('id', id)
+      .eq('estudio_id', estudioId);
+    if (error) throw error;
+    return true;
+  },
+
+  async listarMatriculasFixas(aulasIds = null) {
+    // Bug #1: aulasIds=null sem filtro retornaria registros de todos os estúdios.
+    // Proteção defensiva: se não vier lista de IDs, retorna vazio.
+    // O isolamento por tenant é garantido pelo caller (Agenda.jsx) que deriva
+    // aulasIds das aulas já filtradas por estudio_id.
+    if (aulasIds === null || aulasIds.length === 0) return [];
+
+    const { data, error } = await supabase
+      .from('agenda_fixa')
+      .select('aula_id, alunos (id, nome_completo, data_inicio_plano, data_fim_plano)')
+      .in('aula_id', aulasIds);
+
+    if (error) {
+      console.error('Erro ao buscar alunos fixos:', error);
+      return [];
+    }
+    return data;
+  },
+};
+</file>
+
 <file path="webapp/src/App.jsx">
 // webapp/src/App.jsx
 import React, { useState } from 'react';
@@ -32926,227 +33148,6 @@ export default function App() {
     </QueryClientProvider>
   );
 }
-</file>
-
-<file path="webapp/src/services/gradeService.js">
-import { supabase } from '../lib/supabase';
-
-export const gradeService = {
-  async listarProfessores(estudioId) {
-    const { data, error } = await supabase
-      .from('professores')
-      .select('id, nome')
-      .eq('estudio_id', estudioId)
-      .eq('ativo', true)
-      .order('nome');
-    if (error) throw error;
-    return data;
-  },
-
-  // Allowlist de colunas: único consumidor é Agenda.jsx/ModalNovaAula.jsx,
-  // que usa apenas id, nome, area (sugestão automática de espaço),
-  // professor_id (auto-preenche professor) e capacidade_padrao (auto-
-  // preenche vagas). Substitui select('*'), alinhando com o padrão já
-  // aplicado nos demais services do módulo.
-  async listarModalidades(estudioId) {
-    const { data, error } = await supabase
-      .from('modalidades')
-      .select('id, nome, area, professor_id, capacidade_padrao')
-      .eq('estudio_id', estudioId)
-      .order('nome');
-    if (error) throw error;
-    return data;
-  },
-
-  /**
-   * @param {'admin' | 'professor' | 'aluno'} perfil  — vem do useAuth
-   * @param {string | null} professorId                — id do professor logado (se perfil === 'professor')
-   * @param {string} estudioId                          — vem do useAuth
-   * @param {Object} janela                             — objeto com propriedades 'inicio' e 'fim' para filtrar o período
-   */
-async listarGrade(perfil, professorId, estudioId, janela) {
-  // `horario` é coluna `time` (só hora do dia) — não dá pra comparar com
-  // datas completas. `agenda` guarda definições de aula (recorrentes por
-  // dia da semana ou pontuais via `data_especifica`); a janela de período
-  // visível já é aplicada no client por useEventosCalendario/limitesVisiveis
-  // ao expandir a recorrência, então não filtramos por data aqui.
-  void janela; // mantido no parâmetro por compatibilidade de assinatura com o caller
-
-  if (perfil === 'admin') {
-    const { data, error } = await supabase
-      .from('agenda')
-      .select('*, professores(nome), modalidades(id, nome)')
-      .eq('estudio_id', estudioId)
-      .order('horario', { ascending: true });
-    if (error) throw error;
-    return data;
-  }
-
-  if (perfil !== 'professor' || !professorId) return [];
-
-  const { data: modalidadesDoProf } = await supabase
-    .from('modalidades')
-    .select('id')
-    .eq('estudio_id', estudioId)
-    .eq('professor_id', professorId);
-
-  const idsModsDoProf = modalidadesDoProf?.map((m) => m.id) ?? [];
-
-  const [{ data: aulasDiretas, error: errDiretas }, { data: aulasPorMod, error: errMod }] =
-    await Promise.all([
-      supabase
-        .from('agenda')
-        .select('*, professores(nome), modalidades(id, nome)')
-        .eq('estudio_id', estudioId)
-        .eq('professor_id', professorId)
-        .order('horario', { ascending: true }),
-      idsModsDoProf.length > 0
-        ? supabase
-            .from('agenda')
-            .select('*, professores(nome), modalidades(id, nome)')
-            .eq('estudio_id', estudioId)
-            .is('professor_id', null)
-            .in('modalidade_id', idsModsDoProf)
-            .order('horario', { ascending: true })
-        : Promise.resolve({ data: [], error: null }),
-    ]);
-
-  if (errDiretas) throw errDiretas;
-  if (errMod) throw errMod;
-
-  const vistas = new Set();
-  return [...(aulasDiretas ?? []), ...(aulasPorMod ?? [])].filter((a) => {
-    if (vistas.has(a.id)) return false;
-    vistas.add(a.id);
-    return true;
-  });
-},
-
-  // Sprint 02: estudioId obrigatório em INSERTs de agenda
-  async salvarAula(aula, estudioId) {
-    if (aula.id) {
-      // UPDATE: estudio_id não precisa ser alterado
-      const { id, ...payload } = aula;
-      const { error } = await supabase
-        .from('agenda')
-        .update(payload)
-        .eq('id', id)
-        .eq('estudio_id', estudioId);
-      if (error) throw error;
-    } else {
-      const { error } = await supabase
-        .from('agenda')
-        .insert([{ ...aula, estudio_id: estudioId }]);
-      if (error) throw error;
-    }
-    return true;
-  },
-
-  // Bug #2: versão legada com cascata sequencial removida — única implementação
-  // válida usa a RPC excluir_aula_cascata, que executa todas as deleções dentro
-  // de uma transação Postgres. A versão antiga podia deixar o banco inconsistente
-  // se qualquer step falhasse (ex: agenda_fixa e presenca deletadas, agenda não).
-  async excluirAula(id, estudioId) {
-    const { error } = await supabase.rpc('excluir_aula_cascata', {
-      p_aula_id:    id,
-      p_estudio_id: estudioId,
-    });
-    if (error) {
-      console.error('Erro ao excluir aula em cascata:', error);
-      throw error;
-    }
-    return true;
-  },
-
-  async encerrarAula(id, dataEncerramento, estudioId) {
-    const { error } = await supabase
-      .from('agenda')
-      .update({ data_fim: dataEncerramento })
-      .eq('id', id)
-      .eq('estudio_id', estudioId);
-    if (error) throw error;
-    return true;
-  },
-
-  // Bug #5: query sem limite de janela temporal substituída por filtro de ±12 meses.
-  // A versão anterior buscava todos os feriados históricos sem nenhum limite —
-  // um estúdio com anos de operação acumularia centenas de registros trafegados
-  // desnecessariamente a cada carregamento da Agenda.
-  // O calendário raramente precisa navegar além de 12 meses para frente ou atrás,
-  // portanto esta janela cobre todos os casos de uso reais sem desperdício.
-  async listarFeriados(estudioId) {
-    const hoje = new Date();
-    const dozeAtras = new Date(hoje.getFullYear() - 1, hoje.getMonth(), 1)
-      .toISOString().split('T')[0];
-    const dozeFuturos = new Date(hoje.getFullYear() + 1, hoje.getMonth() + 1, 0)
-      .toISOString().split('T')[0];
-
-    const { data, error } = await supabase
-      .from('feriados')
-      .select('*')
-      .eq('estudio_id', estudioId)
-      .gte('data', dozeAtras)
-      .lte('data', dozeFuturos)
-      .order('data', { ascending: true });
-
-    if (error) throw error;
-    return data;
-  },
-
-  // Sprint 02: estudioId obrigatório no INSERT de feriados
-  // Sprint 03: filtro de limpeza trocado de data_checkin (só preenchido após
-  // check-in confirmado — bug antigo: agendamentos pendentes nunca eram
-  // limpos) para data_aula (correto: cobre agendado + presente + falta).
-  async cadastrarFeriado(dados, estudioId) {
-    const { error } = await supabase
-      .from('feriados')
-      .insert([{ ...dados, estudio_id: estudioId }]);
-    if (error) throw error;
-
-    if (dados.bloqueia_agenda) {
-      await supabase
-        .from('presencas')
-        .delete()
-        .eq('estudio_id', estudioId)
-        .eq('data_aula', dados.data);
-
-      await supabase
-        .from('leads')
-        .delete()
-        .eq('estudio_id', estudioId)
-        .eq('data_visita', dados.data);
-    }
-  },
-
-  async excluirFeriado(id, estudioId) {
-    const { error } = await supabase
-      .from('feriados')
-      .delete()
-      .eq('id', id)
-      .eq('estudio_id', estudioId);
-    if (error) throw error;
-    return true;
-  },
-
-  async listarMatriculasFixas(aulasIds = null) {
-    // Bug #1: aulasIds=null sem filtro retornaria registros de todos os estúdios.
-    // Proteção defensiva: se não vier lista de IDs, retorna vazio.
-    // O isolamento por tenant é garantido pelo caller (Agenda.jsx) que deriva
-    // aulasIds das aulas já filtradas por estudio_id.
-    if (aulasIds === null || aulasIds.length === 0) return [];
-
-    const { data, error } = await supabase
-      .from('agenda_fixa')
-      .select('aula_id, alunos (id, nome_completo, data_inicio_plano, data_fim_plano)')
-      .in('aula_id', aulasIds);
-
-    if (error) {
-      console.error('Erro ao buscar alunos fixos:', error);
-      return [];
-    }
-    return data;
-  },
-};
 </file>
 
 <file path="webapp/src/pages/NovoAluno.jsx">

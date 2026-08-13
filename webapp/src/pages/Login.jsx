@@ -11,6 +11,19 @@
 //   1. Login normal → redireciona por perfil
 //   2. primeiro_acesso → /redefinir-senha com state
 //   3. Recuperar senha → modal inline → reset email via Supabase
+//
+// FIX (login travado fora de subdomínio de tenant): antes, qualquer login
+// exigia `estudioPublico.id` resolvido (via slug do subdomínio) ANTES de
+// autenticar — inclusive para super_admin, que por design nunca tem
+// estudio_id (ver useAuth.jsx). Login no domínio raiz (sem subdomínio,
+// ex: acesso do super_admin) ficava permanentemente bloqueado com
+// "Não foi possível identificar o estúdio", mesmo com credenciais corretas.
+// Agora o gate só bloqueia quando HÁ um slug de subdomínio que falhou ao
+// resolver (erro real de tenant). Sem slug (domínio raiz, de propósito),
+// o login segue normalmente e quem decide o perfil/redirect é o
+// useAuth()/estudio_membros já usado pelo roteador em App.jsx — que já
+// cobre super_admin, admin e professor corretamente, sem depender de
+// subdomínio.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -39,7 +52,11 @@ export default function Login() {
   // do subdomínio. Usado para filtrar as queries de perfil (alunos/professores)
   // e evitar que um auth_id presente em mais de um estúdio (ex: professor que
   // dá aula em duas unidades) resolva o perfil errado ou quebre o .maybeSingle().
-  const { data: estudioPublico, isLoading: estudioLoading } = useEstudioPublico();
+  //
+  // FIX (login no domínio raiz): agora também lemos `slug` diretamente, para
+  // distinguir "sem subdomínio de propósito" (slug null, ex: domínio raiz —
+  // válido) de "subdomínio presente mas não resolveu no banco" (erro real).
+  const { data: estudioPublico, isLoading: estudioLoading, slug } = useEstudioPublico();
   const nomeEstudio = estudioPublico?.nome || 'plataforma';
 
   // FIX (Race condition): flag explícita para o listener de auth ignorar
@@ -60,6 +77,9 @@ export default function Login() {
         if (session.user.app_metadata?.provider !== 'email') return;
         if (!session.user.confirmed_at) return;
 
+        // Magic link é sempre um convite de professor vinculado a um estúdio
+        // específico — este fluxo continua exigindo o subdomínio do tenant
+        // (diferente do login por senha, que agora também aceita domínio raiz).
         if (!estudioPublico?.id) return; // FIX: sem estúdio resolvido, não prosseguir
 
         // ⚠️ ASSUMIR/VALIDAR: pressupõe que `professores` tem coluna `estudio_id`
@@ -108,7 +128,14 @@ export default function Login() {
       return;
     }
 
-    if (!estudioPublico?.id) {
+    // FIX (login no domínio raiz): só bloqueia quando HÁ um slug de
+    // subdomínio (estamos claramente numa URL de tenant, ex:
+    // iluminus.gestao.app) mas ele não resolveu um estúdio no banco — isso
+    // sim é um erro real. Quando `slug` é null de propósito (domínio raiz,
+    // sem subdomínio — porta de entrada do super_admin e login genérico),
+    // deixamos seguir: o perfil real é resolvido depois via useAuth()/
+    // estudio_membros, sem depender de tenant.
+    if (slug && !estudioPublico?.id) {
       showToast.error('Não foi possível identificar o estúdio. Recarregue a página.');
       return;
     }
@@ -123,6 +150,17 @@ export default function Login() {
       });
 
       if (error) throw error;
+
+      // FIX (login no domínio raiz): sem estúdio de tenant resolvido, não dá
+      // pra (e não faz sentido) filtrar alunos/professores por estudio_id
+      // aqui. Quem resolve o perfil real neste caso é useAuth()/App.jsx via
+      // estudio_membros (super_admin, admin ou professor, sem exigir
+      // subdomínio) — só navegamos pra raiz e deixamos o roteador decidir.
+      if (!estudioPublico?.id) {
+        showToast.success('Login realizado!');
+        navigate('/');
+        return;
+      }
 
       // ⚠️ ASSUMIR/VALIDAR: mesma suposição de estudio_id + RLS pública citada acima,
       // agora para a tabela `alunos`.
