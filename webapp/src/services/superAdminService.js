@@ -1,29 +1,18 @@
-// webapp/src/services/superAdminService.js
+// criarEstudio agora usa a mesma lógica de extração de mensagem
+// de erro que cadastroService.criarMeuEstudio já usa — sem isso, qualquer
+// erro de negócio retornado pela Edge Function `criar-estudio` (slug em
+// uso, campo obrigatório ausente etc.) virava a mensagem genérica do
+// supabase-js "Edge Function returned a non-2xx status code" na UI do
+// super_admin.
 //
-// Serviço exclusivo do painel super_admin.
-// Todas as queries aqui são cross-tenant — leem de TODOS os estúdios.
-// O RLS deve permitir isso apenas para usuários com role 'super_admin'.
-//
-// NOTA: listarEstudios e metricasGlobais usam RPCs com agregação no banco
-// (receita_total_paga, listar_estudios_admin) em vez de somar/contar no
-// client, evitando carregar tabelas inteiras em memória e o truncamento
-// silencioso imposto pelo max_rows (1000) do PostgREST.
+// Extraído para um módulo compartilhado para não duplicar a lógica entre
+// os dois services (DRY) — ver webapp/src/lib/edgeFunctionError.js abaixo.
 
 import { supabase } from '../lib/supabase';
-
-// ── LISTA DE ESTÚDIOS ────────────────────────────────────────────────────────
+import { extrairMensagemErro } from '../lib/edgeFunctionError';
 
 const DEFAULT_PAGE_SIZE = 50;
 
-/**
- * Retorna uma página de estúdios com contagens de alunos e professores,
- * agregadas no banco via RPC (sem N+1, sem carregar tudo em memória).
- * A busca é feita no servidor (nome/slug) para continuar funcionando
- * corretamente junto com a paginação.
- *
- * @param {{ page?: number, pageSize?: number, busca?: string }} opts  page é 0-based.
- * @returns {Promise<{ estudios: Array, totalCount: number }>}
- */
 async function listarEstudios({ page = 0, pageSize = DEFAULT_PAGE_SIZE, busca = '' } = {}) {
   const { data, error } = await supabase.rpc('listar_estudios_admin', {
     p_limit: pageSize,
@@ -40,12 +29,6 @@ async function listarEstudios({ page = 0, pageSize = DEFAULT_PAGE_SIZE, busca = 
   return { estudios, totalCount };
 }
 
-// ── MÉTRICAS GLOBAIS ─────────────────────────────────────────────────────────
-
-/**
- * Retorna métricas cross-tenant para os cards do dashboard.
- * { totalEstudios, totalAlunos, receitaTotal }
- */
 async function metricasGlobais() {
   const [
     { count: totalEstudios, error: errEstudios },
@@ -68,15 +51,10 @@ async function metricasGlobais() {
   };
 }
 
-// ── SUSPENDER / REATIVAR ─────────────────────────────────────────────────────
-
 const STATUS_VALIDOS = ['ativo', 'suspenso'];
 
-/**
- * Alterna o status de um estúdio entre 'ativo' e 'suspenso'.
- */
 async function alterarStatusEstudio(estudioId, novoStatus) {
- if (!STATUS_VALIDOS.includes(novoStatus)) {
+  if (!STATUS_VALIDOS.includes(novoStatus)) {
     throw new Error(`Status inválido: "${novoStatus}". Valores aceitos: ${STATUS_VALIDOS.join(', ')}.`);
   }
 
@@ -88,8 +66,6 @@ async function alterarStatusEstudio(estudioId, novoStatus) {
   if (error) throw error;
 }
 
-// ── CRIAR ESTÚDIO (via Edge Function) ────────────────────────────────────────
-
 /**
  * Chama a Edge Function `criar-estudio`.
  * Retorna { estudio: { id, nome, slug }, admin: { auth_id, email, reutilizado } }
@@ -99,25 +75,17 @@ async function criarEstudio({ nome, slug, adminEmail, adminNome, whatsapp, insta
     body: { nome, slug, adminEmail, adminNome, whatsapp, instagram },
   });
 
-  if (error) throw error;
+  if (error) {
+    // CORREÇÃO: antes era `throw error` cru — mensagem genérica do
+    // supabase-js em vez do erro de negócio real vindo da Edge Function.
+    const mensagem = await extrairMensagemErro(error, 'Erro ao criar estúdio.');
+    throw new Error(mensagem);
+  }
+
   if (data?.error) throw new Error(data.error);
 
   return data;
 }
-
-// ── Exemplo de uso no hook (TabelaEstudios.jsx) ──────────────────────────────
-//
-// const { data, isLoading } = useQuery({
-//   queryKey: ['super-admin', 'estudios', busca, pagina],
-//   queryFn: () => superAdminService.listarEstudios({ page: pagina, busca }),
-//   staleTime: 1000 * 60,
-//   keepPreviousData: true,
-// });
-// const estudios   = data?.estudios ?? [];
-// const totalCount = data?.totalCount ?? 0;
-//
-// A filtragem client-side com `estudios.filter(...)` deve ser removida —
-// a busca agora acontece no servidor via p_busca.
 
 export const superAdminService = {
   listarEstudios,

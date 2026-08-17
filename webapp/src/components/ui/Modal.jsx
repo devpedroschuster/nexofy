@@ -1,4 +1,3 @@
-// src/components/ui/Modal.jsx
 import React, { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, AlertTriangle, Trash2, CheckCircle, Info } from 'lucide-react';
@@ -103,7 +102,17 @@ export function ModalConfirmacao({
   const _aberto = aberto ?? isOpen ?? false;
   const _fechar = fechar ?? onClose ?? (() => {});
   const [confirmando, setConfirmando] = React.useState(false);
+  // NOVO: erro visível ao usuário quando onConfirm falha, em vez de só
+  // console.error (falha silenciosa da versão anterior).
+  const [erroConfirmacao, setErroConfirmacao] = React.useState('');
   const isLoading = loading || confirmando;
+
+  // ModalConfirmacao não desmonta quando fecha (só o <Modal> interno
+  // retorna null) — sem isso, o erro de uma tentativa anterior
+  // continuaria visível ao reabrir o modal para uma nova ação.
+  React.useEffect(() => {
+    if (_aberto) setErroConfirmacao('');
+  }, [_aberto]);
 
   const icones = {
     danger:  <Trash2 size={28} className="text-destructive" />,
@@ -121,11 +130,13 @@ export function ModalConfirmacao({
 
   const handleConfirm = async () => {
     setConfirmando(true);
+    setErroConfirmacao('');
     try {
       await onConfirm();
       _fechar();
     } catch (err) {
       console.error('ModalConfirmacao: onConfirm falhou', err);
+      setErroConfirmacao(err?.message || 'Não foi possível concluir a ação. Tente novamente.');
     } finally {
       setConfirmando(false);
     }
@@ -141,6 +152,13 @@ export function ModalConfirmacao({
           <h3 className="text-2xl font-black text-foreground leading-tight">{titulo}</h3>
           <p className="text-sm font-medium text-muted-foreground leading-relaxed">{mensagem}</p>
         </div>
+
+        {erroConfirmacao && (
+          <p role="alert" className="text-sm font-medium text-destructive">
+            {erroConfirmacao}
+          </p>
+        )}
+
         <div className="flex gap-3 pt-6">
           <Button variant="outline" fullWidth size="lg" onClick={_fechar} disabled={isLoading}>
             {textoCancelar}

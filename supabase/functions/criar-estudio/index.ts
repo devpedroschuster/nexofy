@@ -18,6 +18,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { getUserByEmail } from '../_shared/getUserByEmail.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -121,23 +122,17 @@ serve(async (req: Request) => {
   }
 
   // ── 4. RESOLVER AUTH USER DO ADMIN ────────────────────────────────────────
-  // Esta etapa precisa ficar na Edge Function porque createUser é uma API HTTP
-  // do GoTrue — não existe equivalente SQL acessível de dentro de uma função
-  // PL/pgSQL.
-  //
-  // Se falhar aqui, nenhuma escrita no banco ainda ocorreu → sem efeito colateral.
-  const { data: { user: authExistente }, error: getUserErr } =
-   await admin.auth.admin.getUserByEmail(emailNorm);
- if (getUserErr && getUserErr.status !== 404) {
-   return resp({ error: `Falha ao consultar usuário: ${getUserErr.message}` }, 500);
- }
-  let adminAuthId: string;
 
-  if (authExistente) {
-    // Email já existe: reutiliza sem resetar senha
-    adminAuthId = authExistente.id;
-    console.log(`[criar-estudio] Email já existia no auth, reutilizando: ${adminAuthId}`);
-  } else {
+  const { user: authExistente, error: getUserErr } = await getUserByEmail(admin, emailNorm);
+if (getUserErr) {
+  return resp({ error: `Falha ao consultar usuário: ${getUserErr.message}` }, 500);
+}
+let adminAuthId: string;
+ 
+if (authExistente) {
+  adminAuthId = authExistente.id;
+  console.log(`[criar-estudio] Email já existia no auth, reutilizando: ${adminAuthId}`);
+} else {
     // Cria usuário sem senha — admin acessa via link de recovery
     const { data: authData, error: errAuth } = await admin.auth.admin.createUser({
       email: emailNorm,

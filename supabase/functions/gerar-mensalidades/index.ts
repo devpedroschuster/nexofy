@@ -34,15 +34,25 @@ serve(async (req: Request) => {
   // A service role ignora RLS; todo acesso deve filtrar explicitamente por estudio_id.
   // O payload DEVE conter estudioId — chamadas sem ele são rejeitadas.
   let estudioId: string | null = null
+  let mesParam: number | null = null
+  let anoParam: number | null = null
   try {
     const body = await req.json().catch(() => ({}))
     estudioId = body?.estudioId ?? null
+    mesParam = Number.isInteger(body?.mes) ? body.mes : null
+    anoParam = Number.isInteger(body?.ano) ? body.ano : null
   } catch {
-    // body vazio ou não-JSON
   }
 
   if (!estudioId) {
     return response({ erro: 'estudioId é obrigatório no payload da requisição.' }, 400)
+  }
+
+  if ((mesParam !== null && (mesParam < 1 || mesParam > 12))) {
+    return response({ erro: 'mes deve estar entre 1 e 12.' }, 400)
+  }
+  if (anoParam !== null && (anoParam < 2000 || anoParam > 2100)) {
+    return response({ erro: 'ano inválido.' }, 400)
   }
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -107,10 +117,10 @@ serve(async (req: Request) => {
   )
 
   const hoje = new Date()
-  const ano = hoje.getFullYear()
-  const mes = hoje.getMonth() + 1
+  const ano = anoParam ?? hoje.getFullYear()
+  const mes = mesParam ?? (hoje.getMonth() + 1)
   const mesStr = String(mes).padStart(2, '0')
-  const mesLabel = hoje.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })
+  const mesLabel = new Date(ano, mes - 1, 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' })
 
   // Dia 10 como vencimento padrão
   const data_vencimento = `${ano}-${mesStr}-10`

@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { getUserByEmail } from '../_shared/getUserByEmail.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -129,10 +130,12 @@ serve(async (req: Request) => {
 
     const emailNormalizado = email.trim().toLowerCase();
 
-    // Verifica se já existe um auth user com esse email
-    const { data: { user: existente }, error: getUserErr } =
-      await admin.auth.admin.getUserByEmail(emailNormalizado);
-    if (getUserErr && getUserErr.status !== 404) throw getUserErr;
+    // Verifica se já existe um auth user com esse email.
+    // ANTES: await admin.auth.admin.getUserByEmail(emailNormalizado)
+    // — método inexistente na Admin API do supabase-js v2, lançava
+    // TypeError em runtime Deno. Substituído pelo helper compartilhado.
+    const { user: existente, error: getUserErr } = await getUserByEmail(admin, emailNormalizado);
+    if (getUserErr) throw getUserErr;
 
     let novoAuthId: string;
     let reutilizado = false;

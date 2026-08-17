@@ -17,6 +17,7 @@ import Skeleton from '../../components/ui/Skeleton';
 import EmptyState from '../../components/ui/EmptyState';
 import Button from '../../components/ui/Button';
 import { formatarMoeda, formatarData } from '../../lib/utils';
+import { tipoAulaLabel } from '../../lib/constants/tipoAula';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -45,15 +46,7 @@ function statusBadge(status) {
   return <Badge tone="warning">Pendente</Badge>;
 }
 
-function tipoAulaLabel(tipo) {
-  const mapa = {
-    fixo: 'Aula Fixa',
-    avulsa: 'Aula Avulsa',
-    reposicao: 'Reposição',
-    experimental: 'Experimental',
-  };
-  return mapa[tipo] ?? tipo ?? '—';
-}
+
 
 // ─── export CSV ──────────────────────────────────────────────────────────────
 

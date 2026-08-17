@@ -1,18 +1,6 @@
-// components/tabela/CelulaDinamica.jsx
-//
 // Renderer de célula genérico, usado pela tabela de Alunos para exibir o
 // valor de qualquer coluna (fixa ou dinâmica) de acordo com o field_type
 // vindo de tabela_colunas_config (ver services/tabelaColunasService.js).
-//
-// Financeiro não usa este renderer: suas colunas (valor, vencimento,
-// status etc.) já têm formatação própria e específica de domínio no
-// componente da tabela — não fazem parte do catálogo dinâmico de
-// campos_dinamicos, então não têm um field_type genérico para mapear
-// aqui. Ver seção 5.4 do plano do item 3.
-//
-// IMPORTANTE: cobre os 5 tipos suportados pela Nexofy (text, boolean,
-// file, select, number) — um a mais do que o FutSUL original (que só
-// tinha text/boolean/file).
 
 /**
  * @param {'text'|'boolean'|'file'|'select'|'number'} fieldType
@@ -37,26 +25,41 @@ export function renderCelula(fieldType, valor) {
 
     case 'text':
     default:
-      // fallback intencional: qualquer field_type desconhecido (ex. um
-      // valor futuro ainda não coberto aqui) cai em texto puro, mesmo
-      // comportamento de fallback do catálogo (ver lib/tabelaColunas.js)
       return valor ?? '—';
   }
 }
 
 function formatarNumero(valor) {
   const num = Number(valor);
-  if (Number.isNaN(num)) return String(valor); // defensivo: não deveria acontecer se o campo foi validado na Ficha
+  if (Number.isNaN(num)) return String(valor);
   return num.toLocaleString('pt-BR');
+}
+
+// Esquemas permitidos para o link de arquivo. Bloqueia javascript:, data:
+// e outros esquemas que poderiam ser usados para XSS caso `valor` venha
+// de uma fonte não totalmente confiável (ex. campo dinâmico alimentado
+// via API sem passar pelo fluxo de upload da UI).
+const ESQUEMAS_PERMITIDOS = ['http:', 'https:'];
+
+function urlSegura(url) {
+  try {
+    // URL relativa (ex. "/storage/arquivo.pdf") é considerada segura.
+    if (url.startsWith('/')) return true;
+    const parsed = new URL(url);
+    return ESQUEMAS_PERMITIDOS.includes(parsed.protocol);
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Link para abrir/baixar um arquivo anexado (ex. atestado médico).
- * Placeholder simples — trocar por um componente real do design system
- * se já existir um padrão de preview/download de arquivo em outro
- * módulo da Nexofy (ex. comprovantes de pagamento em Financeiro).
  */
 function LinkArquivo({ url }) {
+  if (typeof url !== 'string' || !urlSegura(url)) {
+    return <span className="text-muted-foreground text-sm">Arquivo inválido</span>;
+  }
+
   return (
     <a
       href={url}
