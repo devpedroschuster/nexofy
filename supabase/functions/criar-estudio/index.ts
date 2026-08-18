@@ -1,5 +1,3 @@
-// supabase/functions/criar-estudio/index.ts
-//
 // Onboarding completo de um novo estúdio no sistema Nexofy.
 //
 // Responsabilidades desta Edge Function:
@@ -44,7 +42,7 @@ serve(async (req: Request) => {
   // Cliente admin (service role) — ignora RLS, usado para escritas e Auth API
   const admin = createClient(supabaseUrl, serviceKey);
 
-  // ── 1. AUTENTICAÇÃO E AUTORIZAÇÃO ─────────────────────────────────────────
+  // 1. AUTENTICAÇÃO E AUTORIZAÇÃO
   const authHeader = req.headers.get('Authorization') ?? '';
   if (!authHeader.startsWith('Bearer ')) {
     return resp({ error: 'Cabeçalho Authorization ausente ou inválido.' }, 401);
@@ -79,7 +77,7 @@ serve(async (req: Request) => {
     return resp({ error: 'Acesso negado. Apenas super_admins podem criar estúdios.' }, 403);
   }
 
-  // ── 2. VALIDAÇÃO DO PAYLOAD ───────────────────────────────────────────────
+  // VALIDAÇÃO DO PAYLOAD
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -110,7 +108,7 @@ serve(async (req: Request) => {
     }, 400);
   }
 
-  // ── 3. UNICIDADE DO SLUG ──────────────────────────────────────────────────
+  // UNICIDADE DO SLUG
   const { data: slugExistente } = await admin
     .from('estudios')
     .select('id')
@@ -121,7 +119,7 @@ serve(async (req: Request) => {
     return resp({ error: `O slug "${slugNorm}" já está em uso. Escolha outro.` }, 409);
   }
 
-  // ── 4. RESOLVER AUTH USER DO ADMIN ────────────────────────────────────────
+  // 4. RESOLVER AUTH USER DO ADMIN
 
   const { user: authExistente, error: getUserErr } = await getUserByEmail(admin, emailNorm);
 if (getUserErr) {
@@ -148,7 +146,7 @@ if (authExistente) {
     console.log(`[criar-estudio] Auth user criado: ${adminAuthId}`);
   }
 
-  // ── 5. ESCRITAS NO BANCO — TRANSAÇÃO ATÔMICA VIA RPC ─────────────────────
+  // ESCRITAS NO BANCO — TRANSAÇÃO ATÔMICA VIA RPC
   // estudios + profiles + estudio_membros + configuracoes_repasse em uma
   // única transação Postgres. Se qualquer INSERT falhar, o Postgres desfaz
   // tudo automaticamente — sem rollback manual.
@@ -177,11 +175,10 @@ if (authExistente) {
     return resp({ error: rpcErr.message }, 500);
   }
 
-  // rpc() com RETURNS TABLE retorna um array; pegamos a primeira (e única) linha
   const resultado = Array.isArray(rpcData) ? rpcData[0] : rpcData;
 
-  // ── 6. ENVIAR LINK DE RECOVERY ────────────────────────────────────────────
-  // Só para admins recém-criados. Não é fatal — super_admin pode reenviar depois.
+  // ENVIAR LINK DE RECOVERY
+
   if (!authExistente) {
     const { error: errReset } = await admin.auth.admin.generateLink({
       type: 'recovery',
@@ -195,7 +192,7 @@ if (authExistente) {
     }
   }
 
-  // ── SUCESSO ───────────────────────────────────────────────────────────────
+  // SUCESSO
   return resp({
     sucesso: true,
     estudio: {

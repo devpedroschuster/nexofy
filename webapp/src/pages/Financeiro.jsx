@@ -53,17 +53,6 @@ function calcularStatusReal(item) {
 }
 
 const ORDEM_STATUS = { atrasado: 0, pendente: 1, pago: 2 };
-// ──────────────────────────────────────────────────────────────────────────────
-
-// ---------------------------------------------------------------------
-// Renderers das 6 colunas fixas de negócio de Financeiro (item 3 do
-// plano multi-segmento — tabela configurável). Cada função recebe a
-// linha `item` (mensalidade) inteira — mesmo JSX/lógica que já existia
-// inline na tabela, só extraído para ser despachado pelo column_key
-// configurado em tabela_colunas_config. NENHUMA lógica de negócio foi
-// alterada aqui. Financeiro não tem colunas dinâmicas (catálogo 100%
-// estático — ver TABLE_COLUMNS_ESTATICO.financeiro em lib/tabelaColunas.js).
-// ---------------------------------------------------------------------
 
 function CelulaFinAlunoFixa({ item }) {
   return (

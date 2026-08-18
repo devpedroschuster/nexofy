@@ -6,6 +6,7 @@ import { RefreshCw, CheckCircle2, AlertCircle, Camera } from 'lucide-react';
 import { showToast } from '../components/shared/Toast';
 import { useEstudio } from '../hooks/useEstudio';
 import { formatarMoeda, formatarData as formatarDataUtil } from '../lib/utils';
+import { alunosKeys } from '../lib/alunosQueryKeys';
 
 const NOMES_DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const DIAS_BANCO = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
@@ -53,7 +54,7 @@ export default function AreaAluno() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const { data: aluno, isLoading: loadingAluno, isError: erroAluno } = useQuery({
-    queryKey: ['meu-perfil'],
+    queryKey: alunosKeys.meuPerfil(),
     queryFn: async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Não logado');
@@ -178,8 +179,7 @@ export default function AreaAluno() {
   const handleAvatarUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
-    // FIX: valida tipo e tamanho ANTES de subir, com mensagem específica
+ 
     if (!AVATAR_TIPOS_ACEITOS.includes(file.type)) {
       showToast.error('Formato inválido. Envie uma imagem JPG, PNG ou WebP.');
       event.target.value = '';
@@ -190,19 +190,24 @@ export default function AreaAluno() {
       event.target.value = '';
       return;
     }
-
+ 
     try {
       setUploadingAvatar(true);
-      // FIX: extensão com fallback seguro, sem depender de file.name ter '.'
       const partes = file.name.split('.');
       const fileExt = partes.length > 1 ? partes.pop().toLowerCase() : 'jpg';
       const fileName = `${aluno.id}-${Date.now()}.${fileExt}`;
       const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file);
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName);
-      const { error: updateError } = await supabase.from('alunos').update({ avatar_url: publicUrl }).eq('id', aluno.id);
+ 
+      const { error: updateError } = await supabase
+        .from('alunos')
+        .update({ avatar_url: publicUrl })
+        .eq('id', aluno.id)
+        .eq('auth_id', aluno.auth_id);
       if (updateError) throw updateError;
-      await queryClient.invalidateQueries(['meu-perfil']);
+ 
+      await queryClient.invalidateQueries({ queryKey: alunosKeys.meuPerfil() });
       showToast.success('Foto de perfil atualizada!');
     } catch (error) {
       console.error('Erro ao fazer upload da imagem:', error);
@@ -221,13 +226,17 @@ export default function AreaAluno() {
   const handleSalvarPerfil = async () => {
     setSalvandoPerfil(true);
     try {
-      const { error } = await supabase.from('alunos').update(formEdit).eq('id', aluno.id);
+      const { error } = await supabase
+        .from('alunos')
+        .update(formEdit)
+        .eq('id', aluno.id)
+        .eq('auth_id', aluno.auth_id);
       if (error) throw error;
-      await queryClient.invalidateQueries(['meu-perfil']);
+ 
+      await queryClient.invalidateQueries({ queryKey: alunosKeys.meuPerfil() });
       setModoEdicao(false);
       showToast.success('Perfil atualizado com sucesso!');
     } catch (error) {
-      // FIX: loga o erro real e repassa a mensagem específica quando existir
       console.error('Erro ao atualizar perfil:', error);
       showToast.error(error.message || 'Erro ao atualizar os dados.');
     } finally {
@@ -235,19 +244,13 @@ export default function AreaAluno() {
     }
   };
 
-  // NOTA DE SEGURANÇA: p_aluno_id é enviado pelo client. A RPC `agendar_aula`
-  // no Postgres PRECISA validar internamente que p_aluno_id corresponde ao
-  // auth.uid() da sessão (ex.: comparando com `select id from alunos where
-  // auth_id = auth.uid()`), caso contrário existe uma janela de IDOR onde
-  // um usuário pode agendar/cancelar aulas em nome de outro aluno chamando
-  // a RPC diretamente. Isso não pode ser corrigido apenas no front-end.
   const handleAgendar = async (agendaId) => {
     setProcessandoId(agendaId);
     try {
       const { error } = await supabase.rpc('agendar_aula', { p_aluno_id: aluno.id, p_agenda_id: agendaId });
       if (error) throw error;
-      await queryClient.invalidateQueries(['agenda', diaAtivo]);
-      await queryClient.invalidateQueries(['presencas-mes']);
+      await queryClient.invalidateQueries({ queryKey: alunosKeys.agendaDoDia(diaAtivo, estudioIdAluno) });
+      await queryClient.invalidateQueries({ queryKey: alunosKeys.presencasMes(aluno.id) });
       showToast.success('Vaga garantida!');
     } catch (error) {
       showToast.error(`Ops! Recusado: ${error.message || error.details || 'Erro desconhecido'}`);
@@ -261,11 +264,10 @@ export default function AreaAluno() {
     try {
       const { error } = await supabase.rpc('cancelar_agendamento', { p_aluno_id: aluno.id, p_agenda_id: agendaId });
       if (error) throw error;
-      await queryClient.invalidateQueries(['agenda', diaAtivo]);
-      await queryClient.invalidateQueries(['presencas-mes']);
+      await queryClient.invalidateQueries({ queryKey: alunosKeys.agendaDoDia(diaAtivo, estudioIdAluno) });
+      await queryClient.invalidateQueries({ queryKey: alunosKeys.presencasMes(aluno.id) });
       showToast.success('Agendamento cancelado.');
     } catch (error) {
-      // FIX: idem — mostra a mensagem real em vez de genérica
       console.error('Erro ao cancelar agendamento:', error);
       showToast.error(error.message || 'Erro ao cancelar o agendamento.');
     } finally {

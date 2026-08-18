@@ -1,10 +1,3 @@
-// supabase/functions/_shared/getUserByEmail.ts
-//
-// `admin.auth.admin.getUserByEmail()` NÃO existe na Admin API do supabase-js
-// v2 (GoTrue) — é um método que aparece em exemplos desatualizados na
-// comunidade, mas lança `TypeError: ... is not a function` em runtime Deno.
-// Os únicos métodos oficiais são getUserById, listUsers, createUser etc.
-//
 // Este helper reproduz getUserByEmail de forma segura, paginando listUsers()
 // até encontrar o e-mail (case-insensitive) ou esgotar os resultados.
 // Para bases muito grandes de usuários, o ideal a médio prazo é substituir
@@ -17,7 +10,7 @@ import type { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 type AdminClient = ReturnType<typeof createClient>;
 
 const PAGE_SIZE = 200;
-const MAX_PAGES = 25; // hard cap de segurança (5.000 usuários) — evita loop infinito
+const MAX_PAGES = 25;
 
 export async function getUserByEmail(
   admin: AdminClient,
@@ -39,7 +32,6 @@ export async function getUserByEmail(
     );
     if (encontrado) return { user: { id: encontrado.id }, error: null };
 
-    // Página veio incompleta → não há mais usuários a paginar.
     if (data.users.length < PAGE_SIZE) break;
   }
 

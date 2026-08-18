@@ -184,52 +184,40 @@ export default function ProfessorAlunos() {
     [alunosFiltrados, paginaAtual]
   );
 
-  // FIX P1/P2: busca de última presença agora é feita SOMENTE para os alunos
-  // exibidos na página atual (até PAGE_SIZE ids), em vez de todos os alunos
-  // filtrados. Isso evita:
-  //  (a) buscar presença de gente que nem está sendo exibida;
-  //  (b) o corte silencioso de 1000 linhas do PostgREST quando um professor
-  //      tem muitos alunos com muito histórico — antes a ordenação era global
-  //      e um aluno pouco frequente podia nunca aparecer no corte de 1000.
   useEffect(() => {
-    if (!estudioId || alunosPagina.length === 0) {
-      setUltimaPresencaMap(prev => (Object.keys(prev).length ? {} : prev));
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setPresencaLoading(true);
-      try {
-        const alunoIds = alunosPagina.map(a => a.id);
-        // Uma linha por aluno é suficiente — não precisamos do histórico
-        // completo, então limitamos por aluno via loop pequeno (PAGE_SIZE
-        // é no máximo 10, então isso é barato e elimina o risco de corte).
-        const resultados = await Promise.all(
-          alunoIds.map(id =>
-            supabase
-              .from('presencas')
-              .select('aluno_id, data_checkin')
-              .eq('estudio_id', estudioId) // FIX C1
-              .eq('aluno_id', id)
-              .order('data_checkin', { ascending: false })
-              .limit(1)
-              .maybeSingle()
-          )
-        );
-        if (cancelled) return;
-        const mapa = {};
-        resultados.forEach(({ data }) => {
-          if (data) mapa[data.aluno_id] = data.data_checkin;
-        });
-        setUltimaPresencaMap(mapa);
-      } catch (err) {
-        if (!cancelled) console.error('[ProfessorAlunos] Erro ao carregar presenças:', err);
-      } finally {
-        if (!cancelled) setPresencaLoading(false);
+  if (!estudioId || alunosPagina.length === 0) {
+    setUltimaPresencaMap(prev => (Object.keys(prev).length ? {} : prev));
+    return;
+  }
+  let cancelled = false;
+  (async () => {
+    setPresencaLoading(true);
+    try {
+      const alunoIds = alunosPagina.map(a => a.id);
+
+      const { data, error } = await supabase
+        .from('presencas')
+        .select('aluno_id, data_checkin')
+        .eq('estudio_id', estudioId)
+        .in('aluno_id', alunoIds)
+        .order('data_checkin', { ascending: false });
+
+      if (error) throw error;
+      if (cancelled) return;
+
+      const mapa = {};
+      for (const row of data || []) {
+        if (!(row.aluno_id in mapa)) mapa[row.aluno_id] = row.data_checkin;
       }
-    })();
-    return () => { cancelled = true; };
-  }, [alunosPagina, estudioId]);
+      setUltimaPresencaMap(mapa);
+    } catch (err) {
+      if (!cancelled) console.error('[ProfessorAlunos] Erro ao carregar presenças:', err);
+    } finally {
+      if (!cancelled) setPresencaLoading(false);
+    }
+  })();
+  return () => { cancelled = true; };
+}, [alunosPagina, estudioId]);
 
   const titulo = loading
     ? 'Meus Alunos'

@@ -50,13 +50,11 @@ const INITIAL_FORM_STATE = {
 };
 
 export default function Agenda() {
-  // Fix: `perfil` deixa de vir do Outlet context (canal de prop-drilling
-  // separado, hoje incompleto — ver comentário em useAgendaPage.js sobre
-  // `professorId` nunca chegar por ali) e passa a vir de useAuth(), a
-  // mesma fonte única já usada para `estudioId`. Evita duas fontes de
-  // verdade divergentes decidindo `isAdmin`, que controla todo o acesso
-  // administrativo da tela. `professorId` do Outlet era desestruturado
-  // e nunca usado — removido junto (código morto).
+  // `perfil` e `estudioId` vêm de useAuth(), fonte única de verdade —
+  // evita duas fontes divergentes decidindo `isAdmin`, que controla todo
+  // o acesso administrativo da tela. useAgendaPage.js não expõe mais
+  // `perfil`/`professorId` (removido: era código morto vindo do Outlet
+  // context, nunca consumido aqui).
   const { ...pageState } = useAgendaPage();
   const { perfil, estudioId } = useAuth();
   const isAdmin = perfil === 'admin';

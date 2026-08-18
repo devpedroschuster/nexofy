@@ -30,7 +30,7 @@ serve(async (req: Request) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  // ── ISOLAMENTO MULTI-TENANT ────────────────────────────────────────────────
+  // ISOLAMENTO MULTI-TENANT
   // A service role ignora RLS; todo acesso deve filtrar explicitamente por estudio_id.
   // O payload DEVE conter estudioId — chamadas sem ele são rejeitadas.
   let estudioId: string | null = null
@@ -54,9 +54,8 @@ serve(async (req: Request) => {
   if (anoParam !== null && (anoParam < 2000 || anoParam > 2100)) {
     return response({ erro: 'ano inválido.' }, 400)
   }
-  // ──────────────────────────────────────────────────────────────────────────
 
-  // ── AUTORIZAÇÃO ────────────────────────────────────────────────────────────
+  // AUTORIZAÇÃO
   // verify_jwt = false é necessário para o cron interno (que não envia JWT).
   // Chamadas manuais (vindas do frontend ou de ferramentas externas) DEVEM
   // enviar um header Authorization válido e o usuário precisa ser admin do
@@ -109,7 +108,6 @@ serve(async (req: Request) => {
       return response({ erro: 'Acesso negado.' }, 403)
     }
   }
-  // ──────────────────────────────────────────────────────────────────────────
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,

@@ -1,11 +1,10 @@
 @import "tailwindcss";
 @config "../tailwind.config.js";
 
-/* ─── Midnight Indigo · Design System v2.0 ──────────────────────────────────
+/* Midnight Indigo · Design System v2.0
    Fonte de verdade dos tokens CSS.
    Stack: Vite + React 19 + Tailwind v4 + shadcn/ui + Radix
-   Regra: ZERO valores hardcoded em componentes. Sempre via token.
-────────────────────────────────────────────────────────────────────────────── */
+   Regra: ZERO valores hardcoded em componentes. Sempre via token. */
 
 @plugin "tailwindcss-animate";
 

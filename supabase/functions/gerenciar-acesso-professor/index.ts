@@ -17,45 +17,24 @@ function resp(body: object, status = 200): Response {
 }
 
 /**
- * Cria um auth user sem senha e envia magic link de primeiro acesso.
+ * Cria um auth user sem senha e ENVIA o convite por e-mail via
+ * inviteUserByEmail (diferente de generateLink, este método efetivamente
+ * dispara o e-mail através do provedor SMTP configurado no projeto).
  * Retorna o auth_id do usuário criado.
- *
- * Uso: chamado nas ações 'criar' e 'trocar_email' quando o e-mail não existe.
  */
 async function criarUsuarioSemSenha(
   admin: ReturnType<typeof createClient>,
   emailNormalizado: string,
   nome: string,
 ): Promise<string> {
-  // 1. Cria o usuário sem password — impossibilita login com senha até ele definir uma.
-  const { data, error } = await admin.auth.admin.createUser({
-    email: emailNormalizado,
-    email_confirm: true,          // pula confirmação — acesso via magic link
-    user_metadata: { nome, role: 'professor' },
-    // Sem campo `password` → conta nasce bloqueada para signInWithPassword
+
+  const { data, error } = await admin.auth.admin.inviteUserByEmail(emailNormalizado, {
+    data: { nome, role: 'professor' },
   });
   if (error) throw error;
 
-  const novoAuthId = data.user.id;
-
-  // 2. Envia magic link de primeiro acesso.
-  //    O professor clica, é autenticado automaticamente e cai no fluxo
-  //    de /redefinir-senha (detectado via primeiro_acesso = true na tabela professores).
-  const { error: linkError } = await admin.auth.admin.generateLink({
-    type: 'magiclink',
-    email: emailNormalizado,
-  });
-
-  // Não é fatal — o admin pode reenviar o convite manualmente depois.
-  if (linkError) {
-    console.warn(
-      `[gerenciar-acesso-professor] Falha ao gerar magic link para ${emailNormalizado}: ${linkError.message}`,
-    );
-  } else {
-    console.log(`[gerenciar-acesso-professor] Magic link enviado para ${emailNormalizado}`);
-  }
-
-  return novoAuthId;
+  console.log(`[gerenciar-acesso-professor] Convite enviado para ${emailNormalizado}`);
+  return data.user.id;
 }
 
 serve(async (req: Request) => {
@@ -107,104 +86,104 @@ serve(async (req: Request) => {
       return resp({ error: 'Acesso negado.' }, 403);
     }
 
-    // ── CRIAR ────────────────────────────────────────────────────────────────
-    if (acao === 'criar') {
-      if (!email || !professor_id) return resp({ error: 'email e professor_id são obrigatórios' }, 400);
+    // CRIAR
 
-      const emailNormalizado = email.trim().toLowerCase();
+if (acao === 'criar') {
+  if (!email || !professor_id) return resp({ error: 'email e professor_id são obrigatórios' }, 400);
 
-      // Verifica se já existe um auth user com esse email.
-      // ANTES: await admin.auth.admin.getUserByEmail(emailNormalizado)
-      // — método inexistente na Admin API do supabase-js v2, lançava
-      // TypeError em runtime Deno. Substituído pelo helper compartilhado.
-      const { user: existente, error: getUserErr } = await getUserByEmail(admin, emailNormalizado);
-      if (getUserErr) throw getUserErr;
+  const emailNormalizado = email.trim().toLowerCase();
+  const { user: existente, error: getUserErr } = await getUserByEmail(admin, emailNormalizado);
+  if (getUserErr) throw getUserErr;
 
-      let novoAuthId: string;
-      let reutilizado = false;
+  let novoAuthId: string;
+  let reutilizado = false;
+  let authCriadoNestaChamada = false;
 
-      if (existente) {
-        // Usuário já existe: apenas vincula, não cria nem envia link
-        novoAuthId = existente.id;
-        reutilizado = true;
-      } else {
-        // Cria sem senha + envia magic link de primeiro acesso
-        novoAuthId = await criarUsuarioSemSenha(admin, emailNormalizado, nome);
-      }
+  if (existente) {
+    novoAuthId = existente.id;
+    reutilizado = true;
+  } else {
+    novoAuthId = await criarUsuarioSemSenha(admin, emailNormalizado, nome);
+    authCriadoNestaChamada = true;
+  }
 
-      // Atualiza professores: auth_id, email e primeiro_acesso = true
-      const { error: upErr } = await admin
-        .from('professores')
-        .update({
-          auth_id: novoAuthId,
-          email: emailNormalizado,
-          primeiro_acesso: !reutilizado, // só marca primeiro_acesso para usuários novos
-        })
-        .eq('id', professor_id)
-        .eq('estudio_id', estudio_id);  // ← isolamento: garante que o professor pertence ao estúdio
-      if (upErr) throw upErr;
+  try {
+    const { error: upErr } = await admin
+      .from('professores')
+      .update({
+        auth_id: novoAuthId,
+        email: emailNormalizado,
+        primeiro_acesso: !reutilizado,
+      })
+      .eq('id', professor_id)
+      .eq('estudio_id', estudio_id);
+    if (upErr) throw upErr;
 
-      // Vincula professor ao estúdio na tabela de membros (upsert para idempotência)
-      const { error: memErr } = await admin
-        .from('estudio_membros')
-        .upsert(
-          {
-            estudio_id,
-            user_id: novoAuthId,
-            role: 'professor',
-          },
-          { onConflict: 'estudio_id,user_id' }  // evita duplicatas em chamadas repetidas
-        );
-      if (memErr) throw memErr;
-
-      return resp({ auth_id: novoAuthId, reutilizado });
+    const { error: memErr } = await admin
+      .from('estudio_membros')
+      .upsert(
+        { estudio_id, user_id: novoAuthId, role: 'professor' },
+        { onConflict: 'estudio_id,user_id' },
+      );
+    if (memErr) throw memErr;
+  } catch (err) {
+    if (authCriadoNestaChamada) {
+      await admin.auth.admin.deleteUser(novoAuthId).catch((delErr) =>
+        console.error(`[gerenciar-acesso-professor] Falha ao reverter auth user órfão ${novoAuthId}:`, delErr),
+      );
     }
+    throw err;
+  }
 
-    // ── REMOVER ───────────────────────────────────────────────────────────────
+  return resp({ auth_id: novoAuthId, reutilizado });
+}
+
+    // REMOVER
     if (acao === 'remover') {
-      if (!auth_id || !professor_id) return resp({ error: 'auth_id e professor_id são obrigatórios' }, 400);
+  if (!auth_id || !professor_id) return resp({ error: 'auth_id e professor_id são obrigatórios' }, 400);
 
-      // Remove o vínculo do estúdio antes de qualquer deleção de usuário
-      const { error: memErr } = await admin
-        .from('estudio_membros')
-        .delete()
-        .eq('estudio_id', estudio_id)  // ← isolamento: remove só do estúdio correto
-        .eq('user_id', auth_id);
-      if (memErr) throw memErr;
+  const { error: upErr } = await admin
+    .from('professores')
+    .update({ auth_id: null, email: null, primeiro_acesso: false })
+    .eq('id', professor_id)
+    .eq('estudio_id', estudio_id);
+  if (upErr) throw upErr;
 
-      const { data: aluno } = await admin
-        .from('alunos')
-        .select('id')
-        .eq('auth_id', auth_id)
-        .maybeSingle();
+  const { error: memErr } = await admin
+    .from('estudio_membros')
+    .delete()
+    .eq('estudio_id', estudio_id)
+    .eq('user_id', auth_id);
+  if (memErr) throw memErr;
 
-      let userDeletado = false;
-      if (!aluno) {
-        // Verifica se o usuário ainda tem vínculo com algum outro estúdio antes de deletar
-        const { data: outrosVinculos } = await admin
-          .from('estudio_membros')
-          .select('id')
-          .eq('user_id', auth_id)
-          .limit(1);
+  const { data: aluno } = await admin
+    .from('alunos')
+    .select('id')
+    .eq('auth_id', auth_id)
+    .maybeSingle();
 
-        if (!outrosVinculos || outrosVinculos.length === 0) {
-          const { error: delErr } = await admin.auth.admin.deleteUser(auth_id);
-          if (delErr && !delErr.message.includes('User not found')) throw delErr;
-          userDeletado = true;
-        }
+  let userDeletado = false;
+  if (!aluno) {
+    const { data: outrosVinculos } = await admin
+      .from('estudio_membros')
+      .select('id')
+      .eq('user_id', auth_id)
+      .limit(1);
+
+    if (!outrosVinculos || outrosVinculos.length === 0) {
+      const { error: delErr } = await admin.auth.admin.deleteUser(auth_id);
+      if (delErr && !delErr.message.includes('User not found')) {
+        console.warn(`[gerenciar-acesso-professor] Falha ao deletar auth ${auth_id} após remoção:`, delErr.message);
+      } else {
+        userDeletado = true;
       }
-
-      const { error: upErr } = await admin
-        .from('professores')
-        .update({ auth_id: null, email: null, primeiro_acesso: false })
-        .eq('id', professor_id)
-        .eq('estudio_id', estudio_id);  // ← isolamento
-      if (upErr) throw upErr;
-
-      return resp({ removido: true, user_deletado: userDeletado });
     }
+  }
 
-    // ── TROCAR EMAIL ──────────────────────────────────────────────────────────
+  return resp({ removido: true, user_deletado: userDeletado });
+}
+
+    // TROCAR EMAIL
     if (acao === 'trocar_email') {
       if (!auth_id || !email || !professor_id) {
         return resp({ error: 'auth_id, email e professor_id são obrigatórios' }, 400);

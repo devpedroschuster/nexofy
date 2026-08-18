@@ -16,6 +16,7 @@ import { useBuscaCep } from '../hooks/useBuscaCep';
 import { useImpersonation } from '../context/ImpersonationContext';
 import { useCamposDinamicos } from '../hooks/useCamposDinamicos';
 import { construirSchemaMetadata } from '../lib/camposDinamicosValidation';
+import { alunosKeys } from '../lib/alunosQueryKeys';
 import { TableSkeleton } from '../components/shared/Loading';
 import { showToast } from '../components/shared/Toast';
 import ModalRenovarPlano from '../components/ModalRenovarPlano';
@@ -175,7 +176,7 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
         cidade:             form.cidade.trim()             || null,
         metadata:           metadataForm,
       }, estudioId);
-      queryClient.invalidateQueries(['aluno', alunoId]);
+      queryClient.invalidateQueries({ queryKey: alunosKeys.perfil(alunoId, estudioId) });
       showToast.success('Cadastro atualizado com sucesso!');
       onClose();
     } catch (err) {
@@ -540,7 +541,7 @@ function AbaAnamnese({ aluno, alunoId, estudioId, queryClient, observacoesMedica
     setSalvandoLink(true);
     try {
       await alunosService.atualizar(alunoId, { link_anamnese: novoLink.trim() || null }, estudioId);
-      queryClient.invalidateQueries(['aluno', alunoId]);
+      queryClient.invalidateQueries({ queryKey: alunosKeys.perfil(alunoId, estudioId) });
       showToast.success('Link da anamnese atualizado!');
       setEditandoLink(false);
     } catch (err) {
@@ -550,6 +551,7 @@ function AbaAnamnese({ aluno, alunoId, estudioId, queryClient, observacoesMedica
       setSalvandoLink(false);
     }
   };
+
   const handleSalvarObservacoesMedicas = async () => {
     if (salvandoMedico) return;
     setSalvandoMedico(true);
@@ -802,7 +804,7 @@ function AbaModalidades({ aluno, alunoId, estudioId, queryClient }) {
       await alunosService.atualizar(alunoId, {
         modalidades_selecionadas: modalidadesFinais,
       }, estudioId);
-      queryClient.invalidateQueries(['aluno', alunoId]);
+      queryClient.invalidateQueries({ queryKey: alunosKeys.perfil(alunoId, estudioId) });
       showToast.success('Modalidades atualizadas com sucesso!');
     } catch (err) {
       console.error('[PerfilAluno] Erro ao salvar modalidades:', err);
@@ -1255,18 +1257,18 @@ export default function PerfilAluno() {
   const [filtroFim,    setFiltroFim]    = useState(fmt(hoje));
 
   const { data: aluno, isLoading: loadingAluno } = useQuery({
-    queryKey: ['aluno', id, idEfetivo],
+    queryKey: alunosKeys.perfil(id, idEfetivo),
     queryFn: () => alunosService.buscarPerfilCompleto(id, idEfetivo),
     enabled: !!idEfetivo,
     placeholderData: keepPreviousData, // evita skeleton completo ao trocar de aluno
   });
-  const { data: planos } = useQuery({
-    queryKey: ['aluno-planos', id, idEfetivo],
+    const { data: planos } = useQuery({
+    queryKey: alunosKeys.planos(id, idEfetivo),
     queryFn: () => alunosService.buscarHistoricoPlanos(id, idEfetivo),
     enabled: !!aluno && !!idEfetivo,
   });
   const { data: frequencia } = useQuery({
-    queryKey: ['aluno-frequencia', id, idEfetivo],
+    queryKey: alunosKeys.frequencia(id, idEfetivo),
     queryFn: () => alunosService.buscarHistoricoFrequencia(id, idEfetivo),
     enabled: !!aluno && !!idEfetivo,
   });
@@ -1279,9 +1281,9 @@ export default function PerfilAluno() {
     }
   }, [aluno?.observacoes_medicas]);
 
-  const handleRenovacaoSucesso = () => {
-    queryClient.invalidateQueries({ queryKey: ['aluno', id, idEfetivo] });
-    queryClient.invalidateQueries({ queryKey: ['aluno-planos', id, idEfetivo] });
+  const aoRenovarComSucesso = () => {
+    queryClient.invalidateQueries({ queryKey: alunosKeys.perfil(id, idEfetivo) });
+    queryClient.invalidateQueries({ queryKey: alunosKeys.planos(id, idEfetivo) });
   };
  
   if (loadingAluno) return <TableSkeleton />;

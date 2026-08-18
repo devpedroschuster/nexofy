@@ -1,0 +1,8 @@
+[functions.lembretes-aula]
+verify_jwt = false  # Autorização validada dentro da função (x-cron-secret ou JWT + checagem de admin) —
+                    # ver comentário "AUTORIZAÇÃO" em index.ts.
+
+[[cron]]
+name = "lembretes-diarios"
+schedule = "0 12 * * *"   # Todos os dias às 12h (horário do servidor) — ajustar por estúdio se necessário
+command = "POST https://<PROJECT_REF>.supabase.co/functions/v1/lembretes-aula -H 'x-cron-secret: ${CRON_SECRET}' -H 'Content-Type: application/json' -d '{\"estudioId\": \"<ESTUDIO_ID>\"}'"

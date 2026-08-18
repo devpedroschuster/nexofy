@@ -48,16 +48,6 @@ function calcularStatusVencimento(dataFim) {
   return              { tone: 'success',      label: dataFormatada, dias };
 }
 
-// ---------------------------------------------------------------------
-// Renderers das 4 colunas fixas de negócio de Alunos (item 3 do plano
-// multi-segmento — tabela configurável). Cada função recebe a linha
-// `aluno` inteira (não um valor escalar) porque essas colunas são
-// compostas — avatar+nome+email, badges, cálculo de vencimento — e
-// mantêm exatamente o mesmo JSX/lógica que já existia inline na tabela,
-// só extraído para poder ser despachado pelo column_key configurado em
-// tabela_colunas_config. NENHUMA lógica de negócio foi alterada aqui.
-// ---------------------------------------------------------------------
-
 function CelulaAlunoFixa({ aluno, navigate }) {
   return (
     <div

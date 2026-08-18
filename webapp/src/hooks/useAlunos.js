@@ -4,6 +4,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { alunosService } from '../services/alunosService';
 import { showToast } from '../components/shared/Toast';
 import { useAuth } from './useAuth';
+import { alunosKeys } from '../lib/alunosQueryKeys';
 
 export const PAGE_SIZE = 25;
 
@@ -26,15 +27,15 @@ export function useAlunos(filtros = {}, pagina = 1, estudioIdOverride) {
   const estudioId = estudioIdOverride ?? estudioIdAuth;
 
   const query = useQuery({
-    queryKey: ['alunos', estudioId, filtros, pagina],
+    // FIX: key vem do mesmo helper usado por invalidateQueries em toda
+    // a aplicação — impossível a chave divergir entre leitura e invalidação.
+    queryKey: alunosKeys.lista(estudioId, filtros, pagina),
     queryFn: () => alunosService.listar(filtros, { pagina, tamanho: PAGE_SIZE }, estudioId),
     enabled: !!estudioId,
     placeholderData: keepPreviousData,
     staleTime: 1000 * 60 * 5,
   });
 
-  // Notifica o erro uma única vez por falha definitiva (após esgotar os
-  // retries do QueryClient), não a cada tentativa individual.
   useEffect(() => {
     if (query.isError) {
       showToast.error('Erro ao carregar lista de alunos');

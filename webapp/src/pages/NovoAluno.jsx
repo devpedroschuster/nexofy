@@ -20,6 +20,7 @@ import { useImpersonation } from "../context/ImpersonationContext";
 import { useBuscaCep } from '../hooks/useBuscaCep';
 import { useCamposDinamicos } from '../hooks/useCamposDinamicos';
 import { construirSchemaMetadata } from '../lib/camposDinamicosValidation';
+import { alunosKeys } from '../lib/alunosQueryKeys';
 import { showToast } from '../components/shared/Toast';
 import Modal from '../components/ui/Modal';
 import { CamposDinamicosGrid } from '../components/shared/CampoDinamicoInput';
@@ -627,7 +628,10 @@ export default function NovoAluno() {
           ...payloadBase, nome_completo: data.nome_completo,
         }, idEfetivo);
         showToast.success('Cadastro atualizado com sucesso!');
-        await queryClient.invalidateQueries({ queryKey: ['alunos'] });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: alunosKeys.listaTodas(idEfetivo) }),
+          queryClient.invalidateQueries({ queryKey: alunosKeys.perfil(alunoParaEditar.id, idEfetivo) }),
+        ]);
         navigate('/alunos');
         return;
       }
@@ -698,7 +702,7 @@ export default function NovoAluno() {
       // FIX: sem .eq('estudio_id', idEfetivo) qualquer id de "presenca" informado
       // via location.state poderia ser atualizado, mesmo de outro tenant (IDOR).
       // O erro também deixa de ser ignorado silenciosamente.
-      if (leadParaConversao?.id) {
+       if (leadParaConversao?.id) {
         const payload = { status_conversao: 'convertido' };
         if (novoAlunoId) payload.aluno_id = novoAlunoId;
         const { error: errConversao } = await supabase
@@ -707,12 +711,15 @@ export default function NovoAluno() {
         if (errConversao) console.error('Erro ao converter lead:', errConversao);
       }
 
-      await queryClient.invalidateQueries({ queryKey: ['alunos', 'professores', 'presencas'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: alunosKeys.listaTodas(idEfetivo) }),
+        queryClient.invalidateQueries({ queryKey: alunosKeys.professores() }),
+        queryClient.invalidateQueries({ queryKey: alunosKeys.presencas() }),
+      ]);
 
-      if (profExistente) {
+       if (profExistente) {
         navigate('/alunos');
       } else {
-        // Advance to Phase 2 – let admin decide whether to create login now or later
         setAlunoSalvoId(novoAlunoId);
         setAlunoSalvoEmail(data.email.trim());
         setAlunoSalvoNome(data.nome_completo);
