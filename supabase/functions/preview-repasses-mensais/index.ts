@@ -91,7 +91,6 @@ serve(async (req: Request) => {
     if (!estudioId) {
       return response({ error: 'estudioId é obrigatório no payload.' }, 400);
     }
-    // ────────────────────────────────────────────────────────────────────────
 
     if (!mes || !ano || mes < 1 || mes > 12) {
       return response({ error: 'Parâmetros inválidos. Informe mes (1–12) e ano.' }, 400);
@@ -139,7 +138,6 @@ serve(async (req: Request) => {
     if (!ehSuperAdmin && !ehAdminDoEstudio) {
       return response({ error: 'Acesso negado. Apenas admins do estúdio podem ver o preview de repasses.' }, 403);
     }
-    // ────────────────────────────────────────────────────────────────────────
 
     const mesStr = String(mes).padStart(2, '0');
     const dataReferencia = `${ano}-${mesStr}-01`;

@@ -1,6 +1,12 @@
 import React from 'react';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 
+// Chave de sessão usada para garantir no máximo UMA tentativa automática de
+// reload por falha de chunk. Sem isso, um deploy com cache de CDN
+// inconsistente pode gerar um loop infinito de reload (bug crítico
+// encontrado na versão anterior).
+const CHUNK_RELOAD_FLAG = 'nexofy:chunk-reload-attempted';
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -17,9 +23,19 @@ class ErrorBoundary extends React.Component {
     const isChunkError = /Failed to fetch dynamically imported module|Loading chunk .* failed/i.test(
       error?.message || ''
     );
+
     if (isChunkError) {
-      window.location.reload();
-      return;
+      const jaTentou = window.sessionStorage.getItem(CHUNK_RELOAD_FLAG);
+      if (!jaTentou) {
+        // Só recarrega automaticamente na PRIMEIRA vez nesta sessão.
+        // Se falhar de novo após o reload, cai no fallback normal de UI
+        // em vez de continuar recarregando indefinidamente.
+        window.sessionStorage.setItem(CHUNK_RELOAD_FLAG, '1');
+        window.location.reload();
+        return;
+      }
+      // Segunda falha de chunk na mesma sessão: não tenta mais sozinho,
+      // mostra a tela de erro normalmente para o usuário decidir.
     }
 
     if (!import.meta.env.DEV && typeof window.Sentry?.captureException === 'function') {
@@ -28,6 +44,10 @@ class ErrorBoundary extends React.Component {
   }
 
   handleReset = () => {
+    // Reset manual limpa a flag: se o usuário clicar em "Tentar novamente"
+    // e o problema já tiver sido corrigido (novo deploy), um futuro erro
+    // de chunk pode voltar a tentar reload automático uma vez.
+    window.sessionStorage.removeItem(CHUNK_RELOAD_FLAG);
     this.setState({ hasError: false, error: null });
   };
 

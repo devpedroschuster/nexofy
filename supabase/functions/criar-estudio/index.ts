@@ -1,5 +1,3 @@
-// supabase/functions/criar-estudio/index.ts
-//
 // Onboarding completo de um novo estúdio no sistema Nexofy.
 //
 // Responsabilidades desta Edge Function:
@@ -18,6 +16,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { getUserByEmail } from '../_shared/getUserByEmail.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -43,7 +42,7 @@ serve(async (req: Request) => {
   // Cliente admin (service role) — ignora RLS, usado para escritas e Auth API
   const admin = createClient(supabaseUrl, serviceKey);
 
-  // ── 1. AUTENTICAÇÃO E AUTORIZAÇÃO ─────────────────────────────────────────
+  // 1. AUTENTICAÇÃO E AUTORIZAÇÃO
   const authHeader = req.headers.get('Authorization') ?? '';
   if (!authHeader.startsWith('Bearer ')) {
     return resp({ error: 'Cabeçalho Authorization ausente ou inválido.' }, 401);
@@ -78,7 +77,7 @@ serve(async (req: Request) => {
     return resp({ error: 'Acesso negado. Apenas super_admins podem criar estúdios.' }, 403);
   }
 
-  // ── 2. VALIDAÇÃO DO PAYLOAD ───────────────────────────────────────────────
+  // VALIDAÇÃO DO PAYLOAD
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -109,7 +108,7 @@ serve(async (req: Request) => {
     }, 400);
   }
 
-  // ── 3. UNICIDADE DO SLUG ──────────────────────────────────────────────────
+  // UNICIDADE DO SLUG
   const { data: slugExistente } = await admin
     .from('estudios')
     .select('id')
@@ -120,24 +119,18 @@ serve(async (req: Request) => {
     return resp({ error: `O slug "${slugNorm}" já está em uso. Escolha outro.` }, 409);
   }
 
-  // ── 4. RESOLVER AUTH USER DO ADMIN ────────────────────────────────────────
-  // Esta etapa precisa ficar na Edge Function porque createUser é uma API HTTP
-  // do GoTrue — não existe equivalente SQL acessível de dentro de uma função
-  // PL/pgSQL.
-  //
-  // Se falhar aqui, nenhuma escrita no banco ainda ocorreu → sem efeito colateral.
-  const { data: { user: authExistente }, error: getUserErr } =
-   await admin.auth.admin.getUserByEmail(emailNorm);
- if (getUserErr && getUserErr.status !== 404) {
-   return resp({ error: `Falha ao consultar usuário: ${getUserErr.message}` }, 500);
- }
-  let adminAuthId: string;
+  // 4. RESOLVER AUTH USER DO ADMIN
 
-  if (authExistente) {
-    // Email já existe: reutiliza sem resetar senha
-    adminAuthId = authExistente.id;
-    console.log(`[criar-estudio] Email já existia no auth, reutilizando: ${adminAuthId}`);
-  } else {
+  const { user: authExistente, error: getUserErr } = await getUserByEmail(admin, emailNorm);
+if (getUserErr) {
+  return resp({ error: `Falha ao consultar usuário: ${getUserErr.message}` }, 500);
+}
+let adminAuthId: string;
+ 
+if (authExistente) {
+  adminAuthId = authExistente.id;
+  console.log(`[criar-estudio] Email já existia no auth, reutilizando: ${adminAuthId}`);
+} else {
     // Cria usuário sem senha — admin acessa via link de recovery
     const { data: authData, error: errAuth } = await admin.auth.admin.createUser({
       email: emailNorm,
@@ -153,7 +146,7 @@ serve(async (req: Request) => {
     console.log(`[criar-estudio] Auth user criado: ${adminAuthId}`);
   }
 
-  // ── 5. ESCRITAS NO BANCO — TRANSAÇÃO ATÔMICA VIA RPC ─────────────────────
+  // ESCRITAS NO BANCO — TRANSAÇÃO ATÔMICA VIA RPC
   // estudios + profiles + estudio_membros + configuracoes_repasse em uma
   // única transação Postgres. Se qualquer INSERT falhar, o Postgres desfaz
   // tudo automaticamente — sem rollback manual.
@@ -182,11 +175,10 @@ serve(async (req: Request) => {
     return resp({ error: rpcErr.message }, 500);
   }
 
-  // rpc() com RETURNS TABLE retorna um array; pegamos a primeira (e única) linha
   const resultado = Array.isArray(rpcData) ? rpcData[0] : rpcData;
 
-  // ── 6. ENVIAR LINK DE RECOVERY ────────────────────────────────────────────
-  // Só para admins recém-criados. Não é fatal — super_admin pode reenviar depois.
+  // ENVIAR LINK DE RECOVERY
+
   if (!authExistente) {
     const { error: errReset } = await admin.auth.admin.generateLink({
       type: 'recovery',
@@ -200,7 +192,7 @@ serve(async (req: Request) => {
     }
   }
 
-  // ── SUCESSO ───────────────────────────────────────────────────────────────
+  // SUCESSO
   return resp({
     sucesso: true,
     estudio: {

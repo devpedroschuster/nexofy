@@ -7,9 +7,10 @@ import {
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
 import { financeiroService } from '../services/financeiroService';
+import { gerarRepassesDaMensalidade } from '../services/repasseService';
 import { useFinanceiro } from '../hooks/useFinanceiro';
 import { useAuth } from '../hooks/useAuth';
-import { useImpersonation } from '../context/ImpersonationContext'; // FIX: impersonation
+import { useImpersonation } from '../context/ImpersonationContext';
 import { useTabelaColunas } from '../hooks/useTabelaColunas';
 import { TABLE_COLUMNS_ESTATICO } from '../lib/tabelaColunas';
 import SelectFormaPagamento from '../components/SelectFormaPagamento';
@@ -34,7 +35,7 @@ import Badge from '../components/ui/Badge';
  * @returns {{ tipo: 'pago'|'pendente'|'atrasado', diasAtraso: number }}
  */
 
-/** Data local (não UTC) no formato YYYY-MM-DD, para evitar bug de fuso horário. */
+/** Data local (não UTC) no formato YYYY-MM-DD. */
 function hojeLocal() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -52,17 +53,6 @@ function calcularStatusReal(item) {
 }
 
 const ORDEM_STATUS = { atrasado: 0, pendente: 1, pago: 2 };
-// ──────────────────────────────────────────────────────────────────────────────
-
-// ---------------------------------------------------------------------
-// Renderers das 6 colunas fixas de negócio de Financeiro (item 3 do
-// plano multi-segmento — tabela configurável). Cada função recebe a
-// linha `item` (mensalidade) inteira — mesmo JSX/lógica que já existia
-// inline na tabela, só extraído para ser despachado pelo column_key
-// configurado em tabela_colunas_config. NENHUMA lógica de negócio foi
-// alterada aqui. Financeiro não tem colunas dinâmicas (catálogo 100%
-// estático — ver TABLE_COLUMNS_ESTATICO.financeiro em lib/tabelaColunas.js).
-// ---------------------------------------------------------------------
 
 function CelulaFinAlunoFixa({ item }) {
   return (
@@ -318,13 +308,22 @@ export default function Financeiro() {
     }
     setGerando(true);
     try {
-      await financeiroService.gerarMensalidades(filtros.mes, filtros.ano, idEfetivo); // FIX: idEfetivo
-      showToast.success('Mensalidades criadas com sucesso!');
-      refetch();
+      const { data, error } = await supabase.functions.invoke('gerar-mensalidades', {
+        body: { estudioId: idEfetivo, mes: filtros.mes, ano: filtros.ano },
+      });
+      if (error) throw error;
+      if (data?.erro) throw new Error(data.erro);
+
+      showToast.success(
+        data?.geradas > 0
+          ? `${data.geradas} mensalidade(s) gerada(s) com sucesso!`
+          : (data?.message || 'Mensalidades já estavam geradas para este mês.')
+      );
       modalGerarMensalidades.fechar();
-    } catch (error) {
-      console.error('[Financeiro] handleGerarMensalidades:', error); // FIX: log real do erro
-      showToast.error('Erro ao criar mensalidades');
+      refetch();
+          } catch (error) {
+      console.error('[Financeiro] handleGerarMensalidades:', error);
+      showToast.error(error.message || 'Erro ao gerar mensalidades');
     } finally {
       setGerando(false);
     }
@@ -374,6 +373,7 @@ export default function Financeiro() {
     }
     setSalvandoEdicao(true);
     try {
+      const statusAnterior = lancamentoEditando.status;
       const payload = {
         data_vencimento: formEdicao.data_vencimento,
         status: formEdicao.status,
@@ -387,8 +387,7 @@ export default function Financeiro() {
         payload.forma_pagamento = null;
         payload.data_pagamento = null;
       }
-      // FIX: .eq('estudio_id', idEfetivo) — sem isso, o update confiava só na RLS (IDOR)
-      // FIX: .select().maybeSingle() para detectar 0 linhas afetadas (tentativa de IDOR ou id inexistente)
+
       const { data, error } = await supabase
         .from('mensalidades')
         .update(payload)
@@ -398,6 +397,19 @@ export default function Financeiro() {
         .maybeSingle();
       if (error) throw error;
       if (!data) throw new Error('Lançamento não encontrado neste estúdio.');
+
+      if (formEdicao.status === 'pago' && statusAnterior !== 'pago') {
+        try {
+          await gerarRepassesDaMensalidade(lancamentoEditando.id, idEfetivo);
+        } catch (repasseError) {
+          console.warn('[Financeiro] Repasse não gerado automaticamente na edição.', repasseError);
+          setTimeout(
+            () => showToast.warning('Lançamento atualizado, mas o repasse não foi gerado automaticamente. Verifique manualmente.'),
+            600
+          );
+        }
+      }
+
       showToast.success('Lançamento atualizado com sucesso!');
       refetch();
       modalEditar.fechar();

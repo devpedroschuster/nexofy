@@ -52,10 +52,10 @@ export const dreService = {
 
       supabase
         .from('repasses_lancamentos')
-        .select('id, valor, professor_id, professores(nome), created_at')
+        .select('id, valor, professor_id, professores(nome), data_referencia')
         .eq('estudio_id', estudioId)
-        .gte('created_at', `${dataInicio}T00:00:00`)
-        .lte('created_at', `${dataFim}T23:59:59`),
+        .gte('data_referencia', dataInicio)
+        .lte('data_referencia', dataFim),
 
       supabase
         .from('alunos')
@@ -188,10 +188,10 @@ export const dreService = {
 
       supabase
         .from('repasses_lancamentos')
-        .select('valor, created_at')
+        .select('valor, data_referencia')
         .eq('estudio_id', estudioId)
-        .gte('created_at', `${dataLimite}T00:00:00`)
-        .lte('created_at', `${dataFim}T23:59:59`),
+        .gte('data_referencia', dataLimite)
+        .lte('data_referencia', dataFim),
     ]);
 
     if (e1) throw e1;
@@ -225,9 +225,9 @@ export const dreService = {
     });
 
     (repasses || []).forEach(r => {
-      const key = r.created_at?.substring(0, 7);
+      const key = r.data_referencia?.substring(0, 7);
       if (!key) return;
-      garantir(key, labelMes(r.created_at));
+      garantir(key, labelMes(r.data_referencia));
       mapa[key].comissao += Number(r.valor || 0);
     });
 

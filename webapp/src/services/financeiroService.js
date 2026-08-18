@@ -54,12 +54,14 @@ export const financeiroService = {
     tresMesesAtras.setMonth(tresMesesAtras.getMonth() - 3);
     const filtroData = tresMesesAtras.toISOString().split('T')[0];
 
-    const { data: ultimasMensalidades } = await supabase
+    const { data: ultimasMensalidades, error: errUltimas } = await supabase
       .from('mensalidades')
       .select('aluno_id, data_vencimento')
       .eq('estudio_id', estudioId)
       .gte('data_vencimento', filtroData)
       .order('data_vencimento', { ascending: false });
+
+  if (errUltimas) throw errUltimas;
 
     const mapaUltimasDatas = new Map();
     ultimasMensalidades?.forEach(m => {

@@ -1,5 +1,3 @@
-// services/tabelaColunasService.js
-//
 // Service layer para `tabela_colunas_config`. Segue o padrão já auditado
 // no restante da Nexofy: todo `estudioId` recebido aqui deve ser o
 // `idEfetivo` já resolvido pelo chamador (`estudioAtivo?.id ?? estudioId`
@@ -217,20 +215,14 @@ export async function reorderTabelaColunas(estudioId, orderedIds) {
   if (orderedIds.some((id) => id.startsWith('pending-'))) {
     throw new Error('Existem colunas ainda não inicializadas. Recarregue a página.');
   }
-
-  const updates = orderedIds.map((id, index) =>
-    supabase
-      .from('tabela_colunas_config')
-      .update({ display_order: index + 1 })
-      .eq('id', id)
-      .eq('estudio_id', estudioId)
-  );
-
-  const results = await Promise.all(updates);
-  const failed = results.find((r) => r.error);
-
-  if (failed) {
-    console.error('Erro ao reordenar colunas:', failed.error);
-    throw failed.error;
+ 
+  const { error } = await supabase.rpc('reorder_tabela_colunas', {
+    p_estudio_id: estudioId,
+    p_ids: orderedIds,
+  });
+ 
+  if (error) {
+    console.error('Erro ao reordenar colunas:', error);
+    throw error;
   }
 }

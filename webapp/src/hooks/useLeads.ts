@@ -157,18 +157,12 @@ export function useResumoMensalLeads() {
   });
 }
 
-/**
- * Igual ao resumo mensal, mas considerando apenas leads pendentes.
- * Usado para alimentar o seletor de meses na Visão Ação (organização
- * de leads em aberto por período de realização da experimental).
- */
 export function useResumoMensalLeadsPendentes() {
   const { estudioId } = useAuth();
 
   return useQuery<ResumoMensal[]>({
     queryKey: ['leads', estudioId, 'resumo-mensal-pendentes'],
     queryFn: async () => {
-      // FIX (Bug #4): idem acima.
       const data = await leadsService.listarResumoLeadsPendentes(estudioId) as unknown as ResumoLead[];
       return agruparPorMes(data);
     },
@@ -180,45 +174,47 @@ export function useResumoMensalLeadsPendentes() {
 export function useAtualizarStatusLead() {
   const queryClient = useQueryClient();
   const { estudioId } = useAuth();
-
+ 
   return useMutation({
     mutationFn: async ({ id, status }: { id: string, status: 'convertido' | 'perdido' | 'pendente' }) => {
-      // FIX (Bug #1): estudioId nunca era enviado ao service, então o
-      // UPDATE não batia com nenhuma linha (0 rows afetadas, sem erro) —
-      // falha silenciosa. Agora validamos e passamos o 3º argumento.
       if (!estudioId) throw new Error('Estúdio não identificado. Recarregue a página.');
       return await leadsService.atualizarStatusLead(id, status, estudioId);
     },
     onMutate: async ({ id, status }) => {
       await queryClient.cancelQueries({ queryKey: ['leads', estudioId] });
-
-      const previousPendentes = queryClient.getQueryData<Lead[]>(['leads', estudioId, 'pendentes']);
-      if (previousPendentes) {
-        queryClient.setQueryData<Lead[]>(['leads', estudioId, 'pendentes'], old => {
-           if (!old) return [];
-           if (status !== 'pendente') return old.filter(l => l.id !== id);
-           return old.map(l => l.id === id ? { ...l, status_conversao: status } : l);
-        });
-      }
-
-      const previousHistorico = queryClient.getQueryData<InfiniteData<Lead[]>>(['leads', estudioId, 'historico']);
-      if (previousHistorico) {
-        queryClient.setQueryData<InfiniteData<Lead[]>>(['leads', estudioId, 'historico'], (oldData: InfiniteData<Lead[]> | undefined) => {
-          if (!oldData) return oldData;
-          return {
-            ...oldData,
-            pages: oldData.pages.map((page) =>
-              page.map((l) => l.id === id ? { ...l, status_conversao: status } : l)
-            )
-          };
-        });
-      }
-
+ 
+      const previousPendentes = queryClient.getQueriesData<Lead[]>({
+        queryKey: ['leads', estudioId, 'pendentes'], exact: false,
+      });
+      const previousHistorico = queryClient.getQueriesData<InfiniteData<Lead[]> | Lead[]>({
+        queryKey: ['leads', estudioId, 'historico'], exact: false,
+      });
+ 
+      // Listas simples
+      queryClient.setQueriesData<Lead[]>({ queryKey: ['leads', estudioId, 'pendentes'], exact: false }, (old) => {
+        if (!old) return old;
+        return status !== 'pendente' ? old.filter(l => l.id !== id) : old.map(l => l.id === id ? { ...l, status_conversao: status } : l);
+      });
+      queryClient.setQueriesData<Lead[]>({ queryKey: ['leads', estudioId, 'historico', 'mes'], exact: false }, (old) =>
+        old?.map(l => l.id === id ? { ...l, status_conversao: status } : l) ?? old
+      );
+ 
+      // Histórico paginado
+      queryClient.setQueriesData<InfiniteData<Lead[]>>({ queryKey: ['leads', estudioId, 'historico'], exact: false }, (oldData) => {
+        if (!oldData || !('pages' in oldData)) return oldData;
+        return {
+          ...oldData,
+          pages: oldData.pages.map((page) =>
+            page.map((l) => l.id === id ? { ...l, status_conversao: status } : l)
+          ),
+        };
+      });
+ 
       return { previousPendentes, previousHistorico };
     },
     onError: (err, variables, context) => {
-      if (context?.previousPendentes) queryClient.setQueryData<Lead[]>(['leads', estudioId, 'pendentes'], context.previousPendentes);
-      if (context?.previousHistorico) queryClient.setQueryData<InfiniteData<Lead[]>>(['leads', estudioId, 'historico'], context.previousHistorico);
+      context?.previousPendentes?.forEach(([key, data]) => queryClient.setQueryData(key, data));
+      context?.previousHistorico?.forEach(([key, data]) => queryClient.setQueryData(key, data));
       showToast.error("Erro de conexão. Ação desfeita.");
     },
     onSettled: () => {

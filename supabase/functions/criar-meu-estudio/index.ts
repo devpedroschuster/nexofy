@@ -43,7 +43,7 @@ serve(async (req: Request) => {
   // Cliente admin (service role) — ignora RLS, usado só para a escrita transacional.
   const admin = createClient(supabaseUrl, serviceKey);
 
-  // ── 1. AUTENTICAÇÃO ────────────────────────────────────────────────────────
+  // 1. AUTENTICAÇÃO
   const authHeader = req.headers.get('Authorization') ?? '';
   if (!authHeader.startsWith('Bearer ')) {
     return resp({ error: 'Cabeçalho Authorization ausente ou inválido.' }, 401);
@@ -67,7 +67,7 @@ serve(async (req: Request) => {
     return resp({ error: 'Usuário sem e-mail associado.' }, 400);
   }
 
-  // ── 2. IMPEDE MÚLTIPLOS ESTÚDIOS PELO MESMO USUÁRIO ────────────────────────
+  // IMPEDE MÚLTIPLOS ESTÚDIOS PELO MESMO USUÁRIO
   // Política atual: 1 conta → 1 estúdio. Se no futuro Nexofy quiser permitir
   // multi-estúdio por dono, este bloco (e a checagem em useAuth/App.jsx) é o
   // ponto a revisar.
@@ -86,7 +86,7 @@ serve(async (req: Request) => {
     return resp({ error: 'Sua conta já está vinculada a um estúdio.' }, 409);
   }
 
-  // ── 3. VALIDAÇÃO DO PAYLOAD ─────────────────────────────────────────────────
+  // VALIDAÇÃO DO PAYLOAD
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -112,7 +112,7 @@ serve(async (req: Request) => {
     }, 400);
   }
 
-  // ── 4. UNICIDADE DO SLUG ─────────────────────────────────────────────────────
+  // 4. UNICIDADE DO SLUG
   const { data: slugExistente } = await admin
     .from('estudios')
     .select('id')
@@ -123,7 +123,7 @@ serve(async (req: Request) => {
     return resp({ error: `O slug "${slugNorm}" já está em uso. Escolha outro.` }, 409);
   }
 
-  // ── 5. ESCRITAS NO BANCO — TRANSAÇÃO ATÔMICA VIA RPC ─────────────────────────
+  // ESCRITAS NO BANCO — TRANSAÇÃO ATÔMICA VIA RPC
   // Mesma RPC do fluxo admin. p_admin_id é o próprio caller — não há criação
   // nem reuso de auth user aqui, ele já existe e já tem senha própria.
   const adminNome = (caller.user_metadata?.nome as string | undefined)?.trim() || caller.email;
@@ -146,7 +146,7 @@ serve(async (req: Request) => {
   // rpc() com RETURNS TABLE retorna um array; pegamos a primeira (e única) linha
   const resultado = Array.isArray(rpcData) ? rpcData[0] : rpcData;
 
-  // ── SUCESSO ────────────────────────────────────────────────────────────────
+  // SUCESSO
   return resp({
     sucesso: true,
     estudio: {

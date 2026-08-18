@@ -6,7 +6,7 @@ import {
   TrendingUp, Filter, ArrowRight,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-
+import { TIPO_AULA_LABELS as TIPO_LABELS } from '../lib/constants/tipoAula';
 import { comissoesService } from '../services/comissoesService';
 import { gerarRepassesMensais, previewRepassesMensais } from '../services/repasseService';
 import { useAuth } from '../hooks/useAuth';
@@ -24,7 +24,6 @@ import ModalPreviewRepasses from '../components/ModalPreviewRepasses';
 import { formatarMoeda } from '../lib/utils';
 import { formatarData } from '../lib/utils';
 import Badge from '../components/ui/Badge';
-
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Surface from '../components/ui/Surface';
@@ -38,13 +37,6 @@ const TIPOS_AULA = [
   { value: 'avulsa', label: 'Avulsa' },
   { value: 'experimental', label: 'Experimental' },
 ];
-
-const TIPO_LABELS = {
-  regular: 'Regular',
-  plano_livre: 'Plano Livre',
-  avulsa: 'Avulsa',
-  experimental: 'Experimental',
-};
 
 const TIPO_TONE = {
   regular: 'brand',

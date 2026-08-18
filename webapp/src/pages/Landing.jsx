@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import './landing.css';
 import { useEstudioPublico } from '../hooks/useEstudioPublico';
 import { usePlanosPublicos } from '../hooks/usePlanosPublicos';
+import { leadsService } from '../services/leadsService';
 
 // Domínios aceitos para embed do Google Maps — defesa em profundidade contra
 // um iframe apontando pra origem inesperada, caso o campo maps_embed_url
@@ -112,61 +113,58 @@ export default function Landing() {
   }
 
   async function handleLeadSubmit(e) {
-    e.preventDefault();
-    if (!estudio?.id) return; // guarda contra submit antes do estúdio resolver
-    if (!leadNome.trim() || !leadTel.trim()) return;
-
-    // Honeypot preenchido = bot. Finge sucesso pra não dar dica de detecção.
-    if (honeypot) {
-      setLeadStatus('ok');
-      setLeadNome('');
-      setLeadTel('');
-      return;
-    }
-
-    const telefoneDigits = leadTel.replace(/\D/g, '');
-    if (telefoneDigits.length < 10) {
-      setLeadStatus('err');
-      setLeadErro('Informe um telefone válido com DDD.');
-      return;
-    }
-
-    setLeadLoading(true);
-    setLeadStatus(null);
-    setLeadErro('');
-    try {
-      const { error } = await supabase
-        .from('presencas_agenda')
-        .insert([{
-          estudio_id: estudio.id,                    // ← isolamento multi-tenant
-          nome_visitante: leadNome.trim(),
-          telefone_visitante: telefoneDigits,
-          status_conversao: 'pendente',
-        }]);
-
-      if (error) throw error;
-      setLeadStatus('ok');
-      setLeadNome('');
-      setLeadTel('');
-    } catch (err) {
-      console.error('[Landing] Falha ao registrar lead:', err);
-      setLeadStatus('err');
-      setLeadErro('Não conseguimos registrar agora. Tente novamente ou fale pelo WhatsApp.');
-    } finally {
-      setLeadLoading(false);
-    }
+  e.preventDefault();
+  if (!estudio?.id) return; // guarda contra submit antes do estúdio resolver
+  if (!leadNome.trim() || !leadTel.trim()) return;
+ 
+  // Honeypot preenchido = bot. Finge sucesso pra não dar dica de detecção.
+  if (honeypot) {
+    setLeadStatus('ok');
+    setLeadNome('');
+    setLeadTel('');
+    return;
   }
+ 
+  const telefoneDigits = leadTel.replace(/\D/g, '');
+  if (telefoneDigits.length < 10) {
+    setLeadStatus('err');
+    setLeadErro('Informe um telefone válido com DDD.');
+    return;
+  }
+ 
+  setLeadLoading(true);
+  setLeadStatus(null);
+  setLeadErro('');
+  try {
+    await leadsService.criarLeadPublico({
+      nomeVisitante: leadNome.trim(),
+      telefoneVisitante: telefoneDigits,
+      estudioId: estudio.id,
+    });
+ 
+    setLeadStatus('ok');
+    setLeadNome('');
+    setLeadTel('');
+  } catch (err) {
+    console.error('[Landing] Falha ao registrar lead:', {
+      code: err?.code,
+      message: err?.message,
+      estudioId: estudio.id,
+    });
+    setLeadStatus('err');
+    setLeadErro('Não conseguimos registrar agora. Tente novamente ou fale pelo WhatsApp.');
+  } finally {
+    setLeadLoading(false);
+  }
+}
 
-  // ── Plan helpers ─────────────────────────────────────────────────────
+  // Plan helpers
   const isFeatured = (plano, todos) => {
     if (todos.length === 0) return false;
     const mid = Math.floor(todos.length / 2);
     return todos.indexOf(plano) === mid;
   };
 
-  // ── Dados de contato (Supabase > fallback hardcoded) ─────────────────
-  // Enquanto o estúdio ainda está carregando, não mostramos nome/marca
-  // errados (evita o "flash" de branding genérico antes do real aparecer).
   const nomeEstudio = estudioLoading ? '' : (estudio?.nome ?? 'Gestão App');
 
   const whatsappDigits = normalizarWhatsappDigits(estudio?.whatsapp);

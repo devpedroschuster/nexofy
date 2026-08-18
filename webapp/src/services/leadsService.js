@@ -49,6 +49,23 @@ export const leadsService = {
     return data;
   },
 
+async criarLeadPublico({ nomeVisitante, telefoneVisitante, estudioId }) {
+  const { data, error } = await supabase.rpc('criar_lead_com_presenca', {
+    p_estudio_id:  estudioId,
+    p_nome:        nomeVisitante,
+    p_telefone:    telefoneVisitante || null,
+    p_aula_id:     null,
+    p_data_visita: null,
+  });
+
+  if (error) {
+    if (error.code === '23505')
+      throw new Error('Este visitante já possui um agendamento nesta turma e data.');
+    throw error;
+  }
+  return data;
+},
+
   async listarLeadsPendentes(estudioId) {
     const { data, error } = await supabase
       .from('leads')

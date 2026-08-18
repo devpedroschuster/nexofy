@@ -17,6 +17,7 @@ import Skeleton from '../../components/ui/Skeleton';
 import EmptyState from '../../components/ui/EmptyState';
 import Button from '../../components/ui/Button';
 import { formatarMoeda, formatarData } from '../../lib/utils';
+import { tipoAulaLabel } from '../../lib/constants/tipoAula';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -45,25 +46,22 @@ function statusBadge(status) {
   return <Badge tone="warning">Pendente</Badge>;
 }
 
-function tipoAulaLabel(tipo) {
-  const mapa = {
-    fixo: 'Aula Fixa',
-    avulsa: 'Aula Avulsa',
-    reposicao: 'Reposição',
-    experimental: 'Experimental',
-  };
-  return mapa[tipo] ?? tipo ?? '—';
-}
 
-// ─── export CSV ──────────────────────────────────────────────────────────────
+
+// Exportar CSV
+
+function sanitizarCelulaCSV(valor) {
+  const texto = String(valor ?? '');
+  return /^[=+\-@\t\r]/.test(texto) ? `'${texto}` : texto;
+}
 
 function exportarCSV(repasses, mesAno) {
   const cabecalho = ['Data', 'Aluno', 'Modalidade', 'Tipo de Aula', 'Valor', 'Status'];
   const linhas = repasses.map(r => [
     formatarData(r.data_referencia),
-    r.alunos?.nome_completo ?? '—',
-    r.modalidade ?? '—',
-    tipoAulaLabel(r.tipo_aula),
+    sanitizarCelulaCSV(r.alunos?.nome_completo ?? '—'),
+    sanitizarCelulaCSV(r.modalidade ?? '—'),
+    sanitizarCelulaCSV(tipoAulaLabel(r.tipo_aula)),
     String(r.valor ?? 0).replace('.', ','),
     r.status ?? 'pendente',
   ]);
@@ -81,7 +79,7 @@ function exportarCSV(repasses, mesAno) {
   URL.revokeObjectURL(url);
 }
 
-// ─── KPI card ────────────────────────────────────────────────────────────────
+// KPI Card
 
 function KPICard({ icon, label, value, subtitle, tone = 'neutral', loading }) {
   const toneClasses = {

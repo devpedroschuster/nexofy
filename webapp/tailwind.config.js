@@ -2,7 +2,6 @@
 // ─── Midnight Indigo · tailwind.config.js ────────────────────────────────────
 // Mapeia TODOS os tokens CSS → classes utilitárias Tailwind.
 // Regra: nunca hard-code cores aqui. Tudo via hsl(var(--token)).
-// ─────────────────────────────────────────────────────────────────────────────
 
 export default {
   darkMode: ['class'],

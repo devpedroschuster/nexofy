@@ -73,12 +73,11 @@ serve(async (req: Request) => {
   try {
     const { estudioId, mensalidadeId } = await req.json();
 
-    // ── ISOLAMENTO MULTI-TENANT ──────────────────────────────────────────────
+    // ISOLAMENTO MULTI-TENANT
     // A service role ignora RLS; todo acesso deve filtrar explicitamente por estudio_id.
     if (!estudioId) {
       return response({ error: 'estudioId é obrigatório no payload.' }, 400);
     }
-    // ────────────────────────────────────────────────────────────────────────
 
     if (!mensalidadeId) {
       return response({ error: 'Parâmetro mensalidadeId é obrigatório.' }, 400);
@@ -89,7 +88,7 @@ serve(async (req: Request) => {
     const anonKey     = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // ── AUTENTICAÇÃO ────────────────────────────────────────────────────────
+    // AUTENTICAÇÃO
     const authHeader = req.headers.get('Authorization') ?? '';
     if (!authHeader.startsWith('Bearer ')) {
       return response({ error: 'Não autorizado.' }, 401);
@@ -102,9 +101,8 @@ serve(async (req: Request) => {
     if (authErr || !user) {
       return response({ error: 'Não autorizado.' }, 401);
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
-    // ── AUTORIZAÇÃO ──────────────────────────────────────────────────────────
+    // AUTORIZAÇÃO
     // Só admin/super_admin do estúdio-alvo pode gerar/regerar repasses.
     // Sem isso, qualquer usuário autenticado (professor, aluno) poderia apagar
     // e recriar lançamentos financeiros de outro estúdio.
@@ -119,7 +117,7 @@ serve(async (req: Request) => {
       return response({ error: 'Acesso negado.' }, 403);
     }
 
-    // ── 1. Busca a mensalidade — confirma que pertence a este estúdio ────────
+    // Busca a mensalidade — confirma que pertence a este estúdio
     const { data: mens, error: errMens } = await supabase
       .from('mensalidades')
       .select('id, estudio_id, aluno_id, plano_id, tipo_aula, valor_pago, professor_id, modalidade_nome, data_pagamento, data_vencimento')
@@ -138,7 +136,7 @@ serve(async (req: Request) => {
       return response({ aviso: 'Mensalidade sem aluno vinculado. Nenhum repasse gerado.', gerados: 0 });
     }
 
-    // ── 2. Configurações de repasse deste estúdio ───────────────────────────
+    // Configurações de repasse deste estúdio
     const { data: config, error: errConfig } = await supabase
       .from('configuracoes_repasse')
       .select('valor_1_modalidade, valor_multi_modalidade, plano_livre_pct_casa, plano_livre_pct_prof, aula_avulsa_valor, aula_avulsa_pct_prof, aula_avulsa_pct_casa, aula_experimental_valor, aula_experimental_pct_prof')
@@ -168,12 +166,12 @@ serve(async (req: Request) => {
       data_referencia: string;
     }[] = [];
 
-    // ── 3. Repasses de lote a remover, coletados durante o cálculo abaixo ────
+    // Repasses de lote a remover, coletados durante o cálculo abaixo
     // (antes eram deletados um a um dentro do loop; agora só coletamos os ids
     // e o delete real acontece junto com o insert, dentro da RPC transacional).
     const idsLoteRemover: string[] = [];
 
-    // ── 3b. Repasses já gerados pelo lote mensal (mensalidade_id IS NULL) ────
+    // Repasses já gerados pelo lote mensal (mensalidade_id IS NULL)
     const { data: repassesLote } = await supabase
       .from('repasses_lancamentos')
       .select('id, modalidade, tipo_aula')
@@ -187,7 +185,7 @@ serve(async (req: Request) => {
       loteJaGerado.set(`${r.modalidade}|${r.tipo_aula}`, r.id);
     }
 
-    // ── 4a. PLANO LIVRE ──────────────────────────────────────────────────────
+    // PLANO LIVRE
     if (mensalidade.tipo_aula === 'plano_livre') {
 
       const { data: presencas, error: errPresencas } = await supabase
@@ -257,7 +255,7 @@ serve(async (req: Request) => {
         });
       }
 
-    // ── 4b. REGULAR ──────────────────────────────────────────────────────────
+    // REGULAR
     } else if (mensalidade.tipo_aula === 'regular') {
       const { data: aluno } = await supabase
         .from('alunos')
@@ -307,7 +305,7 @@ serve(async (req: Request) => {
         });
       }
 
-    // ── 4c. AVULSA ───────────────────────────────────────────────────────────
+    // AVULSA
     } else if (mensalidade.tipo_aula === 'avulsa') {
       if (!mensalidade.professor_id) {
         return response({ aviso: 'Aula avulsa sem professor. Repasse não gerado.', gerados: 0 });
@@ -326,7 +324,7 @@ serve(async (req: Request) => {
         data_referencia: dataReferencia,
       });
 
-    // ── 4d. EXPERIMENTAL ─────────────────────────────────────────────────────
+    // EXPERIMENTAL
     } else if (mensalidade.tipo_aula === 'experimental') {
       const pctProf = Number(cfg.aula_experimental_pct_prof);
 
@@ -352,7 +350,7 @@ serve(async (req: Request) => {
       });
     }
 
-    // ── 5. Insere ─────────────────────────────────────────────────────────────
+    // Insere
     if (itens.length === 0) {
       return response({ aviso: 'Nenhum repasse calculado para este tipo de aula.', gerados: 0 });
     }

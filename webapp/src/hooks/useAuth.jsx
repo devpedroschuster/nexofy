@@ -122,22 +122,26 @@ export function AuthProvider({ children }) {
       const authId = session.user.id;
 
       try {
-        // Join direto na query existente (Opção A da seção 3 do
-        // PLANO_ITEM_2.md): zero round-trips adicionais — o dado de
-        // segmento/terminologia/modulos_ativos chega no mesmo response.
-        const { data: membros, error: errMembro } = await supabase
-          .from('estudio_membros')
-          .select('estudio_id, role, estudios(segmento, terminologia, modulos_ativos)')
-          .eq('user_id', authId)
-          .limit(5);
+        
+// Ordena por created_at (vínculo mais antigo primeiro) de forma
+// determinística. Ajustar a coluna/critério conforme a regra de negócio real
+// desejada (ex: se deveria ser o vínculo mais RECENTE, trocar ascending para
+// false).
 
-        if (errMembro) {
-          throw errMembro;
-        }
-
-        if (cancelled) return;
-
-        const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ?? null;
+const { data: membros, error: errMembro } = await supabase
+  .from('estudio_membros')
+  .select('estudio_id, role, created_at, estudios(segmento, terminologia, modulos_ativos)')
+  .eq('user_id', authId)
+  .order('created_at', { ascending: true })
+  .limit(5);
+ 
+if (errMembro) {
+  throw errMembro;
+}
+ 
+if (cancelled) return;
+ 
+const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ?? null;
 
         if (membro) {
           perfilJaCarregado.current = true;

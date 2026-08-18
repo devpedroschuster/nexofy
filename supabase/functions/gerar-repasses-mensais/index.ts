@@ -93,12 +93,11 @@ serve(async (req: Request) => {
   try {
     const { estudioId, mes, ano } = await req.json();
 
-    // ── ISOLAMENTO MULTI-TENANT ──────────────────────────────────────────────
+    // ISOLAMENTO MULTI-TENANT
     // A service role ignora RLS; todo acesso deve filtrar explicitamente por estudio_id.
     if (!estudioId) {
       return response({ error: 'estudioId é obrigatório no payload.' }, 400);
     }
-    // ────────────────────────────────────────────────────────────────────────
 
     if (!mes || !ano || mes < 1 || mes > 12) {
       return response({ error: 'Parâmetros inválidos. Informe mes (1–12) e ano.' }, 400);
@@ -144,7 +143,6 @@ serve(async (req: Request) => {
     if (!ehSuperAdmin && !ehAdminDoEstudio) {
       return response({ error: 'Acesso negado. Apenas admins do estúdio podem gerar repasses.' }, 403);
     }
-    // ────────────────────────────────────────────────────────────────────────
 
     const mesStr = String(mes).padStart(2, '0');
     const dataReferencia = `${ano}-${mesStr}-01`;
@@ -166,7 +164,6 @@ serve(async (req: Request) => {
     //     ON repasses_lancamentos (estudio_id, data_referencia, professor_id, modalidade, tipo_aula)
     //     WHERE mensalidade_id IS NULL;
     //
-    // ────────────────────────────────────────────────────────────────────────
 
     // ── 1. Previne dupla geração no mesmo mês (para este estúdio) ───────────
     const { data: jaExistem } = await supabase

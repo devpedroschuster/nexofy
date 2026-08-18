@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useOutletContext } from 'react-router-dom';
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -19,13 +18,10 @@ function useIsMobile(breakpoint = MOBILE_BREAKPOINT) {
 }
 
 export function useAgendaPage() {
-  // Defesa: evita "Cannot destructure property of undefined" se o hook
-  // for usado fora da árvore de rotas que fornece o Outlet context.
-  // ATENÇÃO: o Layout pai precisa passar `professorId` em
-  // <Outlet context={{ perfil, professorId }} /> — hoje ele só passa `perfil`,
-  // então `professorId` chega sempre undefined até essa correção ser feita lá.
-  const { perfil, professorId } = useOutletContext() ?? {};
-
+  // `perfil`/`professorId` não vêm mais deste hook: Agenda.jsx já os obtém
+  // de useAuth(), a fonte única usada por todo o app para essa informação
+  // (evita duas fontes de verdade divergentes decidindo `isAdmin`).
+  // Removido junto: dependência de useOutletContext, que ficou morta aqui.
   const isMobile = useIsMobile();
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -53,8 +49,6 @@ export function useAgendaPage() {
   };
 
   return {
-    perfil,
-    professorId,
     currentDate, setCurrentDate,
     currentView, setCurrentView: handleSetCurrentView,
     filtroProf, setFiltroProf,
