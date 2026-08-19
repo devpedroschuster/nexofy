@@ -9,10 +9,19 @@ import { resolverLandingCopy } from '../lib/landingCopy';
 import { leadsService } from '../services/leadsService';
 import LandingNexofy from './LandingNexofy';
 
-// Primeiro domínio raiz configurado, só pra exibir na mensagem de erro
-// abaixo — não hardcoded, porque o domínio muda por ambiente
-// (gestao.app em dev/preview, nexofy.com.br em produção).
-const DOMINIO_EXIBICAO = (import.meta.env.VITE_ROOT_DOMAINS || 'gestao.app').split(',')[0].trim();
+// Domínio raiz que realmente bateu com o hostname atual, só pra exibir
+// na mensagem de erro abaixo. Cai pro primeiro configurado (ou o default
+// 'gestao.app') se por algum motivo não achar — não deveria acontecer,
+// já que se chegamos aqui é porque um slug foi resolvido.
+function resolverDominioExibicao() {
+  const dominios = (import.meta.env.VITE_ROOT_DOMAINS || 'gestao.app')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+  return dominios.find((d) => hostname === d || hostname.endsWith(`.${d}`)) ?? dominios[0];
+}
+const DOMINIO_EXIBICAO = resolverDominioExibicao();
 
 const MAPS_EMBED_HOSTS_PERMITIDOS = ['www.google.com', 'maps.google.com'];
 
@@ -381,6 +390,18 @@ export default function Landing() {
               {planos.map((plano) => {
                 const featured = isFeatured(plano, planos);
                 const regras = Array.isArray(plano.regras_acesso) ? plano.regras_acesso : [];
+                // regras_acesso vem como jsonb: [{ limite, modalidade }, ...].
+                // limite >= 999 é a convenção usada pro "plano livre" (acesso
+                // ilimitado àquela modalidade).
+                const regrasTexto = regras
+                  .map((r) => {
+                    if (typeof r === 'string') return r; // fallback pra dado legado, se existir
+                    if (!r || typeof r !== 'object' || !r.modalidade) return null;
+                    return r.limite >= 999
+                      ? `${r.modalidade}: ilimitado`
+                      : `${r.modalidade}: até ${r.limite}x/mês`;
+                  })
+                  .filter(Boolean);
                 return (
                   <div key={plano.id} className={`plan-card${featured ? ' featured' : ''}`}>
                     {featured && <div className="plan-popular">Mais escolhido</div>}
@@ -405,10 +426,10 @@ export default function Landing() {
                           <span>{plano.frequencia_semanal}× por semana</span>
                         </div>
                       )}
-                      {regras.map((r, i) => (
+                      {regrasTexto.map((texto, i) => (
                         <div key={i} className="plan-feat">
                           <span className="feat-check">✓</span>
-                          <span>{r}</span>
+                          <span>{texto}</span>
                         </div>
                       ))}
                     </div>
