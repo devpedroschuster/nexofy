@@ -4,8 +4,15 @@ import { supabase } from '../lib/supabase';
 import './landing.css';
 import { useEstudioPublico } from '../hooks/useEstudioPublico';
 import { usePlanosPublicos } from '../hooks/usePlanosPublicos';
+import { useModalidadesPublicas } from '../hooks/useModalidadesPublicas';
+import { resolverLandingCopy } from '../lib/landingCopy';
 import { leadsService } from '../services/leadsService';
 import LandingNexofy from './LandingNexofy';
+
+// Primeiro domínio raiz configurado, só pra exibir na mensagem de erro
+// abaixo — não hardcoded, porque o domínio muda por ambiente
+// (gestao.app em dev/preview, nexofy.com.br em produção).
+const DOMINIO_EXIBICAO = (import.meta.env.VITE_ROOT_DOMAINS || 'gestao.app').split(',')[0].trim();
 
 const MAPS_EMBED_HOSTS_PERMITIDOS = ['www.google.com', 'maps.google.com'];
 
@@ -51,6 +58,12 @@ export default function Landing() {
   //  Planos
   const { planos, loading: planosLoading } = usePlanosPublicos(estudio?.id);
 
+  //  Modalidades reais do estúdio, agrupadas por área
+  const { grupos: modalidadeGrupos, loading: modalidadesLoading } = useModalidadesPublicas(estudio?.id);
+
+  //  Copy do hero/seções — varia por segmento (danca_fitness, escolinha_esportiva, ...)
+  const copy = resolverLandingCopy(estudio?.segmento);
+
   // Lead form state
   const [leadNome, setLeadNome] = useState('');
   const [leadTel, setLeadTel] = useState('');
@@ -86,7 +99,7 @@ export default function Landing() {
             Estúdio não encontrado
           </h1>
           <p style={{ color: '#6b7280' }}>
-            Nenhum estúdio cadastrado para <strong>{slug}</strong>.gestao.app
+            Nenhum estúdio cadastrado para <strong>{slug}</strong>.{DOMINIO_EXIBICAO}
           </p>
         </div>
       </div>
@@ -206,16 +219,15 @@ export default function Landing() {
         <div className="hero-content" style={{ maxWidth: '680px', position: 'relative', zIndex: 1 }}>
           <div className="hero-tag anim-fade-up">
             <span className="hero-dot"></span>
-            Funcional · Dança · Bem-estar
+            {copy.heroTag}
           </div>
 
           <h1 className="anim-fade-up s1">
-            Mova-se,<br />expresse-se,<br /><em>ilumine-se.</em>
+            {copy.heroTitlePre}<br /><em>{copy.heroTitleEm}</em>
           </h1>
 
           <p className="hero-sub anim-fade-up s2">
-            Treinamento funcional e dança para quem quer resultado e não abre mão de se sentir bem.
-            Primeira aula grátis — sem compromisso.
+            {copy.heroSub}
           </p>
 
           {/* ── Inline Lead Form ──────────────────────────────────── */}
@@ -292,60 +304,60 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── Modalidades ────────────────────────────────────────────── */}
-      <section id="sec-aulas" className="section section-alt">
-        <div className="section-header">
-          <div className="section-tag">O que oferecemos</div>
-          <h2 className="section-title">Nossas Modalidades</h2>
-          <p className="section-sub">
-            Duas práticas poderosas sob o mesmo teto, com instrutores apaixonados
-            e metodologias que realmente funcionam.
-          </p>
-        </div>
-        <div className="modality-grid">
-          {/* Card Funcional */}
-          <div className="modality-card funcional anim-fade-up">
-            <div className="modality-icon" style={{ background: 'rgba(217,142,115,.15)', fontSize: '26px' }}>⚡</div>
-            <h3 className="modality-title" style={{ color: 'var(--pri)' }}>Funcional</h3>
-            <p className="modality-desc">
-              Treinamento de alta performance que desenvolve força, equilíbrio e
-              condicionamento completo — para todos os níveis.
-            </p>
-            <div className="schedule-label" style={{ color: 'var(--pri)' }}>Grade de horários</div>
-            <div className="schedule-item">Seg / Qua / Sex — 07:00 e 09:00</div>
-            <div className="schedule-item">Seg a Sex — 18:30</div>
-            <div className="schedule-item">Sábados — 09:00</div>
-            <div style={{ marginTop: '28px' }}>
-              <button className="btn btn-outline btn-sm" onClick={() => scrollTo('hero-form-anchor')}>
-                Quero experimentar
-              </button>
-            </div>
+      {/* ── Modalidades (dados reais do estúdio, via RPC modalidades_publicas) ── */}
+      {(modalidadesLoading || modalidadeGrupos.length > 0) && (
+        <section id="sec-aulas" className="section section-alt">
+          <div className="section-header">
+            <div className="section-tag">{copy.modalidadesTag}</div>
+            <h2 className="section-title">{copy.modalidadesTitle}</h2>
+            <p className="section-sub">{copy.modalidadesSub}</p>
           </div>
 
-          {/* Card Dança */}
-          <div className="modality-card danca anim-fade-up s1">
-            <div className="modality-icon" style={{ background: 'rgba(138,154,91,.15)', fontSize: '26px' }}>✦</div>
-            <h3 className="modality-title" style={{ color: 'var(--sec-d)' }}>Dança</h3>
-            <p className="modality-desc">
-              Do samba ao contemporâneo, celebramos o movimento e a expressão
-              artística em aulas que energizam corpo e mente.
-            </p>
-            <div className="schedule-label" style={{ color: 'var(--sec-d)' }}>Grade de horários</div>
-            <div className="schedule-item">Terças e Quintas — 19:00 e 20:00</div>
-            <div className="schedule-item">Quartas — 20:00</div>
-            <div className="schedule-item">Sábados — 10:00</div>
-            <div style={{ marginTop: '28px' }}>
-              <button
-                className="btn btn-sm"
-                style={{ background: 'var(--sec)', color: '#fff' }}
-                onClick={() => scrollTo('hero-form-anchor')}
-              >
-                Quero experimentar
-              </button>
+          {modalidadesLoading ? (
+            <div className="modality-loading">
+              <div className="modality-skeleton"></div>
+              <div className="modality-skeleton"></div>
             </div>
-          </div>
-        </div>
-      </section>
+          ) : (
+            <div className="modality-grid">
+              {modalidadeGrupos.map((grupo, i) => {
+                // Alterna cor primária/secundária por índice — não depende
+                // mais de nome de modalidade específico (Funcional/Dança).
+                const isPri = i % 2 === 0;
+                const accentClass = isPri ? 'accent-pri' : 'accent-sec';
+                const accentColor = isPri ? 'var(--pri)' : 'var(--sec-d)';
+                const accentBg = isPri ? 'rgba(217,142,115,.15)' : 'rgba(138,154,91,.15)';
+
+                return (
+                  <div
+                    key={grupo.area}
+                    className={`modality-card ${accentClass} anim-fade-up${i > 0 ? ` s${Math.min(i, 3)}` : ''}`}
+                  >
+                    <div className="modality-icon" style={{ background: accentBg, fontSize: '26px' }}>
+                      {isPri ? '⚡' : '✦'}
+                    </div>
+                    <h3 className="modality-title" style={{ color: accentColor }}>{grupo.area}</h3>
+                    <p className="modality-desc">
+                      {grupo.modalidades.length === 1
+                        ? grupo.modalidades[0].nome
+                        : `${grupo.modalidades.length} opções: ${grupo.modalidades.map(m => m.nome).join(', ')}`}
+                    </p>
+                    <div style={{ marginTop: '8px' }}>
+                      <button
+                        className={isPri ? 'btn btn-outline btn-sm' : 'btn btn-sm'}
+                        style={isPri ? undefined : { background: 'var(--sec)', color: '#fff' }}
+                        onClick={() => scrollTo('hero-form-anchor')}
+                      >
+                        Quero experimentar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── Planos (Supabase, via useQuery) ───────────────────────────── */}
       {(planosLoading || planos.length > 0) && (

@@ -232,11 +232,12 @@
 .section-header .section-sub { margin: 0 auto 0; }
 
 /* Modality cards */
-.modality-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 1040px; margin: 0 auto; }
+.modality-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; max-width: 1040px; margin: 0 auto; }
 .modality-card { background: var(--white); border: 1px solid var(--border); border-radius: 24px; padding: 44px; transition: transform .25s, box-shadow .25s; position: relative; overflow: hidden; }
 .modality-card::before { content: ''; position: absolute; top: 0; right: 0; width: 200px; height: 200px; border-radius: 50%; background: radial-gradient(circle, var(--accent-fade, rgba(0,0,0,.05)), transparent 70%); transform: translate(50px,-50px); }
-.modality-card.funcional { --accent-fade: rgba(217,142,115,.1); }
-.modality-card.danca { --accent-fade: rgba(138,154,91,.1); }
+/* Cores alternam por índice (ver Landing.jsx), não mais fixas por nome de modalidade */
+.modality-card.accent-pri { --accent-fade: rgba(217,142,115,.1); }
+.modality-card.accent-sec { --accent-fade: rgba(138,154,91,.1); }
 .modality-card:hover { transform: translateY(-4px); box-shadow: 0 16px 40px rgba(0,0,0,.09); }
 .modality-icon { width: 58px; height: 58px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 24px; }
 .modality-title { font-family: var(--font-display); font-size: 34px; font-weight: 700; margin-bottom: 14px; }
@@ -244,6 +245,9 @@
 .schedule-label { font-size: 10px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; }
 .schedule-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--txt); }
 .schedule-item:last-child { border-bottom: none; }
+.modality-loading { max-width: 1040px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+.modality-skeleton { height: 280px; border-radius: 24px; background: linear-gradient(90deg, var(--bg2) 25%, var(--border) 50%, var(--bg2) 75%); background-size: 200% 100%; animation: skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes skeleton-pulse { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
 /* Plans */
 

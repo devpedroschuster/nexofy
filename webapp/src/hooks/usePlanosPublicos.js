@@ -4,9 +4,12 @@ import { supabase } from '../lib/supabase';
 
 /**
  * Busca os planos públicos de um estúdio (para a landing page).
- * Espelha o padrão de useEstudioPublico: useQuery com cache, em vez de
- * useEffect + fetch manual (o padrão manual não cancelava requests fora
- * de ordem e engolia erros sem expor estado de erro pra UI).
+ *
+ * Passa pela RPC `planos_publicos(estudio_id)` (SECURITY DEFINER) em vez
+ * de `.from('planos')` direto: a tabela `planos` tem colunas de comissão
+ * (comissao_professor/espaco/diretor) que não podem ficar acessíveis via
+ * policy RLS ampla por estudio_id — a RPC expõe só as colunas que a
+ * landing pública realmente usa. Ver migration `add_planos_publicos_rpc`.
  *
  * @param {string|undefined} estudioId
  */
@@ -15,10 +18,7 @@ export function usePlanosPublicos(estudioId) {
     queryKey: ['planos-publicos', estudioId],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('planos')
-        .select('id, nome, preco, duracao_meses, frequencia_semanal, regras_acesso')
-        .eq('estudio_id', estudioId)
-        .order('preco', { ascending: true });
+        .rpc('planos_publicos', { p_estudio_id: estudioId });
 
       if (error) throw error;
       return data ?? [];
