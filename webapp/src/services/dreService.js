@@ -20,9 +20,9 @@ export const dreService = {
    * @param {string} estudioId  — vem do useAuth
    */
   async obterDRE(mes, ano, estudioId) {
-  if (!estudioId) throw new Error('dreService.obterDRE: estudioId é obrigatório'); // FIX
+  if (!estudioId) throw new Error('dreService.obterDRE: estudioId é obrigatório');
   if (!Number.isInteger(mes) || mes < 0 || mes > 11) {
-    throw new Error('dreService.obterDRE: mes inválido'); // FIX
+    throw new Error('dreService.obterDRE: mes inválido');
   }
 
   const dataInicio = new Date(ano, mes, 1).toISOString().split('T')[0];

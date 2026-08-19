@@ -94,7 +94,7 @@ export const espacosService = {
       .from('espacos')
       .update(payload)
       .eq('id', id)
-      .eq('estudio_id', estudioId) // FIX: defesa em profundidade além do RLS — nunca atualiza fora do tenant
+      .eq('estudio_id', estudioId)
       .select(ESPACOS_COLUMNS)
       .single();
     if (error) throw error;

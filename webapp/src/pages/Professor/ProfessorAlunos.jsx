@@ -27,19 +27,19 @@ function formatarUltimaPresenca(isoDate) {
 }
 
 // Formata telefone para wa.me (remove tudo que não é dígito, adiciona 55 se necessário).
-// FIX C-DDD55: decide pelo TAMANHO do número, não pelo prefixo — um telefone local
-// com DDD 55 (Rio Grande do Sul) começa com "55" e antes era erroneamente tratado
+// FIX DDD55: decide pelo TAMANHO do número, não pelo prefixo — um telefone local
+// com DDD 51 (Rio Grande do Sul) começa com "55" e antes era erroneamente tratado
 // como se já tivesse o DDI do Brasil, gerando link wa.me com um dígito faltando.
 function formatarWhatsApp(telefone) {
   if (!telefone) return null;
   const digits = telefone.replace(/\D/g, '');
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`; // DDD + número, sem DDI
+  if (digits.length === 10 || digits.length === 11) return `51${digits}`; // DDD + número, sem DDI
   if (digits.length === 12 || digits.length === 13) return digits;        // já inclui DDI 55
   return digits.length > 0 ? digits : null;
 }
 
 export default function ProfessorAlunos() {
-  // FIX C1: estudioId agora é lido e usado como segunda camada de isolamento
+  // FIX: estudioId agora é lido e usado como segunda camada de isolamento
   // de tenant em TODAS as queries — este era o único arquivo do projeto que
   // acessava lib/supabase diretamente sem essa defesa em profundidade.
   const { professorId, estudioId, loading: authLoading } = useAuth();
@@ -67,12 +67,12 @@ export default function ProfessorAlunos() {
           .from('modalidades')
           .select('id, nome')
           .eq('professor_id', professorId)
-          .eq('estudio_id', estudioId), // FIX C1
+          .eq('estudio_id', estudioId),
         supabase
           .from('agenda')
           .select('modalidade_id')
           .eq('professor_id', professorId)
-          .eq('estudio_id', estudioId), // FIX C1
+          .eq('estudio_id', estudioId),
       ]);
 
       if (getCancelled()) return;
@@ -102,7 +102,7 @@ export default function ProfessorAlunos() {
         const { data } = await supabase
           .from('modalidades')
           .select('id, nome')
-          .eq('estudio_id', estudioId) // FIX C1
+          .eq('estudio_id', estudioId)
           .in('id', idsApenasAgenda);
         modalidadesAgenda = data || [];
       }
@@ -122,7 +122,7 @@ export default function ProfessorAlunos() {
         .select(
           'id, nome_completo, email, telefone, ativo, planos(nome), modalidades_selecionadas'
         )
-        .eq('estudio_id', estudioId) // FIX C1 — segunda camada além da RLS
+        .eq('estudio_id', estudioId)
         .eq('ativo', true)
         .eq('role', 'aluno')
         .overlaps('modalidades_selecionadas', idsModalidades)
@@ -148,7 +148,7 @@ export default function ProfessorAlunos() {
     }
   }, [professorId, estudioId]);
 
-  // FIX C2: guarda de corrida (cancelled) para evitar que uma resposta antiga
+  // FIX: guarda de corrida (cancelled) para evitar que uma resposta antiga
   // sobrescreva uma mais recente quando professorId/estudioId mudam rápido.
   useEffect(() => {
     if (!professorId || !estudioId) return;
@@ -223,7 +223,7 @@ export default function ProfessorAlunos() {
     ? 'Meus Alunos'
     : `Meus Alunos · ${alunosFiltrados.length} ativo${alunosFiltrados.length !== 1 ? 's' : ''}`;
 
-  // FIX C3: se o perfil terminou de carregar mas não há professorId associado,
+  // FIX: se o perfil terminou de carregar mas não há professorId associado,
   // não fica em skeleton eterno — mostra estado explicativo.
   if (!authLoading && !professorId) {
     return (

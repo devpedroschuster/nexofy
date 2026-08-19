@@ -159,7 +159,7 @@
 .hero h1 em { color: var(--pri); font-style: italic; }
 .hero-sub { font-size: 16px; color: var(--muted); line-height: 1.8; max-width: 480px; margin-bottom: 36px; }
 
-/* ── Hero Inline Lead Form ────────────────────────────────────────────── */
+/* Hero Inline Lead Form */
 .hero-form-wrap {
   background: var(--white);
   border: 1px solid var(--border);
@@ -178,7 +178,7 @@
   padding: 14px 22px;
   font-size: 14px;
   white-space: nowrap;
-  height: 50px; /* matches .inp height */
+  height: 50px;
 }
 .hero-form-hint {
   font-size: 12px;
@@ -245,10 +245,8 @@
 .schedule-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--txt); }
 .schedule-item:last-child { border-bottom: none; }
 
-/* ── Plans ──────────────────────────────────────────────────────────── */
-/* auto-fit: substitui a lógica inline que existia no JSX para 1/2/3+ planos.
-   O grid agora se auto-ajusta ao número de itens sem precisar de estado
-   condicional no componente React. */
+/* Plans */
+
 .plans-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

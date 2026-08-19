@@ -11,20 +11,20 @@ import { useImpersonation } from '../context/ImpersonationContext';
  */
 export function useFinanceiro(filtros) {
   const { estudioId } = useAuth();
-  const { estudioAtivo } = useImpersonation();     // FIX
-  const idEfetivo = estudioAtivo?.id ?? estudioId; // FIX
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
 
   const mesValido = Number.isInteger(filtros?.mes) && filtros.mes >= 1 && filtros.mes <= 12;
   const anoValido = Number.isInteger(filtros?.ano);
 
   const query = useQuery({
-    queryKey: ['financeiro', idEfetivo, filtros?.mes, filtros?.ano], // FIX
+    queryKey: ['financeiro', idEfetivo, filtros?.mes, filtros?.ano],
     queryFn: async () => {
       const inicio = paraUTC(filtros.ano, filtros.mes - 1, 1);
       const fim = paraUTC(filtros.ano, filtros.mes, 0);
-      return await financeiroService.listarMensalidades(inicio, fim, idEfetivo); // FIX
+      return await financeiroService.listarMensalidades(inicio, fim, idEfetivo);
     },
-    enabled: !!idEfetivo && mesValido && anoValido, // FIX
+    enabled: !!idEfetivo && mesValido && anoValido,
     placeholderData: keepPreviousData,
     staleTime: 1000 * 60 * 5,
   });

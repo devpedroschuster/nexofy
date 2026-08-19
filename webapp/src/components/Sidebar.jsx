@@ -72,6 +72,7 @@ const construirMenuAdmin = (t) => [
   { name: 'Resultado',         path: '/resultado-financeiro',       icon: Calculator,   modulo: 'financeiro' },
   { name: 'Comissões',         path: '/comissoes',                  icon: Percent,      modulo: 'financeiro' },
   { name: 'Regras de Repasse', path: '/configuracoes/repasse',      icon: Calculator,   modulo: 'financeiro' },
+  { name: 'Pagamentos',        path: '/configuracoes/pagamentos',   icon: CreditCard,   modulo: 'financeiro' },
   { name: 'Configurações',     path: '/configuracoes/estudio',      icon: Settings },
   { name: 'Espaços',           path: '/configuracoes/espacos',      icon: MapPin },
 ];

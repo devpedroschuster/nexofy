@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { startOfDay } from 'date-fns';
 import { useAuth } from './useAuth';
-import { useImpersonation } from '../context/ImpersonationContext'; // FIX: faltava
+import { useImpersonation } from '../context/ImpersonationContext';
 import { storageKey } from '../utils/storage';
 
 const slug = import.meta.env.VITE_APP_SLUG ?? 'app';
@@ -119,7 +119,7 @@ export function useNotificacoes() {
 
       return notificacoes.sort((a, b) => a.diasFaltando - b.diasFaltando);
     },
-    enabled: !!idEfetivo, // FIX
+    enabled: !!idEfetivo,
     staleTime: 1000 * 60 * 5,
   });
 

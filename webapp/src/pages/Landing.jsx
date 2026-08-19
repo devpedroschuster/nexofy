@@ -5,10 +5,8 @@ import './landing.css';
 import { useEstudioPublico } from '../hooks/useEstudioPublico';
 import { usePlanosPublicos } from '../hooks/usePlanosPublicos';
 import { leadsService } from '../services/leadsService';
+import LandingNexofy from './LandingNexofy';
 
-// Domínios aceitos para embed do Google Maps — defesa em profundidade contra
-// um iframe apontando pra origem inesperada, caso o campo maps_embed_url
-// venha corrompido/malicioso por qualquer motivo.
 const MAPS_EMBED_HOSTS_PERMITIDOS = ['www.google.com', 'maps.google.com'];
 
 function isMapsEmbedUrlSegura(url) {
@@ -21,8 +19,6 @@ function isMapsEmbedUrlSegura(url) {
   }
 }
 
-// Normaliza o campo "instagram" do estúdio: aceita tanto uma URL completa
-// já salva quanto um @handle solto, e sempre retorna uma URL válida ou null.
 function normalizarInstagramUrl(valor) {
   if (!valor) return null;
   const limpo = valor.trim();
@@ -31,7 +27,6 @@ function normalizarInstagramUrl(valor) {
   return handle ? `https://instagram.com/${handle}` : null;
 }
 
-// Normaliza o número de WhatsApp pra apenas dígitos, do jeito que a API do wa.me espera.
 function normalizarWhatsappDigits(valor) {
   if (!valor) return null;
   const digits = String(valor).replace(/\D/g, '');
@@ -41,7 +36,7 @@ function normalizarWhatsappDigits(valor) {
 export default function Landing() {
   const navigate = useNavigate();
 
-  // ── Dados públicos do estúdio (resolvido pelo subdomínio) ────────────
+  // Dados públicos do estúdio (resolvido pelo subdomínio)
   const {
     data: estudio,
     isLoading: estudioLoading,
@@ -49,23 +44,22 @@ export default function Landing() {
     slug,
   } = useEstudioPublico();
 
-  // ── Planos (useQuery, com cache — substitui o useEffect manual) ──────
+  if (!slug) {
+    return <LandingNexofy />;
+  }
+
+  //  Planos
   const { planos, loading: planosLoading } = usePlanosPublicos(estudio?.id);
 
-  // ── Lead form state ─────────────────────────────────────────────────
+  // Lead form state
   const [leadNome, setLeadNome] = useState('');
   const [leadTel, setLeadTel] = useState('');
   const [leadLoading, setLeadLoading] = useState(false);
   const [leadStatus, setLeadStatus] = useState(null); // 'ok' | 'err' | null
   const [leadErro, setLeadErro] = useState('');
-  // Honeypot simples anti-bot: campo invisível que um usuário humano nunca
-  // preenche. Bots que preenchem todos os inputs de um form caem aqui.
+  // Honeypot simples anti-bot: campo invisível que um usuário humano nunca preenche
   const [honeypot, setHoneypot] = useState('');
 
-  // ── Tela de falha ao resolver o estúdio (rede/RLS/infra) ──────────────
-  // Importante: isso é diferente de "slug não existe no banco" (ver abaixo).
-  // Antes essas duas situações caíam na mesma mensagem de "não encontrado",
-  // o que é enganoso durante uma instabilidade passageira do Supabase.
   if (!estudioLoading && estudioError) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-6 text-center">
@@ -82,7 +76,7 @@ export default function Landing() {
     );
   }
 
-  // ── Tela de erro: slug no hostname mas estúdio não existe no banco ────
+  // Tela de erro: slug no hostname mas estúdio não existe no banco
   if (!estudioLoading && !estudioError && slug && !estudio) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-6 text-center">
@@ -99,7 +93,7 @@ export default function Landing() {
     );
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────
+  // Helpers
   const scrollTo = (id) => {
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: 'smooth' });
@@ -114,7 +108,7 @@ export default function Landing() {
 
   async function handleLeadSubmit(e) {
   e.preventDefault();
-  if (!estudio?.id) return; // guarda contra submit antes do estúdio resolver
+  if (!estudio?.id) return;
   if (!leadNome.trim() || !leadTel.trim()) return;
  
   // Honeypot preenchido = bot. Finge sucesso pra não dar dica de detecção.

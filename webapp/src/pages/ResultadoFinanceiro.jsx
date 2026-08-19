@@ -23,10 +23,10 @@ import Badge from '../components/ui/Badge';
 const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
                   'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-const COR_RECEITA  = '#22c55e'; // green-500
-const COR_DESPESA  = '#ef4444'; // red-500
-const COR_COMISSAO = '#f59e0b'; // amber-500
-const COR_LUCRO    = '#3b82f6'; // blue-500
+const COR_RECEITA  = '#22c55e';
+const COR_DESPESA  = '#ef4444';
+const COR_COMISSAO = '#f59e0b';
+const COR_LUCRO    = '#3b82f6';
 
 function sinalTendencia(atual, anterior) {
   if (!anterior || anterior === 0) return null;
@@ -99,7 +99,7 @@ function LinhaResultado({ label, valor, destaque = false, negativo = false, nive
   );
 }
 
-// ── Tooltip personalizado para os gráficos ────────────────────────────────────
+// Tooltip personalizado para os gráficos
 const TooltipStyle = {
   borderRadius: '1rem',
   border: '1px solid hsl(var(--border))',
@@ -126,11 +126,11 @@ function CustomTooltip({ active, payload, label }) {
   );
 }
 
-// ── Página principal ──────────────────────────────────────────────────────────
+// Página principal
 export default function ResultadoFinanceiro() {
   const { estudioId } = useAuth();
-  const { estudioAtivo } = useImpersonation(); // FIX
-  const idEfetivo = estudioAtivo?.id ?? estudioId; // FIX: funciona também em impersonation
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
 
   const agora = new Date();
   const [mesRef, setMesRef] = useState(new Date(agora.getFullYear(), agora.getMonth(), 1));
@@ -142,15 +142,15 @@ export default function ResultadoFinanceiro() {
   const navProximo  = () => setMesRef(m => addMonths(m, 1));
   const ehMesAtual  = mes === agora.getMonth() && ano === agora.getFullYear();
 
-  // ── Queries ────────────────────────────────────────────────────────────────
+  // Queries
   const {
     data: dre,
     isLoading: loadingDRE,
     isError: errorDRE,
   } = useQuery({
-    queryKey: ['dre', idEfetivo, mes, ano],        // FIX: idEfetivo no cache key
-    queryFn: () => dreService.obterDRE(mes, ano, idEfetivo), // FIX
-    enabled: !!idEfetivo,                           // FIX
+    queryKey: ['dre', idEfetivo, mes, ano],
+    queryFn: () => dreService.obterDRE(mes, ano, idEfetivo),
+    enabled: !!idEfetivo,
     staleTime: 1000 * 60 * 5,
     placeholderData: keepPreviousData,
   });
@@ -160,13 +160,13 @@ export default function ResultadoFinanceiro() {
     isLoading: loadingHistorico,
     isError: errorHistorico,
   } = useQuery({
-    queryKey: ['dre-historico', idEfetivo], // FIX
-    queryFn: () => dreService.obterHistorico(6, idEfetivo), // FIX
-    enabled: !!idEfetivo, // FIX
+    queryKey: ['dre-historico', idEfetivo],
+    queryFn: () => dreService.obterHistorico(6, idEfetivo),
+    enabled: !!idEfetivo,
     staleTime: 1000 * 60 * 10,
   });
 
-  // ── Tendências (comparação com mês anterior) ───────────────────────────────
+  // Tendências (comparação com mês anterior)
   const mesAnteriorKey = format(subMonths(mesRef, 1), 'yyyy-MM');
   const dadosMesAnterior = historico.find(h => h.key === mesAnteriorKey);
 
@@ -178,16 +178,16 @@ export default function ResultadoFinanceiro() {
     sinalTendencia(dre?.lucroLiquido, dadosMesAnterior?.lucro),
   [dre, dadosMesAnterior]);
 
-  // ── Dados para gráfico de barras agrupadas ─────────────────────────────────
+  // Dados para gráfico de barras agrupadas
   const dadosBarras = historico.map(h => ({
     mes: h.mes,
-    'Receita':   parseFloat((h.receita  ?? 0).toFixed(2)),  // FIX: defensivo contra undefined
-    'Despesas':  parseFloat((h.despesa  ?? 0).toFixed(2)),  // FIX
-    'Comissões': parseFloat((h.comissao ?? 0).toFixed(2)),  // FIX
-    'Lucro':     parseFloat((h.lucro    ?? 0).toFixed(2)),  // FIX
+    'Receita':   parseFloat((h.receita  ?? 0).toFixed(2)),
+    'Despesas':  parseFloat((h.despesa  ?? 0).toFixed(2)),
+    'Comissões': parseFloat((h.comissao ?? 0).toFixed(2)),
+    'Lucro':     parseFloat((h.lucro    ?? 0).toFixed(2)),
   }));
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // Render
   return (
     <div className="p-6 md:p-8 space-y-8 animate-in fade-in duration-500 bg-background min-h-screen">
 

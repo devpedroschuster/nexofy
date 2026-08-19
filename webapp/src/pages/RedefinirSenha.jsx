@@ -1,4 +1,3 @@
-// src/pages/RedefinirSenha.jsx
 // ─── Midnight Indigo · Redefinir Senha ───────────────────────────────────────
 //
 // Dois contextos de uso:
@@ -154,7 +153,7 @@ async function resolverRotaPosSenha(userId) {
   }
 
   if (membro?.role) {
-    // FIX (BUG-CRIT-01): antes retornava aqui sem zerar `primeiro_acesso`
+    // FIX: antes retornava aqui sem zerar `primeiro_acesso`
     // em `alunos`/`professores`. Como `Login.jsx` ainda decide o redirect
     // para /redefinir-senha lendo essas colunas diretamente (não migrou
     // para estudio_membros), o usuário ficava preso num loop de

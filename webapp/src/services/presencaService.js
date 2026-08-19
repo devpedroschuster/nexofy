@@ -27,7 +27,7 @@ export const presencaService = {
   // Cria o registro explícito de agendamento para um aluno cadastrado que
   // marcou presença numa aula pontual (fora da matrícula fixa).
   //
-  // FIX (achado no audit): antes deste fix o INSERT era feito direto na
+  // FIX: antes deste fix o INSERT era feito direto na
   // tabela, sem nenhuma validação de negócio no banco — capacidade e
   // regras de plano eram só um aviso visual (verificar_disponibilidade_v2
   // chamada apenas pelo indicador de vaga), nunca bloqueavam o insert.

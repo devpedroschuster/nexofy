@@ -52,6 +52,7 @@ import ProfessorComissoes from './pages/Professor/ProfessorComissoes';
 import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
 import ConfiguracoesEstudio from './pages/ConfiguracoesEstudio';
 import ConfiguracoesEspacos from './pages/ConfiguracoesEspacos';
+import ConfiguracoesPagamentos from './pages/ConfiguracoesPagamentos';
 
 // Bloqueio de acesso por status do estúdio (inativo/suspenso/cancelado)
 import EstudioBloqueado from './pages/EstudioBloqueado';
@@ -274,6 +275,7 @@ function AppRoutes() {
             <Route path="/configuracoes/repasse" element={<ConfiguracoesRepasse />} />
             <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
             <Route path="/configuracoes/espacos" element={<ConfiguracoesEspacos />} />
+            <Route path="/configuracoes/pagamentos" element={<ConfiguracoesPagamentos />} />
           </Route>
         </Route>
 

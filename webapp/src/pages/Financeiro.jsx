@@ -292,7 +292,6 @@ export default function Financeiro() {
         });
         modalResultado.abrir();
       } else if (res._avisoRepasse) {
-        // FIX: aviso de repasse não gerado não é mais descartado silenciosamente
         setTimeout(() => showToast.warning(`⚠️ ${res._avisoRepasse}`), 600);
       }
     } catch (error) {
@@ -302,7 +301,7 @@ export default function Financeiro() {
   };
 
   const handleGerarMensalidades = async () => {
-    if (!idEfetivo) { // FIX: idEfetivo
+    if (!idEfetivo) {
       showToast.error('Estúdio não identificado. Recarregue a página e tente novamente.');
       return;
     }
@@ -444,8 +443,6 @@ export default function Financeiro() {
         .eq('estudio_id', idEfetivo);
       if (errRepasses) throw errRepasses;
 
-      // FIX: .eq('estudio_id', idEfetivo) — sem isso, o delete confiava só na RLS (IDOR destrutivo)
-      // FIX: .select().maybeSingle() para detectar 0 linhas afetadas
       const { data, error } = await supabase
         .from('mensalidades')
         .delete()

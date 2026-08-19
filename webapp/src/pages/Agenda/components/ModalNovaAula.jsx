@@ -45,8 +45,6 @@ export default function ModalNovaAula({
       modalidadeId: id,
       atividade: mod?.nome ?? novaAula.atividade,
       professorId: mod?.professor_id || '',
-      // Fix: `??` no lugar de `||` — capacidade_padrao = 0 é um valor
-      // válido (turma sob consulta) e não deve cair no fallback de 15.
       capacidade: mod?.capacidade_padrao ?? 15,
       espaco: espacoSugerido ?? novaAula.espaco ?? '',
       cor: novaAula.cor || (mod?.area === 'Funcional' ? 'amarelo' : 'roxo'),

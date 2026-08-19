@@ -30,7 +30,7 @@ export function useLeadsPendentesPorMes(ano: number, mes: number, enabled = true
       const data = await leadsService.listarLeadsPendentesPorMes({ ano, mes, estudioId });
       return data as unknown as Lead[];
     },
-    enabled: !!estudioId && enabled, // FIX
+    enabled: !!estudioId && enabled,
     staleTime: 1000 * 30,
   });
 }
