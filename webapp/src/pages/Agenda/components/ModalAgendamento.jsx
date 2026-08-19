@@ -23,16 +23,15 @@ function resolverConfigModal(tipo, msg) {
 
 export default function ModalAgendamento({
   agendamentoForm, setAgendamentoForm,
-  aulas = [], listaAlunos = [],           // ✅ Bug #1: defaults seguros
+  aulas = [], listaAlunos = [],
   handleAgendarAluno,
   savingAgendamento, infoVaga, verificandoVaga,
-  modalLotacao, confirmarAgendamentoLotado, cancelarAgendamentoLotado
+  modalLotacao, confirmarAgendamentoLotado, cancelarAgendamentoLotado,
+  modalInadimplente, setModalInadimplente,
 }) {
+
   const configModal = resolverConfigModal(modalLotacao?.tipo, modalLotacao?.msg);
 
-  // ✅ Bug #3: se a aula selecionada sair da lista (ex: refetch em background
-  // remove/altera a grade), limpa a seleção em vez de deixar o form com um
-  // aula_id que não corresponde mais ao que o <select> exibe.
   React.useEffect(() => {
     if (agendamentoForm.aula_id && !aulas.some(a => a.id === agendamentoForm.aula_id)) {
       setAgendamentoForm(f => ({ ...f, aula_id: '', _nomeAtividade: '' }));
@@ -196,6 +195,20 @@ export default function ModalAgendamento({
           onClose={cancelarAgendamentoLotado}
         />
       )}
+      {modalInadimplente?.isOpen && (
+  <ModalConfirmacao
+    aberto
+    titulo="Aluno inadimplente"
+    mensagem={`Este aluno está com uma mensalidade em atraso há ${modalInadimplente.diasAtraso} dia(s). Regularize o pagamento para liberar o agendamento.`}
+    textoConfirmar={modalInadimplente.linkPagamento ? 'Abrir link de pagamento' : 'Entendi'}
+    textoCancelar="Fechar"
+    onConfirm={() => {
+      if (modalInadimplente.linkPagamento) window.open(modalInadimplente.linkPagamento, '_blank');
+      setModalInadimplente({ isOpen: false });
+    }}
+    onClose={() => setModalInadimplente({ isOpen: false })}
+  />
+)}
     </>
   );
 }

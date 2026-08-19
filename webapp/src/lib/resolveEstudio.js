@@ -1,23 +1,21 @@
-// webapp/src/lib/resolveEstudio.js
-
 /**
  * Extrai o slug do estúdio a partir do hostname atual.
  *
  * Exemplos:
- *   iluminus.gestao.app       → "iluminus"
- *   abc-dance.gestao.com.br   → "abc-dance"
+ *   iluminus.nexofy.com.br    → "iluminus"
+ *   abc-dance.nexofy.com.br   → "abc-dance"
  *   localhost                 → VITE_DEV_SLUG (dev local) ou null
- *   gestao.app                → null  (raiz sem subdomínio)
- *   gestao.com.br             → null  (raiz sem subdomínio, TLD composto)
+ *   nexofy.com.br             → null  (raiz sem subdomínio)
+ *   nexofy.com.br             → null  (raiz sem subdomínio, TLD composto)
  *
  * VITE_ROOT_DOMAINS: lista separada por vírgula dos domínios raiz da
- * aplicação (sem subdomínio de tenant), ex: "gestao.app,gestao.com.br".
+ * aplicação (sem subdomínio de tenant), ex: "nexofy.com.br".
  * Evita depender de contagem de partes do hostname, que quebra em
  * TLDs compostos (.com.br, .co.uk etc).
  *
  * Aceita `hostname` como parâmetro para facilitar testes sem depender de window.
  */
-const ROOT_DOMAINS = (import.meta.env.VITE_ROOT_DOMAINS || 'gestao.app')
+const ROOT_DOMAINS = (import.meta.env.VITE_ROOT_DOMAINS || 'nexofy.com.br')
   .split(',')
   .map((d) => d.trim())
   .filter(Boolean);

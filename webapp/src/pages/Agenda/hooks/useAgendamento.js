@@ -30,6 +30,7 @@ import { showToast } from '../../../components/shared/Toast';
 
 const CODIGO_LOTACAO = 'P0100';
 const CODIGO_FORA_DO_PLANO = 'P0101';
+const CODIGO_INADIMPLENTE = 'P0102';
 
 // Fallback textual — MANTIDO SÓ enquanto a trigger no banco não for
 // migrada para emitir os SQLSTATE acima. Depois da migration, este bloco
@@ -63,9 +64,9 @@ function classificarMotivoAviso(err) {
 
   if (codigo === CODIGO_LOTACAO) return 'lotacao';
   if (codigo === CODIGO_FORA_DO_PLANO) return 'plano';
+  if (codigo === CODIGO_INADIMPLENTE) return 'inadimplente';
 
-  // Fallback textual (ver TODO acima)
-  return classificarMotivoAvisoPorTexto(err?.message || '');
+return classificarMotivoAvisoPorTexto(err?.message || '');
 }
 
 export function useAgendamento(onSucesso, feriados = [], estudioId) {
@@ -86,6 +87,7 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
   const [verificandoVaga, setVerificandoVaga] = useState(false);
 
   const [modalLotacao, setModalLotacao] = useState({ isOpen: false, msg: '', tipo: '' });
+  const [modalInadimplente, setModalInadimplente] = useState({ isOpen: false, diasAtraso: null, linkPagamento: null });
 
   useEffect(() => {
     let cancelado = false;
@@ -213,11 +215,21 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
         return false;
       }
 
-      // P0 fix: classifica pelo erro completo (código estruturado
-      // primeiro, texto só como fallback) em vez de só a mensagem.
       const motivo = classificarMotivoAviso(err);
 
-      if (motivo === 'lotacao' || motivo === 'plano') {
+if (motivo === 'inadimplente') {
+  let detalhe = {};
+  try { detalhe = JSON.parse(err.details || '{}'); } catch {}
+  setModalInadimplente({
+    isOpen: true,
+    diasAtraso: detalhe.dias_atraso,
+    linkPagamento: detalhe.link_pagamento,
+  });
+  return false;
+}
+
+if (motivo === 'lotacao' || motivo === 'plano') {
+
         abrirModalAviso = true;
         setModalLotacao({ isOpen: true, msg: msgErro, tipo: motivo });
         return false;
@@ -250,5 +262,6 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
     agendamentoForm, setAgendamentoForm, handleAgendarAluno,
     savingAgendamento, infoVaga, verificandoVaga,
     modalLotacao, confirmarAgendamentoLotado, cancelarAgendamentoLotado,
+    modalInadimplente, setModalInadimplente,
   };
 }

@@ -58,7 +58,11 @@ const MODULOS_NUCLEO = [
 // a validação "de verdade" continua sendo feita no backend/constraints).
 const REGEX_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const REGEX_WHATSAPP = /^\d{10,15}$/; // código do país + DDD + número, só dígitos
-const REGEX_HEX_COLOR = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/;
+// 6 dígitos apenas — precisa bater com o check da migration
+// (estudios_cor_primaria_check / estudios_cor_secundaria_check), que só
+// aceita #RRGGBB. Um hex de 3 dígitos passaria aqui e estouraria um erro
+// cru de constraint no Postgres na hora de salvar.
+const REGEX_HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 const PROTOCOLOS_URL_PERMITIDOS = ['http:', 'https:'];
 const TAMANHO_MAX_LOGO_MB = 5;
 const TIPOS_LOGO_PERMITIDOS = ['image/png', 'image/jpeg', 'image/webp'];
@@ -106,6 +110,7 @@ useEffect(() => {
     maps_url:       '',
     email_suporte:  '',
     cor_primaria:   '#7c3aed',
+    cor_secundaria: '',
     timezone:       'America/Sao_Paulo',
   });
 
@@ -133,7 +138,8 @@ useEffect(() => {
       instagram_url: estudio.instagram_url ?? '',
       maps_url:      estudio.maps_url      ?? '',
       email_suporte: estudio.email_suporte ?? '',
-      cor_primaria:  estudio.cor_primaria  ?? '#7c3aed',
+      cor_primaria:  estudio.cor_primaria  ?? '',
+      cor_secundaria: estudio.cor_secundaria ?? '',
       timezone:      estudio.timezone      ?? 'America/Sao_Paulo',
     });
     setPreviewLogo(estudio.logo_url ?? null);
@@ -154,6 +160,15 @@ useEffect(() => {
     const { name, value } = e.target;
     setForm(prev => ({ ...prev, [name]: value }));
     if (erros[name]) setErros(prev => ({ ...prev, [name]: undefined }));
+  }
+
+  // Limpa as cores customizadas no form (fica em branco até o Salvar).
+  // Ao salvar, string vazia vira NULL (ver handleSalvar), e a landing
+  // volta a usar a paleta padrão do Nexofy — nada é persistido aqui
+  // até o admin confirmar clicando em "Salvar Configurações".
+  function handleRestaurarCores() {
+    setForm(prev => ({ ...prev, cor_primaria: '', cor_secundaria: '' }));
+    setErros(prev => ({ ...prev, cor_primaria: undefined, cor_secundaria: undefined }));
   }
 
   // Troca de segmento: não aplica na hora — abre confirmação. O <select>
@@ -212,8 +227,11 @@ useEffect(() => {
     if (!urlValidaOuVazia(form.maps_url)) {
       novosErros.maps_url = 'URL inválida (use http:// ou https://).';
     }
-    if (!REGEX_HEX_COLOR.test(form.cor_primaria)) {
+    if (form.cor_primaria && !REGEX_HEX_COLOR.test(form.cor_primaria)) {
       novosErros.cor_primaria = 'Cor inválida. Use o formato #RRGGBB.';
+    }
+    if (form.cor_secundaria && !REGEX_HEX_COLOR.test(form.cor_secundaria)) {
+      novosErros.cor_secundaria = 'Cor inválida. Use o formato #RRGGBB.';
     }
 
     setErros(novosErros);
@@ -245,6 +263,8 @@ useEffect(() => {
 
       await atualizarEstudio(idEfetivo, {
         ...form,
+        cor_primaria: form.cor_primaria.trim() || null,
+        cor_secundaria: form.cor_secundaria.trim() || null,
         segmento,
         terminologia: terminologiaLimpa,
       });
@@ -461,6 +481,32 @@ useEffect(() => {
             </Input>
           </FieldGroup>
 
+        </div>
+
+        {/* Nível 2: cor de marca customizável — sem valor definido (campo em
+            branco) significa "sem customização"; a landing usa a paleta
+            padrão do Nexofy automaticamente (fallback tratado no front-end,
+            nunca no banco — ver PED-5). */}
+        <div className="flex items-center justify-between mt-6 mb-2">
+          <h3 className="text-sm font-black text-foreground flex items-center gap-1.5">
+            <Palette size={14} className="text-primary" />
+            Cor de Marca
+          </h3>
+          {(form.cor_primaria || form.cor_secundaria) && podeEditar && (
+            <button
+              type="button"
+              onClick={handleRestaurarCores}
+              className="text-xs font-bold text-muted-foreground hover:text-foreground underline underline-offset-2"
+            >
+              Restaurar padrão
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground font-medium mb-4">
+          Deixe em branco para usar a paleta padrão do Nexofy na landing page do estúdio.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <FieldGroup>
             <Label htmlFor="cor_primaria" className="flex items-center gap-1.5">
               <Palette size={12} />
@@ -475,12 +521,13 @@ useEffect(() => {
                 onChange={handleChange}
                 className="h-11 w-14 cursor-pointer rounded-xl border border-border bg-input p-1"
                 disabled={!podeEditar}
+                aria-label="Selecionar cor primária"
               />
               <Input
                 name="cor_primaria"
                 value={form.cor_primaria}
                 onChange={handleChange}
-                placeholder="#7c3aed"
+                placeholder="Padrão do Nexofy"
                 className="font-mono"
                 error={erros.cor_primaria}
                 disabled={!podeEditar}
@@ -488,6 +535,37 @@ useEffect(() => {
             </div>
             {erros.cor_primaria && (
               <p className="text-xs text-destructive font-medium">{erros.cor_primaria}</p>
+            )}
+          </FieldGroup>
+
+          <FieldGroup>
+            <Label htmlFor="cor_secundaria" className="flex items-center gap-1.5">
+              <Palette size={12} />
+              Cor Secundária <span className="text-muted-foreground font-normal">(opcional)</span>
+            </Label>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                id="cor_secundaria"
+                name="cor_secundaria"
+                value={REGEX_HEX_COLOR.test(form.cor_secundaria) ? form.cor_secundaria : '#a78bfa'}
+                onChange={handleChange}
+                className="h-11 w-14 cursor-pointer rounded-xl border border-border bg-input p-1"
+                disabled={!podeEditar}
+                aria-label="Selecionar cor secundária"
+              />
+              <Input
+                name="cor_secundaria"
+                value={form.cor_secundaria}
+                onChange={handleChange}
+                placeholder="Padrão do Nexofy"
+                className="font-mono"
+                error={erros.cor_secundaria}
+                disabled={!podeEditar}
+              />
+            </div>
+            {erros.cor_secundaria && (
+              <p className="text-xs text-destructive font-medium">{erros.cor_secundaria}</p>
             )}
           </FieldGroup>
         </div>
