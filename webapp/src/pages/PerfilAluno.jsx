@@ -1607,7 +1607,7 @@ export default function PerfilAluno() {
         isOpen={modalRenovarAberto}
         onClose={() => setModalRenovarAberto(false)}
         alunoId={id}
-        onSucesso={handleRenovacaoSucesso}
+        onSucesso={aoRenovarComSucesso}
       />
 
       {/* MODAL: Editar Cadastro */}
