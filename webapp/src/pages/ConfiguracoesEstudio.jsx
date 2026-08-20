@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
 import { useImpersonation } from '../context/ImpersonationContext';
-import { atualizarEstudio, uploadLogo } from '../services/estudioService';
+import { atualizarEstudio, uploadLogo, uploadImagemCapa } from '../services/estudioService';
 import { SEGMENTOS, CHAVES_TERMINOLOGIA, terminologiaPadraoDoSegmento } from '../lib/terminologia';
 import { showToast } from '../components/shared/Toast';
 import Button from '../components/ui/Button';
@@ -66,6 +66,11 @@ const REGEX_HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 const PROTOCOLOS_URL_PERMITIDOS = ['http:', 'https:'];
 const TAMANHO_MAX_LOGO_MB = 5;
 const TIPOS_LOGO_PERMITIDOS = ['image/png', 'image/jpeg', 'image/webp'];
+// PED-9: mesmo limite do bucket `landing-covers` (file_size_limit=5MB na
+// migration) — validado no client primeiro pra dar erro amigável em vez
+// de deixar o Storage rejeitar cru.
+const TAMANHO_MAX_CAPA_MB = 5;
+const TIPOS_CAPA_PERMITIDOS = ['image/png', 'image/jpeg', 'image/webp'];
 
 function urlValidaOuVazia(valor) {
   if (!valor) return true; // campo opcional
@@ -91,6 +96,8 @@ export default function ConfiguracoesEstudio() {
 
   const fileInputRef = useRef(null);
   const objectUrlRef = useRef(null);
+  const fileInputCapaRef = useRef(null);
+  const objectUrlCapaRef = useRef(null);
   const montadoRef = useRef(true);
 
 useEffect(() => {
@@ -101,12 +108,14 @@ useEffect(() => {
   const [salvando, setSalvando] = useState(false);
   const [uploadandoLogo, setUploadandoLogo] = useState(false);
   const [previewLogo, setPreviewLogo] = useState(null);
+  const [uploadandoCapa, setUploadandoCapa] = useState(false);
+  const [previewCapa, setPreviewCapa] = useState(null);
   const [erros, setErros] = useState({});
 
   const [form, setForm] = useState({
     nome:           '',
     whatsapp:       '',
-    instagram:  '',
+    instagram_url:  '',
     maps_url:       '',
     email_suporte:  '',
     cor_primaria:   '#7c3aed',
@@ -135,7 +144,7 @@ useEffect(() => {
     setForm({
       nome:          estudio.nome          ?? '',
       whatsapp:      estudio.whatsapp      ?? '',
-      instagram:     estudio.instagram ?? '',
+      instagram_url: estudio.instagram_url ?? '',
       maps_url:      estudio.maps_url      ?? '',
       email_suporte: estudio.email_suporte ?? '',
       cor_primaria:  estudio.cor_primaria  ?? '',
@@ -143,6 +152,7 @@ useEffect(() => {
       timezone:      estudio.timezone      ?? 'America/Sao_Paulo',
     });
     setPreviewLogo(estudio.logo_url ?? null);
+    setPreviewCapa(estudio.landing_config?.imagem_capa_url ?? null);
     setSegmento(estudio.segmento ?? 'danca_fitness');
     setTerminologia(estudio.terminologia ?? {});
   }, [estudio]);
@@ -152,6 +162,9 @@ useEffect(() => {
     return () => {
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
+      }
+      if (objectUrlCapaRef.current) {
+        URL.revokeObjectURL(objectUrlCapaRef.current);
       }
     };
   }, []);
@@ -221,8 +234,8 @@ useEffect(() => {
     if (form.whatsapp && !REGEX_WHATSAPP.test(form.whatsapp)) {
       novosErros.whatsapp = 'Use apenas números: código do país + DDD + número.';
     }
-    if (!urlValidaOuVazia(form.instagram)) {
-      novosErros.instagram = 'URL inválida (use http:// ou https://).';
+    if (!urlValidaOuVazia(form.instagram_url)) {
+      novosErros.instagram_url = 'URL inválida (use http:// ou https://).';
     }
     if (!urlValidaOuVazia(form.maps_url)) {
       novosErros.maps_url = 'URL inválida (use http:// ou https://).';
@@ -339,6 +352,62 @@ useEffect(() => {
     }
   }
 
+  // PED-9: mesmo padrão de handleLogoChange acima — preview otimista via
+  // blob URL, upload real em background, rollback do preview em caso de
+  // erro. `landing_config` é lido via invalidação de `estudio`/`estudio-atual`
+  // (mesmas queries do logo), já que uploadImagemCapa mescla a URL nova
+  // nesse jsonb no backend.
+  async function handleCapaChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!idEfetivo) {
+      showToast.error('Não foi possível identificar o estúdio. Recarregue a página.');
+      e.target.value = '';
+      return;
+    }
+    if (!TIPOS_CAPA_PERMITIDOS.includes(file.type)) {
+      showToast.error('Formato inválido. Use PNG, JPG ou WEBP.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > TAMANHO_MAX_CAPA_MB * 1024 * 1024) {
+      showToast.error(`A imagem deve ter até ${TAMANHO_MAX_CAPA_MB}MB.`);
+      e.target.value = '';
+      return;
+    }
+
+    if (objectUrlCapaRef.current) {
+      URL.revokeObjectURL(objectUrlCapaRef.current);
+    }
+    const novaPreviewUrl = URL.createObjectURL(file);
+    objectUrlCapaRef.current = novaPreviewUrl;
+    setPreviewCapa(novaPreviewUrl);
+
+    setUploadandoCapa(true);
+    try {
+      const url = await uploadImagemCapa(idEfetivo, file);
+      if (objectUrlCapaRef.current) {
+        URL.revokeObjectURL(objectUrlCapaRef.current); // revoga assim que a URL remota está disponível
+        objectUrlCapaRef.current = null;
+      }
+      if (montadoRef.current) setPreviewCapa(url);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['estudio-atual'] }),
+        queryClient.invalidateQueries({ queryKey: ['estudio', idEfetivo] }),
+      ]);
+      if (montadoRef.current) showToast.success('Foto de capa atualizada com sucesso!');
+    } catch (err) {
+      console.error('[ConfiguracoesEstudio] Erro ao enviar foto de capa:', err);
+      if (!montadoRef.current) return;
+      showToast.error('Erro ao enviar a foto de capa. Tente novamente.');
+      setPreviewCapa(estudio?.landing_config?.imagem_capa_url ?? null);
+    } finally {
+      if (montadoRef.current) setUploadandoCapa(false);
+      e.target.value = '';
+    }
+  }
+
   const nomeSegmentoPendente = useMemo(
     () => SEGMENTOS.find((s) => s.value === trocaSegmentoPendente)?.label ?? '',
     [trocaSegmentoPendente]
@@ -437,6 +506,67 @@ useEffect(() => {
             </Button>
             <p className="text-xs text-muted-foreground font-medium">
               PNG, JPG, WEBP ou SVG. Até {TAMANHO_MAX_LOGO_MB}MB. Recomendado: 512×512 px.
+            </p>
+          </div>
+        </div>
+      </Surface>
+
+      {/* PED-9 (Nível 3): upload da foto de capa da landing pública.
+          Vive aqui por ora só para cumprir o critério de aceite do ticket
+          (upload funcional + preview); PED-10 deve mover este bloco para
+          dentro da nova aba "Landing Page", junto do formulário de
+          headline/subheadline/sobre_texto e do preview em tempo real. */}
+      <Surface variant="card" padding="xl">
+        <h2 className="text-base font-black text-foreground mb-6 flex items-center gap-2">
+          <Upload size={18} className="text-primary" />
+          Foto de Capa da Landing Page
+        </h2>
+
+        <div className="flex items-center gap-6">
+          {/* Preview — proporção larga (16:9-ish) por ser a imagem de hero da landing, ao contrário do logo quadrado */}
+          <div className="relative shrink-0">
+            <div className="w-48 h-28 rounded-2xl border-2 border-dashed border-border bg-muted flex items-center justify-center overflow-hidden">
+              {previewCapa ? (
+                <img
+                  src={previewCapa}
+                  alt="Foto de capa da landing page"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-xs text-muted-foreground font-medium px-3 text-center">
+                  Sem foto de capa — usa a padrão do segmento
+                </span>
+              )}
+            </div>
+            {uploadandoCapa && (
+              <div className="absolute inset-0 rounded-2xl bg-black/40 flex items-center justify-center">
+                <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              </div>
+            )}
+          </div>
+
+          {/* Ações */}
+          <div className="space-y-2">
+            <input
+              ref={fileInputCapaRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={handleCapaChange}
+              disabled={!podeEditar}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<Upload size={16} />}
+              onClick={() => fileInputCapaRef.current?.click()}
+              loading={uploadandoCapa}
+              disabled={!podeEditar}
+            >
+              {uploadandoCapa ? 'Enviando...' : 'Escolher imagem'}
+            </Button>
+            <p className="text-xs text-muted-foreground font-medium">
+              PNG, JPG ou WEBP. Até {TAMANHO_MAX_CAPA_MB}MB. Recomendado: 1600×900 px (16:9).
             </p>
           </div>
         </div>
@@ -685,19 +815,19 @@ useEffect(() => {
           </FieldGroup>
 
           <FieldGroup>
-            <Label htmlFor="instagram">Instagram</Label>
+            <Label htmlFor="instagram_url">Instagram</Label>
             <Input
-              id="instagram"
-              name="instagram"
-              value={form.instagram}
+              id="instagram_url"
+              name="instagram_url"
+              value={form.instagram_url}
               onChange={handleChange}
               placeholder="https://instagram.com/meuestudio"
               leftIcon={<Instagram size={16} />}
-              error={erros.instagram}
+              error={erros.instagram_url}
               disabled={!podeEditar}
             />
-            {erros.instagram && (
-              <p className="text-xs text-destructive font-medium">{erros.instagram}</p>
+            {erros.instagram_url && (
+              <p className="text-xs text-destructive font-medium">{erros.instagram_url}</p>
             )}
           </FieldGroup>
 
