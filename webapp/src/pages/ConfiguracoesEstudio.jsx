@@ -106,7 +106,7 @@ useEffect(() => {
   const [form, setForm] = useState({
     nome:           '',
     whatsapp:       '',
-    instagram_url:  '',
+    instagram:  '',
     maps_url:       '',
     email_suporte:  '',
     cor_primaria:   '#7c3aed',
@@ -135,7 +135,7 @@ useEffect(() => {
     setForm({
       nome:          estudio.nome          ?? '',
       whatsapp:      estudio.whatsapp      ?? '',
-      instagram_url: estudio.instagram_url ?? '',
+      instagram:     estudio.instagram ?? '',
       maps_url:      estudio.maps_url      ?? '',
       email_suporte: estudio.email_suporte ?? '',
       cor_primaria:  estudio.cor_primaria  ?? '',
@@ -221,8 +221,8 @@ useEffect(() => {
     if (form.whatsapp && !REGEX_WHATSAPP.test(form.whatsapp)) {
       novosErros.whatsapp = 'Use apenas números: código do país + DDD + número.';
     }
-    if (!urlValidaOuVazia(form.instagram_url)) {
-      novosErros.instagram_url = 'URL inválida (use http:// ou https://).';
+    if (!urlValidaOuVazia(form.instagram)) {
+      novosErros.instagram = 'URL inválida (use http:// ou https://).';
     }
     if (!urlValidaOuVazia(form.maps_url)) {
       novosErros.maps_url = 'URL inválida (use http:// ou https://).';
@@ -685,19 +685,19 @@ useEffect(() => {
           </FieldGroup>
 
           <FieldGroup>
-            <Label htmlFor="instagram_url">Instagram</Label>
+            <Label htmlFor="instagram">Instagram</Label>
             <Input
-              id="instagram_url"
-              name="instagram_url"
-              value={form.instagram_url}
+              id="instagram"
+              name="instagram"
+              value={form.instagram}
               onChange={handleChange}
               placeholder="https://instagram.com/meuestudio"
               leftIcon={<Instagram size={16} />}
-              error={erros.instagram_url}
+              error={erros.instagram}
               disabled={!podeEditar}
             />
-            {erros.instagram_url && (
-              <p className="text-xs text-destructive font-medium">{erros.instagram_url}</p>
+            {erros.instagram && (
+              <p className="text-xs text-destructive font-medium">{erros.instagram}</p>
             )}
           </FieldGroup>
 

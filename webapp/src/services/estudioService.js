@@ -7,7 +7,7 @@ import { SEGMENTOS } from '../lib/terminologia';
 // seria silenciosamente descartado no filter abaixo — mesma allowlist
 // server-adjacent que já protege os campos existentes.
 const CAMPOS_PERMITIDOS = [
-  'nome', 'whatsapp', 'instagram_url', 'maps_url',
+  'nome', 'whatsapp', 'instagram', 'maps_url',
   'email_suporte', 'cor_primaria', 'cor_secundaria', 'timezone',
   'segmento', 'terminologia', 'modulos_ativos',
 ];
