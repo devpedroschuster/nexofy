@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import './landing.css';
@@ -6,6 +6,7 @@ import { useEstudioPublico } from '../hooks/useEstudioPublico';
 import { usePlanosPublicos } from '../hooks/usePlanosPublicos';
 import { useModalidadesPublicas } from '../hooks/useModalidadesPublicas';
 import { resolverLandingCopy } from '../lib/landingCopy';
+import { montarCssVarsMarca } from '../lib/corMarca';
 import { leadsService } from '../services/leadsService';
 import LandingNexofy from './LandingNexofy';
 
@@ -72,6 +73,14 @@ export default function Landing() {
 
   //  Copy do hero/seções — varia por segmento (danca_fitness, escolinha_esportiva, ...)
   const copy = resolverLandingCopy(estudio?.segmento);
+
+  //  Nível 2: cor de marca customizável. `null` quando o estúdio não
+  //  definiu cor nenhuma — nesse caso não aplicamos `style` no root e os
+  //  defaults fixos do landing.css valem (mesmo comportamento de antes).
+  const cssVarsMarca = useMemo(
+    () => montarCssVarsMarca(estudio?.cor_primaria, estudio?.cor_secundaria),
+    [estudio?.cor_primaria, estudio?.cor_secundaria]
+  );
 
   // Lead form state
   const [leadNome, setLeadNome] = useState('');
@@ -195,7 +204,7 @@ export default function Landing() {
     : null;
 
   return (
-    <div id="page-landing">
+    <div id="page-landing" style={cssVarsMarca ?? undefined}>
 
       {/* ── Navbar ─────────────────────────────────────────────────── */}
       <nav className="navbar">

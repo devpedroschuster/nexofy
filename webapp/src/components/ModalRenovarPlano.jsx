@@ -68,10 +68,12 @@ export default function ModalRenovarPlano({ isOpen, onClose, alunoId, onSucesso 
   }, [isOpen, alunoId, estudioId]);
 
   const calcularDataFim = (dataInicioStr, meses) => {
-    const data = new Date(dataInicioStr + 'T12:00:00');
-    data.setMonth(data.getMonth() + meses);
-    return data.toISOString().split('T')[0];
-  };
+  if (!dataInicioStr) return '';
+  const data = new Date(dataInicioStr + 'T12:00:00');
+  if (isNaN(data.getTime())) return '';
+  data.setMonth(data.getMonth() + meses);
+  return data.toISOString().split('T')[0];
+};
 
   const handlePlanoChange = (e) => {
     const planoId = e.target.value;
