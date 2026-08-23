@@ -4,8 +4,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
 import { useImpersonation } from '../context/ImpersonationContext';
-import { atualizarEstudio, uploadLogo, uploadImagemCapa } from '../services/estudioService';
+import { atualizarEstudio, uploadLogo, uploadImagemCapa, salvarLandingTexto } from '../services/estudioService';
 import { SEGMENTOS, CHAVES_TERMINOLOGIA, terminologiaPadraoDoSegmento } from '../lib/terminologia';
+import { resolverLandingCopy } from '../lib/landingCopy';
 import { showToast } from '../components/shared/Toast';
 import Button from '../components/ui/Button';
 import Input, { Label } from '../components/ui/Input';
@@ -112,6 +113,14 @@ useEffect(() => {
   const [previewCapa, setPreviewCapa] = useState(null);
   const [erros, setErros] = useState({});
 
+  // PED-10: aba ativa desta página. Client-side apenas (sem mudança de
+  // rota) — "Landing Page" agrupa capa (PED-9) + headline/subheadline/
+  // sobre_texto (aqui), com salvamento próprio via landing_config,
+  // separado do "Salvar Configurações" da aba Geral (atualizarEstudio).
+  const [abaAtiva, setAbaAtiva] = useState('geral');
+  const [landingForm, setLandingForm] = useState({ headline: '', subheadline: '', sobre_texto: '' });
+  const [salvandoLanding, setSalvandoLanding] = useState(false);
+
   const [form, setForm] = useState({
     nome:           '',
     whatsapp:       '',
@@ -153,6 +162,11 @@ useEffect(() => {
     });
     setPreviewLogo(estudio.logo_url ?? null);
     setPreviewCapa(estudio.landing_config?.imagem_capa_url ?? null);
+    setLandingForm({
+      headline:    estudio.landing_config?.headline    ?? '',
+      subheadline: estudio.landing_config?.subheadline ?? '',
+      sobre_texto: estudio.landing_config?.sobre_texto ?? '',
+    });
     setSegmento(estudio.segmento ?? 'danca_fitness');
     setTerminologia(estudio.terminologia ?? {});
   }, [estudio]);
@@ -408,10 +422,53 @@ useEffect(() => {
     }
   }
 
+  function handleLandingChange(e) {
+    const { name, value } = e.target;
+    setLandingForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  // "Restaurar padrão" por campo: limpa só o campo clicado, não os outros
+  // dois — cada chave do landing_config é independente (ver AC do PED-10).
+  function handleRestaurarCampoLanding(campo) {
+    setLandingForm((prev) => ({ ...prev, [campo]: '' }));
+  }
+
+  async function handleSalvarLanding() {
+    if (!idEfetivo) {
+      showToast.error('Não foi possível identificar o estúdio. Recarregue a página.');
+      return;
+    }
+    if (!podeEditar) {
+      showToast.error('Você não tem permissão para editar essas configurações.');
+      return;
+    }
+
+    setSalvandoLanding(true);
+    try {
+      await salvarLandingTexto(idEfetivo, landingForm);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['estudio-atual'] }),
+        queryClient.invalidateQueries({ queryKey: ['estudio', idEfetivo] }),
+      ]);
+      if (montadoRef.current) showToast.success('Landing page atualizada com sucesso!');
+    } catch (err) {
+      console.error('[ConfiguracoesEstudio] Erro ao salvar landing:', err);
+      if (!montadoRef.current) return;
+      showToast.error(err?.message || 'Erro ao salvar. Tente novamente.');
+    } finally {
+      if (montadoRef.current) setSalvandoLanding(false);
+    }
+  }
+
   const nomeSegmentoPendente = useMemo(
     () => SEGMENTOS.find((s) => s.value === trocaSegmentoPendente)?.label ?? '',
     [trocaSegmentoPendente]
   );
+
+  // PED-10: default de copy do segmento ATUAL selecionado no form (não o
+  // já salvo em `estudio.segmento`) — se o admin troca o segmento e ainda
+  // não salvou, os placeholders/preview já refletem o segmento novo.
+  const copyPadraoLanding = useMemo(() => resolverLandingCopy(segmento), [segmento]);
 
   if (isLoading) {
     return (
@@ -454,6 +511,37 @@ useEffect(() => {
         </p>
       </div>
 
+      {/* PED-10: abas client-side (sem rota nova) — "Geral" mantém o fluxo
+          existente (nome, logo, cor, segmento, contato); "Landing Page"
+          agrupa o mini page-builder (capa, headline, subheadline, sobre),
+          com salvamento próprio e independente. */}
+      <div className="flex gap-2 border-b border-border">
+        <button
+          type="button"
+          onClick={() => setAbaAtiva('geral')}
+          className={`px-4 py-2.5 text-sm font-bold border-b-2 -mb-px transition-colors ${
+            abaAtiva === 'geral'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Geral
+        </button>
+        <button
+          type="button"
+          onClick={() => setAbaAtiva('landing')}
+          className={`px-4 py-2.5 text-sm font-bold border-b-2 -mb-px transition-colors ${
+            abaAtiva === 'landing'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Landing Page
+        </button>
+      </div>
+
+      {abaAtiva === 'geral' && (
+      <>
       {/* Logo */}
       <Surface variant="card" padding="xl">
         <h2 className="text-base font-black text-foreground mb-6 flex items-center gap-2">
@@ -506,67 +594,6 @@ useEffect(() => {
             </Button>
             <p className="text-xs text-muted-foreground font-medium">
               PNG, JPG, WEBP ou SVG. Até {TAMANHO_MAX_LOGO_MB}MB. Recomendado: 512×512 px.
-            </p>
-          </div>
-        </div>
-      </Surface>
-
-      {/* PED-9 (Nível 3): upload da foto de capa da landing pública.
-          Vive aqui por ora só para cumprir o critério de aceite do ticket
-          (upload funcional + preview); PED-10 deve mover este bloco para
-          dentro da nova aba "Landing Page", junto do formulário de
-          headline/subheadline/sobre_texto e do preview em tempo real. */}
-      <Surface variant="card" padding="xl">
-        <h2 className="text-base font-black text-foreground mb-6 flex items-center gap-2">
-          <Upload size={18} className="text-primary" />
-          Foto de Capa da Landing Page
-        </h2>
-
-        <div className="flex items-center gap-6">
-          {/* Preview — proporção larga (16:9-ish) por ser a imagem de hero da landing, ao contrário do logo quadrado */}
-          <div className="relative shrink-0">
-            <div className="w-48 h-28 rounded-2xl border-2 border-dashed border-border bg-muted flex items-center justify-center overflow-hidden">
-              {previewCapa ? (
-                <img
-                  src={previewCapa}
-                  alt="Foto de capa da landing page"
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <span className="text-xs text-muted-foreground font-medium px-3 text-center">
-                  Sem foto de capa — usa a padrão do segmento
-                </span>
-              )}
-            </div>
-            {uploadandoCapa && (
-              <div className="absolute inset-0 rounded-2xl bg-black/40 flex items-center justify-center">
-                <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              </div>
-            )}
-          </div>
-
-          {/* Ações */}
-          <div className="space-y-2">
-            <input
-              ref={fileInputCapaRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              className="hidden"
-              onChange={handleCapaChange}
-              disabled={!podeEditar}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={<Upload size={16} />}
-              onClick={() => fileInputCapaRef.current?.click()}
-              loading={uploadandoCapa}
-              disabled={!podeEditar}
-            >
-              {uploadandoCapa ? 'Enviando...' : 'Escolher imagem'}
-            </Button>
-            <p className="text-xs text-muted-foreground font-medium">
-              PNG, JPG ou WEBP. Até {TAMANHO_MAX_CAPA_MB}MB. Recomendado: 1600×900 px (16:9).
             </p>
           </div>
         </div>
@@ -863,6 +890,212 @@ useEffect(() => {
           {salvando ? 'Salvando...' : 'Salvar Configurações'}
         </Button>
       </div>
+      </>
+      )}
+
+      {abaAtiva === 'landing' && (
+      <>
+      {/* Foto de capa — movido do bloco antigo em Geral (PED-9) pra cá */}
+      <Surface variant="card" padding="xl">
+        <h2 className="text-base font-black text-foreground mb-6 flex items-center gap-2">
+          <Upload size={18} className="text-primary" />
+          Foto de Capa da Landing Page
+        </h2>
+
+        <div className="flex items-center gap-6">
+          {/* Preview — proporção larga (16:9-ish) por ser a imagem de hero da landing, ao contrário do logo quadrado */}
+          <div className="relative shrink-0">
+            <div className="w-48 h-28 rounded-2xl border-2 border-dashed border-border bg-muted flex items-center justify-center overflow-hidden">
+              {previewCapa ? (
+                <img
+                  src={previewCapa}
+                  alt="Foto de capa da landing page"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-xs text-muted-foreground font-medium px-3 text-center">
+                  Sem foto de capa — usa a padrão do segmento
+                </span>
+              )}
+            </div>
+            {uploadandoCapa && (
+              <div className="absolute inset-0 rounded-2xl bg-black/40 flex items-center justify-center">
+                <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              </div>
+            )}
+          </div>
+
+          {/* Ações */}
+          <div className="space-y-2">
+            <input
+              ref={fileInputCapaRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={handleCapaChange}
+              disabled={!podeEditar}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<Upload size={16} />}
+              onClick={() => fileInputCapaRef.current?.click()}
+              loading={uploadandoCapa}
+              disabled={!podeEditar}
+            >
+              {uploadandoCapa ? 'Enviando...' : 'Escolher imagem'}
+            </Button>
+            <p className="text-xs text-muted-foreground font-medium">
+              PNG, JPG ou WEBP. Até {TAMANHO_MAX_CAPA_MB}MB. Recomendado: 1600×900 px (16:9).
+            </p>
+          </div>
+        </div>
+      </Surface>
+
+      {/* Textos customizados — headline/subheadline/sobre_texto, cada um
+          com placeholder = default do segmento e "Restaurar padrão"
+          individual. Campo vazio = usa o default (nunca obrigatório). */}
+      <Surface variant="card" padding="xl">
+        <h2 className="text-base font-black text-foreground mb-2 flex items-center gap-2">
+          <Globe size={18} className="text-primary" />
+          Textos da Landing Page
+        </h2>
+        <p className="text-xs text-muted-foreground font-medium mb-6">
+          Deixe em branco para usar o texto padrão do segmento (mostrado como exemplo abaixo de cada campo).
+        </p>
+
+        <div className="space-y-5">
+          <FieldGroup>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="landing_headline">Headline</Label>
+              {landingForm.headline && podeEditar && (
+                <button
+                  type="button"
+                  onClick={() => handleRestaurarCampoLanding('headline')}
+                  className="text-xs font-bold text-muted-foreground hover:text-foreground underline underline-offset-2"
+                >
+                  Restaurar padrão
+                </button>
+              )}
+            </div>
+            <Input
+              id="landing_headline"
+              name="headline"
+              value={landingForm.headline}
+              onChange={handleLandingChange}
+              placeholder={`${copyPadraoLanding.heroTitlePre} ${copyPadraoLanding.heroTitleEm}`}
+              disabled={!podeEditar}
+            />
+          </FieldGroup>
+
+          <FieldGroup>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="landing_subheadline">Subheadline</Label>
+              {landingForm.subheadline && podeEditar && (
+                <button
+                  type="button"
+                  onClick={() => handleRestaurarCampoLanding('subheadline')}
+                  className="text-xs font-bold text-muted-foreground hover:text-foreground underline underline-offset-2"
+                >
+                  Restaurar padrão
+                </button>
+              )}
+            </div>
+            <Input
+              as="textarea"
+              rows={2}
+              id="landing_subheadline"
+              name="subheadline"
+              value={landingForm.subheadline}
+              onChange={handleLandingChange}
+              placeholder={copyPadraoLanding.heroSub}
+              disabled={!podeEditar}
+            />
+          </FieldGroup>
+
+          <FieldGroup>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="landing_sobre_texto">Sobre o estúdio</Label>
+              {landingForm.sobre_texto && podeEditar && (
+                <button
+                  type="button"
+                  onClick={() => handleRestaurarCampoLanding('sobre_texto')}
+                  className="text-xs font-bold text-muted-foreground hover:text-foreground underline underline-offset-2"
+                >
+                  Restaurar padrão
+                </button>
+              )}
+            </div>
+            <Input
+              as="textarea"
+              rows={4}
+              id="landing_sobre_texto"
+              name="sobre_texto"
+              value={landingForm.sobre_texto}
+              onChange={handleLandingChange}
+              placeholder={copyPadraoLanding.sobreTexto}
+              disabled={!podeEditar}
+            />
+          </FieldGroup>
+        </div>
+      </Surface>
+
+      {/* Preview em tempo real — card leve, não é um iframe da landing de
+          verdade (custo/complexidade desproporcional pro valor aqui);
+          atualiza a cada tecla, sem debounce (render de texto puro, sem
+          custo perceptível). */}
+      <Surface variant="card" padding="none" className="overflow-hidden">
+        <div className="px-6 pt-5 pb-3 border-b border-border">
+          <h2 className="text-base font-black text-foreground flex items-center gap-2">
+            <Globe size={18} className="text-primary" />
+            Preview
+          </h2>
+          <p className="text-xs text-muted-foreground font-medium mt-1">
+            Como o hero da landing pública vai ficar (aproximado).
+          </p>
+        </div>
+        <div
+          className="relative flex flex-col items-start justify-center gap-3 p-8 min-h-[220px] bg-cover bg-center"
+          style={{
+            backgroundImage: previewCapa
+              ? `linear-gradient(to bottom, rgba(0,0,0,.45), rgba(0,0,0,.65)), url(${previewCapa})`
+              : 'linear-gradient(135deg, hsl(var(--muted)) 0%, hsl(var(--border)) 100%)',
+          }}
+        >
+          <span className="inline-block px-3 py-1 rounded-full bg-white/15 backdrop-blur text-white text-[11px] font-bold tracking-wide">
+            {copyPadraoLanding.heroTag}
+          </span>
+          <h3 className={`text-2xl font-black leading-tight ${previewCapa ? 'text-white' : 'text-foreground'}`}>
+            {landingForm.headline || `${copyPadraoLanding.heroTitlePre} ${copyPadraoLanding.heroTitleEm}`}
+          </h3>
+          <p className={`text-sm font-medium max-w-lg ${previewCapa ? 'text-white/90' : 'text-muted-foreground'}`}>
+            {landingForm.subheadline || copyPadraoLanding.heroSub}
+          </p>
+        </div>
+        <div className="p-6">
+          <p className="text-xs font-black text-muted-foreground uppercase tracking-wide mb-1.5">Sobre o estúdio</p>
+          <p className="text-sm text-foreground font-medium">
+            {landingForm.sobre_texto || copyPadraoLanding.sobreTexto}
+          </p>
+        </div>
+      </Surface>
+
+      {/* Botão salvar (independente do "Salvar Configurações" da aba Geral —
+          persiste via salvarLandingTexto/RPC de merge, não atualizarEstudio) */}
+      <div className="flex justify-end pb-4">
+        <Button
+          variant="brand"
+          size="lg"
+          leftIcon={<Save size={20} />}
+          onClick={handleSalvarLanding}
+          loading={salvandoLanding}
+          disabled={!podeEditar || salvandoLanding}
+        >
+          {salvandoLanding ? 'Salvando...' : 'Salvar Landing Page'}
+        </Button>
+      </div>
+      </>
+      )}
 
       {/* Confirmação de troca de segmento */}
       <ModalConfirmacao

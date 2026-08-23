@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { withSentry } from "../_shared/sentry.ts"
 
 // Envia um push "sua aula é amanhã" para os alunos com aula no dia seguinte.
 //
@@ -73,7 +74,7 @@ async function enviarEmLotes(notificacoes, log) {
   return { enviados, falhas };
 }
 
-serve(async (req) => {
+serve(withSentry("lembretes-aula", async (req) => {
   const logs: string[] = [];
   const log = (msg: string) => { console.log(msg); logs.push(msg); };
 
@@ -263,4 +264,4 @@ serve(async (req) => {
       headers: { "Content-Type": "application/json" },
     });
   }
-})
+}));

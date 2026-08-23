@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { withSentry } from "../_shared/sentry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -42,7 +43,7 @@ interface Estudio {
   asaas_status: string
 }
 
-serve(async (req: Request) => {
+serve(withSentry("criar-subconta-asaas", async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -237,4 +238,4 @@ serve(async (req: Request) => {
     console.error('[criar-subconta-asaas] Erro inesperado:', err)
     return response({ erro: 'Erro inesperado ao criar subconta.' }, 500)
   }
-})
+}));

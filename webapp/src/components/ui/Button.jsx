@@ -26,6 +26,9 @@ const VARIANTS = {
   success:
     'bg-success text-success-foreground shadow-sm ' +
     'hover:bg-success/90 hover:-translate-y-0.5',
+  info:
+    'bg-blue-500 text-white shadow-sm ' +
+    'hover:bg-blue-500/90 hover:-translate-y-0.5',
   outline:
     'border border-border bg-transparent text-foreground ' +
     'hover:bg-accent hover:text-accent-foreground hover:border-primary/40',
@@ -37,6 +40,10 @@ const VARIANTS = {
   link:
     'text-primary underline-offset-4 hover:underline active:scale-100',
 };
+
+// Aliases que existem por retrocompatibilidade e são resolvidos para outra
+// chave em VARIANTS, mas não devem disparar o aviso de "variante desconhecida".
+const VARIANT_ALIASES = new Set(['brand']);
 
 const SIZES = {
   sm:      'h-8 rounded-md px-3 text-xs',
@@ -81,7 +88,14 @@ const Button = React.forwardRef(function Button(
   const isNativeFormControl = NATIVE_FORM_TAGS.has(typeof Tag === 'string' ? Tag : '');
 
   if (process.env.NODE_ENV !== 'production') {
-    if (variant && !VARIANTS[variant]) {
+    // FIX: aliases (ex.: 'brand') são válidos mesmo com valor `null` em
+    // VARIANTS — antes o check `!VARIANTS[variant]` disparava um falso
+    // positivo para eles. Agora só avisa quando a variante não é nem uma
+    // chave conhecida nem um alias.
+    const isKnownVariant =
+      VARIANT_ALIASES.has(variant) ||
+      Object.prototype.hasOwnProperty.call(VARIANTS, variant);
+    if (variant && !isKnownVariant) {
       console.warn(`[Button] variant "${variant}" desconhecida. Usando "default".`);
     }
     if (size && !(size in SIZES)) {

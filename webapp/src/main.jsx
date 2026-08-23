@@ -1,11 +1,26 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import * as Sentry from '@sentry/react'
 import App from './App.jsx'
 import './index.css'
 import ErrorBoundary from './components/shared/ErrorBoundary.jsx'
 
 if (import.meta.env.DEV) {
   console.log('[main.jsx] v2 carregado ✅')
+}
+
+if (import.meta.env.PROD && import.meta.env.VITE_SENTRY_DSN) {
+  Sentry.init({
+    dsn: import.meta.env.VITE_SENTRY_DSN,
+    environment: import.meta.env.MODE,
+    tracesSampleRate: 0,
+    ignoreErrors: [
+      'ResizeObserver loop limit exceeded',
+      'Failed to fetch dynamically imported module',
+      'Loading chunk',
+    ],
+  })
+  window.Sentry = Sentry
 }
 
 window.addEventListener('beforeinstallprompt', (e) => {

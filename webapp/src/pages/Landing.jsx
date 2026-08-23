@@ -1,14 +1,25 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import './landing.css';
 import { useEstudioPublico } from '../hooks/useEstudioPublico';
 import { usePlanosPublicos } from '../hooks/usePlanosPublicos';
 import { useModalidadesPublicas } from '../hooks/useModalidadesPublicas';
-import { resolverLandingCopy } from '../lib/landingCopy';
+import { resolverLandingCopy, resolverConteudoLanding } from '../lib/landingCopy';
 import { montarCssVarsMarca } from '../lib/corMarca';
 import { leadsService } from '../services/leadsService';
 import LandingNexofy from './LandingNexofy';
+
+function setMetaTag(attr, key, content) {
+  if (!content) return;
+  let tag = document.querySelector(`meta[${attr}="${key}"]`);
+  if (!tag) {
+    tag = document.createElement('meta');
+    tag.setAttribute(attr, key);
+    document.head.appendChild(tag);
+  }
+  tag.setAttribute('content', content);
+}
 
 // Domínio raiz que realmente bateu com o hostname atual, só pra exibir
 // na mensagem de erro abaixo. Cai pro primeiro configurado (ou o default
@@ -71,8 +82,10 @@ export default function Landing() {
   //  Modalidades reais do estúdio, agrupadas por área
   const { grupos: modalidadeGrupos, loading: modalidadesLoading } = useModalidadesPublicas(estudio?.id);
 
-  //  Copy do hero/seções — varia por segmento (danca_fitness, escolinha_esportiva, ...)
-  const copy = resolverLandingCopy(estudio?.segmento);
+  //  Copy do hero/seções — varia por segmento (danca_fitness, escolinha_esportiva, ...),
+  //  com override por campo quando o estúdio customizou via mini page-builder (PED-9/10/11).
+  //  Capa customizada (imagem_capa_url) ainda não é consumida aqui de propósito.
+  const copy = resolverConteudoLanding(estudio?.landing_config, resolverLandingCopy(estudio?.segmento));
 
   //  Nível 2: cor de marca customizável. `null` quando o estúdio não
   //  definiu cor nenhuma — nesse caso não aplicamos `style` no root e os
@@ -81,6 +94,15 @@ export default function Landing() {
     () => montarCssVarsMarca(estudio?.cor_primaria, estudio?.cor_secundaria),
     [estudio?.cor_primaria, estudio?.cor_secundaria]
   );
+
+    useEffect(() => {
+    if (!estudio) return;
+    const titulo = `${nomeEstudio} | ${copy.heroTag}`;
+    document.title = titulo;
+    setMetaTag('name', 'description', copy.heroSub);
+    setMetaTag('property', 'og:title', titulo);
+    setMetaTag('property', 'og:description', copy.heroSub);
+  }, [estudio, nomeEstudio, copy.heroTag, copy.heroSub]);
 
   // Lead form state
   const [leadNome, setLeadNome] = useState('');
@@ -214,6 +236,7 @@ export default function Landing() {
         </a>
         <div className="nav-links">
           <button className="nav-link" onClick={() => scrollTo('sec-aulas')}>Modalidades</button>
+          <button className="nav-link" onClick={() => scrollTo('sec-sobre')}>Sobre</button>
           <button className="nav-link" onClick={() => scrollTo('sec-planos')}>Planos</button>
           <button className="nav-link" onClick={() => scrollTo('sec-footer')}>Contato</button>
           <button
@@ -241,7 +264,11 @@ export default function Landing() {
           </div>
 
           <h1 className="anim-fade-up s1">
-            {copy.heroTitlePre}<br /><em>{copy.heroTitleEm}</em>
+            {copy.heroCustomizado ? (
+              copy.heroTitlePre
+            ) : (
+              <>{copy.heroTitlePre}<br /><em>{copy.heroTitleEm}</em></>
+            )}
           </h1>
 
           <p className="hero-sub anim-fade-up s2">
@@ -456,6 +483,15 @@ export default function Landing() {
         </section>
       )}
 
+            {/* ── Sobre (copy custom ou default do segmento, PED-11) ──────── */}
+      <section id="sec-sobre" className="section section-alt">
+        <div className="section-header">
+          <div className="section-tag">Sobre nós</div>
+          <h2 className="section-title">Quem somos</h2>
+          <p className="section-sub">{copy.sobreTexto}</p>
+        </div>
+      </section>
+
       {/* ── Anchor for "Quero experimentar" scrolls ────────────────── */}
       <div id="hero-form-anchor" style={{ height: 0 }}></div>
 
@@ -543,6 +579,7 @@ export default function Landing() {
           <div>
             <div className="footer-col-title">Navegação</div>
             <button className="footer-link" onClick={() => scrollTo('sec-aulas')}>Modalidades</button>
+            <button className="footer-link" onClick={() => scrollTo('sec-sobre')}>Sobre</button>
             <button className="footer-link" onClick={() => scrollTo('sec-planos')}>Planos</button>
             <button className="footer-link" onClick={() => navigate('/login')}>Área do Aluno</button>
           </div>

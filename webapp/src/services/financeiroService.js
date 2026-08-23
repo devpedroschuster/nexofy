@@ -2,17 +2,32 @@ import { supabase } from '../lib/supabase';
 import { gerarRepassesDaMensalidade } from './repasseService';
 
 export const financeiroService = {
+  /**
+   * Lista mensalidades cujo período de cobertura [data_vencimento, periodo_fim]
+   * tem QUALQUER sobreposição com o intervalo [inicio, fim] solicitado (mês
+   * selecionado no Financeiro).
+   *
+   * ANTES: filtrava por igualdade estrita de data_vencimento dentro do mês.
+   * Isso fazia pagamentos à vista de planos multi-mês (trimestral/semestral/
+   * anual) desaparecerem da visão financeira nos meses seguintes ao mês em
+   * que foram lançados — mesmo o aluno estando em dia. Ver migration
+   * cobertura_pagamento_periodo (2026-08-22).
+   *
+   * Pagamentos parcelados/mensais não mudam de comportamento: para eles,
+   * periodo_fim = data_vencimento, então a sobreposição de intervalo se
+   * reduz exatamente à igualdade de mês que já existia.
+   */
   async listarMensalidades(inicio, fim, estudioId) {
     const { data, error } = await supabase
       .from('mensalidades')
       .select(`
         *,
         alunos (nome_completo),
-        planos (nome, preco, is_plano_livre)
+        planos (nome, preco, is_plano_livre, duracao_meses)
       `)
       .eq('estudio_id', estudioId)
-      .gte('data_vencimento', inicio)
       .lte('data_vencimento', fim)
+      .gte('periodo_fim', inicio)
       .order('data_vencimento', { ascending: true });
 
     if (error) throw error;
@@ -91,6 +106,7 @@ d.setMonth(d.getMonth() + 1);
           aluno_id: aluno.id,
           plano_id: aluno.plano_id,
           data_vencimento: proximaData,
+          periodo_fim: proximaData, // cobrança mensal normal: cobre só o próprio mês
           status: 'pendente',
           estudio_id: estudioId, // Sprint 02
         });
@@ -107,11 +123,38 @@ d.setMonth(d.getMonth() + 1);
     return true;
   },
 
+  /**
+   * Calcula até quando um pagamento cobre o aluno.
+   *
+   * @param {string} dataVencimento - 'YYYY-MM-DD'
+   * @param {boolean} pagoAVista - se true, cobre os `duracaoMeses` inteiros do plano
+   * @param {number} duracaoMeses - duração do plano em meses (1 para mensal)
+   * @returns {string} 'YYYY-MM-DD' — igual a dataVencimento quando não é à vista
+   *   ou quando o plano é mensal (duracaoMeses <= 1).
+   */
+  calcularPeriodoFim(dataVencimento, pagoAVista, duracaoMeses) {
+    if (!pagoAVista || !duracaoMeses || duracaoMeses <= 1) {
+      return dataVencimento;
+    }
+    const d = new Date(dataVencimento + 'T12:00:00');
+    d.setMonth(d.getMonth() + (duracaoMeses - 1));
+    return d.toISOString().split('T')[0];
+  },
+
   // Sprint 02: estudioId obrigatório no INSERT de mensalidades manuais
   async adicionarPagamentoManual(dados, estudioId) {
     if (!estudioId) {
       throw new Error('adicionarPagamentoManual: estudioId é obrigatório.');
     }
+
+    const dataVencimento = dados.data_vencimento;
+    // pagoAVista + duracaoMeses vêm do formulário (ver ModalAdicionarPagamentoManual)
+    // apenas quando tipo_aula === 'regular' e o plano selecionado tem duracao_meses > 1.
+    const periodoFim = financeiroService.calcularPeriodoFim(
+      dataVencimento,
+      dados.pago_a_vista,
+      dados.duracao_meses
+    );
 
     const payload = {
       aluno_id: dados.aluno_id ? dados.aluno_id : null,
@@ -126,8 +169,9 @@ d.setMonth(d.getMonth() + 1);
 
       forma_pagamento: dados.forma_pagamento,
 
-      data_vencimento: dados.data_vencimento,
-      data_pagamento: dados.status === 'pago' ? (dados.data_pagamento ?? dados.data_vencimento) : null,
+      data_vencimento: dataVencimento,
+      periodo_fim: periodoFim,
+      data_pagamento: dados.status === 'pago' ? (dados.data_pagamento ?? dataVencimento) : null,
 
       estudio_id: estudioId, // Sprint 02
     };
@@ -154,6 +198,67 @@ d.setMonth(d.getMonth() + 1);
         return { ...data, _avisoRepasse: 'Repasse não gerado automaticamente. Verifique manualmente.' };
       }
     }
+    return data;
+  },
+
+  /**
+   * Gera uma idempotency key estável para o fluxo de cobrança Asaas.
+   * Chamar UMA VEZ ao abrir o modal/tela de cobrança (ex: useState(() =>
+   * financeiroService.criarIdempotencyKey())), nunca dentro do onClick —
+   * senão cada clique gera uma key nova e a proteção contra duplo-clique
+   * não funciona.
+   */
+  criarIdempotencyKey() {
+    return crypto.randomUUID();
+  },
+
+  /**
+   * Cria (ou reaproveita, se já existir) uma cobrança Asaas para o aluno.
+   *
+   * @param {Object} params
+   * @param {number} params.alunoId
+   * @param {number|null} [params.planoId] - obrigatório se tipoCobranca='mensalidade'
+   * @param {number} params.valor
+   * @param {string} [params.formaPagamento='PIX']
+   * @param {'mensalidade'|'avulso'} params.tipoCobranca
+   * @param {string} [params.mesReferencia] - 'YYYY-MM', obrigatório se tipoCobranca='mensalidade'
+   *   (usado para localizar a pendência já criada pelo cron de gerarMensalidades)
+   * @param {boolean} [params.cobrePeriodoCompleto=false] - true se este pagamento único
+   *   cobre os duracao_meses inteiros do plano (ex: semestral pago de uma vez)
+   * @param {string} [params.descricao]
+   * @param {string} params.idempotencyKey - gerado via criarIdempotencyKey(), estável
+   *   durante o fluxo (não regenerar em retry/duplo-clique)
+   * @returns {Promise<{link_pagamento: string, asaas_payment_id: string, reaproveitada?: boolean}>}
+   */
+  async criarCobrancaAsaas({
+    alunoId,
+    planoId = null,
+    valor,
+    formaPagamento = 'PIX',
+    tipoCobranca,
+    mesReferencia = null,
+    cobrePeriodoCompleto = false,
+    descricao = null,
+    idempotencyKey,
+  }) {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    const { data, error } = await supabase.functions.invoke('criar-cobranca-asaas', {
+      body: {
+        aluno_id: alunoId,
+        plano_id: planoId,
+        valor,
+        forma_pagamento: formaPagamento,
+        tipo_cobranca: tipoCobranca,
+        mes_referencia: mesReferencia,
+        cobre_periodo_completo: cobrePeriodoCompleto,
+        descricao,
+        idempotency_key: idempotencyKey,
+      },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    });
+
+    if (error) throw new Error(error.message ?? 'Falha ao criar cobrança Asaas.');
     return data;
   },
 

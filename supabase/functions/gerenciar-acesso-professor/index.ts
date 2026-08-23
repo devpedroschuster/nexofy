@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { getUserByEmail } from '../_shared/getUserByEmail.ts';
+import { withSentry } from "../_shared/sentry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,7 +38,7 @@ async function criarUsuarioSemSenha(
   return data.user.id;
 }
 
-serve(async (req: Request) => {
+serve(withSentry("gerenciar-acesso-professor", async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
@@ -277,4 +278,4 @@ if (acao === 'criar') {
     console.error('[gerenciar-acesso-professor]', msg);
     return resp({ error: msg }, 500);
   }
-});
+}));

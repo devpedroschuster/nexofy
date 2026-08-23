@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { getUserByEmail } from '../_shared/getUserByEmail.ts';
+import { withSentry } from "../_shared/sentry.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -45,7 +46,7 @@ async function criarUsuarioSemSenha(
   return novoAuthId;
 }
 
-serve(async (req: Request) => {
+serve(withSentry("criar-acesso-aluno", async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
@@ -166,4 +167,4 @@ let novoAuthId: string;
     console.error('[criar-acesso-aluno] Erro:', err);
     return resp({ error: err instanceof Error ? err.message : 'Erro interno.' }, 500);
   }
-});
+}));

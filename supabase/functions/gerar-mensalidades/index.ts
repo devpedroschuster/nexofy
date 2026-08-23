@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { withSentry } from "../_shared/sentry.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,7 +26,7 @@ interface MembroAdmin {
   user_id: string
 }
 
-serve(async (req: Request) => {
+serve(withSentry("gerar-mensalidades", async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -240,7 +241,7 @@ serve(async (req: Request) => {
     console.error('[gerar-mensalidades] Erro:', message)
     return response({ erro: message }, 500)
   }
-})
+}))
 
 function response(body: object, status = 200) {
   return new Response(JSON.stringify(body), {

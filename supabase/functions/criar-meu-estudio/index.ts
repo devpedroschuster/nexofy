@@ -18,6 +18,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { withSentry } from "../_shared/sentry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -34,7 +35,7 @@ function resp(body: object, status = 200): Response {
 // Slug: apenas letras minúsculas, dígitos e hífens, 3–50 caracteres.
 const SLUG_RE = /^[a-z0-9-]{3,50}$/;
 
-serve(async (req: Request) => {
+serve(withSentry("criar-meu-estudio", async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
@@ -155,4 +156,4 @@ serve(async (req: Request) => {
       slug: resultado.estudio_slug,
     },
   }, 201);
-});
+}));

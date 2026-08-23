@@ -19,6 +19,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { withSentry } from "../_shared/sentry.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -78,7 +79,7 @@ function distribuirCentavos(total: number, n: number): number[] {
   return parcelas;
 }
 
-serve(async (req: Request) => {
+serve(withSentry("preview-repasses-mensais", async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -419,4 +420,4 @@ serve(async (req: Request) => {
     console.error('[preview-repasses-mensais] ERRO:', message);
     return response({ error: message }, 500);
   }
-});
+}));

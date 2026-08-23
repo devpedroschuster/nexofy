@@ -6,6 +6,12 @@
 //
 // Design: faixa amarela de alerta, discreta mas impossível de ignorar.
 // Não interfere com o layout existente — usa position: fixed + z-index alto.
+//
+// AUDITORIA: catch genérico sem parâmetro de erro perdia a causa raiz de
+// falhas em sairImpersonation() (nenhum log, só toast). Agora logamos o erro
+// original antes de exibir o toast — importante enquanto Sentry não estiver
+// integrado (ver plano de Go-Live, seção 4) e mesmo depois, como contexto
+// extra no breadcrumb.
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -25,7 +31,9 @@ export default function BannerImpersonation() {
     try {
       await sairImpersonation();
       navigate('/super/estudios');
-    } catch {
+    } catch (err) {
+      // FIX: loga a causa raiz em vez de descartá-la silenciosamente.
+      console.error('[BannerImpersonation] Erro ao sair da impersonation:', err);
       showToast.error('Erro ao encerrar visualização. Tente novamente.');
       setSaindo(false);
     }

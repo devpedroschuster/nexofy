@@ -34,6 +34,32 @@ export async function atualizarEstudio(estudioId, dados) {
   if (error) throw error;
 }
 
+// PED-9/PED-10: helper único pro merge atômico de `landing_config`,
+// reaproveitado tanto pelo upload de capa quanto pelo formulário de
+// headline/subheadline/sobre_texto (PED-10) — nenhum dos dois usa
+// atualizarEstudio() aqui porque um UPDATE ingênuo apagaria as chaves
+// que o outro fluxo já tinha salvo (ver comentário da RPC no Postgres).
+async function atualizarLandingConfig(estudioId, patch) {
+  const { data, error } = await supabase.rpc('atualizar_landing_config', {
+    p_estudio_id: estudioId,
+    p_patch: patch,
+  });
+  if (error) throw error;
+  return data;
+}
+
+// PED-10: salva headline/subheadline/sobre_texto do mini page-builder.
+// Valores vazios viram `null` no patch — sem isso, string vazia
+// persistiria como override "de propósito" e a landing pública nunca
+// mais cairia no fallback do segmento pra aquele campo específico.
+export async function salvarLandingTexto(estudioId, { headline, subheadline, sobre_texto }) {
+  return atualizarLandingConfig(estudioId, {
+    headline: headline?.trim() || null,
+    subheadline: subheadline?.trim() || null,
+    sobre_texto: sobre_texto?.trim() || null,
+  });
+}
+
 export async function uploadLogo(estudioId, file) {
   const path = `${estudioId}/logo.png`;
 
@@ -93,11 +119,7 @@ export async function uploadImagemCapa(estudioId, file) {
   // o browser/CDN serviria a imagem antiga do cache após a troca.
   const urlComCacheBuster = `${data.publicUrl}?v=${Date.now()}`;
 
-  const { error: rpcError } = await supabase.rpc('atualizar_landing_config', {
-    p_estudio_id: estudioId,
-    p_patch: { imagem_capa_url: urlComCacheBuster },
-  });
-  if (rpcError) throw rpcError;
+  await atualizarLandingConfig(estudioId, { imagem_capa_url: urlComCacheBuster });
 
   return urlComCacheBuster;
 }

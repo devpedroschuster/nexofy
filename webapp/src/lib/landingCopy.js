@@ -20,6 +20,10 @@ const LANDING_COPY = {
     modalidadesTitle: 'Nossas Modalidades',
     modalidadesSub:
       'Práticas pensadas pra cada objetivo, com professores que acompanham sua evolução de perto.',
+    // PED-10: default do campo "sobre o estúdio" do mini page-builder —
+    // não existia copy de "sobre" neste módulo antes (só hero/modalidades).
+    sobreTexto:
+      'Um espaço pensado para você evoluir com constância, cercado de gente que também está na jornada. Aqui, cada aula é uma oportunidade de se conhecer melhor através do movimento.',
   },
   escolinha_esportiva: {
     heroTag: 'Treino · Formação · Competição',
@@ -31,6 +35,8 @@ const LANDING_COPY = {
     modalidadesTitle: 'Nossas Modalidades',
     modalidadesSub:
       'Categorias organizadas por faixa etária e nível técnico, com treinadores dedicados a cada turma.',
+    sobreTexto:
+      'Um espaço de formação esportiva onde técnica, disciplina e o amor pelo esporte caminham juntos. Aqui, cada atleta é acompanhado de perto, dentro e fora de quadra.',
   },
 };
 
@@ -45,4 +51,32 @@ const SEGMENTO_FALLBACK = 'danca_fitness';
  */
 export function resolverLandingCopy(segmento) {
   return LANDING_COPY[segmento] ?? LANDING_COPY[SEGMENTO_FALLBACK];
+}
+
+/**
+ * Mescla o conteúdo customizado do estúdio (`landing_config`, PED-9/10)
+ * com a copy padrão do segmento (Nível 1), campo a campo. Um campo
+ * vazio/null em `landing_config` cai pro default do segmento — nunca
+ * deixamos a landing com um campo em branco.
+ *
+ * Nota: a capa customizada (`imagem_capa_url`) ainda não é consumida
+ * aqui — landing de capa ainda em desenvolvimento (ver PED-9/PED-11).
+ *
+ * @param {object|null|undefined} landingConfig - `estudio.landing_config`
+ * @param {ReturnType<typeof resolverLandingCopy>} copyPadrao
+ */
+export function resolverConteudoLanding(landingConfig, copyPadrao) {
+  const cfg = landingConfig ?? {};
+  const headline = cfg.headline?.trim() || null;
+  const subheadline = cfg.subheadline?.trim() || null;
+  const sobreTexto = cfg.sobre_texto?.trim() || null;
+
+  return {
+    ...copyPadrao,
+    heroTitlePre: headline ?? copyPadrao.heroTitlePre,
+    heroTitleEm: headline ? '' : copyPadrao.heroTitleEm,
+    heroCustomizado: Boolean(headline),
+    heroSub: subheadline ?? copyPadrao.heroSub,
+    sobreTexto: sobreTexto ?? copyPadrao.sobreTexto,
+  };
 }

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { withSentry } from "../_shared/sentry.ts"
 
 // ─────────────────────────────────────────────────────────────────────────
 // webhook-pagamento
@@ -39,7 +40,7 @@ const EVENTOS_FALHOU = new Set([
   "PAYMENT_CHARGEBACK_REQUESTED",
 ])
 
-serve(async (req) => {
+serve(withSentry("webhook-pagamento", async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
   }
@@ -116,6 +117,25 @@ serve(async (req) => {
   }
   if (novoStatus) updatePayload.status = novoStatus
 
+  // Quando o pagamento é confirmado via Asaas, precisamos preencher valor_pago —
+  // até agora essa coluna só era gravada em confirmações manuais
+  // (financeiroService.confirmarPagamento), então pagamentos automáticos via
+  // Asaas ficavam com valor_pago nulo para sempre, quebrando relatórios
+  // financeiros que dependem desse campo (ver criar-cobranca-asaas, que agora
+  // grava só valor_cobranca na criação).
+  if (novoStatus === "pago") {
+    const { data: mensalidadeAtual } = await supabase
+      .from("mensalidades")
+      .select("valor_cobranca, valor_pago")
+      .eq("id", mensalidade.id)
+      .single()
+
+    if (mensalidadeAtual && mensalidadeAtual.valor_pago === null) {
+      updatePayload.valor_pago = mensalidadeAtual.valor_cobranca
+      updatePayload.data_pagamento = new Date().toISOString().split("T")[0]
+    }
+  }
+
   const { error: updateErr } = await supabase
     .from("mensalidades")
     .update(updatePayload)
@@ -148,7 +168,7 @@ serve(async (req) => {
   // status acima para 'pendente'.
 
   return response({ recebido: true, mensalidade_id: mensalidade.id, status: novoStatus ?? "sem_alteracao" })
-})
+}))
 
 function response(body: object, status = 200) {
   return new Response(JSON.stringify(body), {

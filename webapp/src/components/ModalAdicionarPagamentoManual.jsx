@@ -47,6 +47,7 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
     data_vencimento: new Date().toISOString().split('T')[0],
     professor_id: '',
     modalidade_nome: '',
+    pago_a_vista: false,
   };
   const [form, setForm] = useState(initialForm);
 
@@ -66,7 +67,9 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
     try {
       const [{ data: a, error: ea }, { data: p, error: ep }, { data: profs, error: eprofs }] = await Promise.all([
         supabase.from('alunos').select('id, nome_completo, plano_id').eq('estudio_id', estudioId).order('nome_completo'),
-        supabase.from('planos').select('id, nome, preco').eq('estudio_id', estudioId),
+        // duracao_meses: necessário para calcular o período de cobertura
+        // de pagamentos à vista (ver checkbox "Pagamento à vista" abaixo).
+        supabase.from('planos').select('id, nome, preco, duracao_meses').eq('estudio_id', estudioId),
         supabase.from('professores').select('id, nome').eq('estudio_id', estudioId),
       ]);
       if (ea || ep || eprofs) throw ea || ep || eprofs;
@@ -80,6 +83,9 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
       setCarregandoDados(false);
     }
   }
+
+  const planoSelecionado = planos.find(p => p.id === form.plano_id);
+  const planoMultiMes = form.tipo_aula === 'regular' && Number(planoSelecionado?.duracao_meses) > 1;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -107,6 +113,11 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
         data_vencimento: form.data_vencimento,
         status: 'pago',
         data_pagamento: form.data_pagamento,
+        // Só tem efeito quando planoMultiMes — ver calcularPeriodoFim em
+        // financeiroService.js. Para plano mensal ou aula avulsa, o
+        // período de cobertura é sempre igual à data de vencimento.
+        pago_a_vista: planoMultiMes ? form.pago_a_vista : false,
+        duracao_meses: planoSelecionado?.duracao_meses ?? null,
       };
 
       if (form.tipo_aula === 'regular' && form.plano_id) {
@@ -194,7 +205,7 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
             as="select"
             leftIcon={<LayoutList size={18} />}
             value={form.tipo_aula}
-            onChange={e => setForm({ ...form, tipo_aula: e.target.value })}
+            onChange={e => setForm({ ...form, tipo_aula: e.target.value, pago_a_vista: false })}
           >
             <option value="regular">Mensalidade (Plano Regular)</option>
             <option value="avulsa">Aula Avulsa / Coreografia</option>
@@ -213,7 +224,7 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
               value={form.plano_id}
               onChange={e => {
                 const p = planos.find(pl => pl.id === e.target.value);
-                setForm({ ...form, plano_id: e.target.value, valor_pago: p ? p.preco : '' });
+                setForm({ ...form, plano_id: e.target.value, valor_pago: p ? p.preco : '', pago_a_vista: false });
               }}
               required
             >
@@ -222,6 +233,35 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
                 <option key={p.id} value={p.id}>{p.nome} - R$ {p.preco}</option>
               ))}
             </Input>
+          </div>
+        )}
+
+        {/* Pagamento à vista — só aparece para planos com duração > 1 mês.
+            Sem isso marcado, uma mensalidade de plano trimestral/semestral/
+            anual paga de uma vez some do Financeiro nos meses seguintes ao
+            do lançamento, mesmo o aluno estando em dia (ver migration
+            cobertura_pagamento_periodo, 2026-08-22). */}
+        {planoMultiMes && (
+          <div className="rounded-lg border border-border bg-muted/40 p-3">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={form.pago_a_vista}
+                onChange={e => setForm({ ...form, pago_a_vista: e.target.checked })}
+              />
+              <span className="text-sm">
+                <span className="font-bold block">Pagamento à vista</span>
+                <span className="text-muted-foreground text-xs">
+                  Este valor cobre os {planoSelecionado.duracao_meses} meses do plano de uma vez.
+                  O aluno ficará marcado como em dia até{' '}
+                  {new Date(
+                    financeiroService.calcularPeriodoFim(form.data_vencimento, true, planoSelecionado.duracao_meses) + 'T12:00:00'
+                  ).toLocaleDateString('pt-BR')}
+                  {' '}sem gerar cobrança nova nesse período.
+                </span>
+              </span>
+            </label>
           </div>
         )}
 

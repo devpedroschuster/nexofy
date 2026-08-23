@@ -1,4 +1,24 @@
 // webapp/src/pages/SuperAdmin/components/TabelaEstudios.jsx
+//
+// AUDITORIA (correções aplicadas):
+//   CR-1 (race condition) — antes só a linha clicada ficava desabilitada
+//   (`acessando={acessandoId === e.id && impersonando}`), permitindo disparar
+//   `acessarEstudio` para outro estúdio enquanto uma chamada já estava em
+//   voo. A correção principal já foi feita na ORIGEM (ImpersonationContext
+//   agora recusa chamadas concorrentes), mas aqui reforçamos a UX: TODAS as
+//   linhas ficam com a ação "Acessar" desabilitada enquanto `impersonando`
+//   for true, não só a que foi clicada — o usuário não fica intrigado
+//   vendo outras linhas "clicáveis" que na prática seriam ignoradas.
+//
+//   CR-2 (null-safety) — `estudio.nome.charAt(0)`, `estudio.total_alunos`
+//   e `estudio.total_professores` eram acessados sem fallback; um valor
+//   nulo/vazio vindo da RPC de agregação derrubava a tabela inteira com
+//   TypeError. Agora há fallback seguro para cada campo.
+//
+//   Erro de autorização — a checagem por substring de mensagem
+//   (`msg.includes('Acesso negado')`) foi extraída para
+//   `isErroAcessoNegado()`, centralizada em ImpersonationContext, preferindo
+//   `error.code` estruturado quando disponível.
 
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -13,7 +33,7 @@ import Skeleton from '../../../components/ui/Skeleton';
 import { ModalConfirmacao } from '../../../components/ui/Modal';
 import { showToast } from '../../../components/shared/Toast';
 import { superAdminService } from '../../../services/superAdminService';
-import { useImpersonation } from '../../../context/ImpersonationContext';
+import { useImpersonation, isErroAcessoNegado } from '../../../context/ImpersonationContext';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { formatarData } from '../../../lib/utils';
 
@@ -25,8 +45,24 @@ const TH = ({ children, className = '' }) => (
   </th>
 );
 
+// Nome de exibição defensivo: nunca deixa a UI quebrar por dado ausente.
+function nomeExibicao(estudio) {
+  return estudio?.nome?.trim() || 'Estúdio sem nome';
+}
+
+function inicial(estudio) {
+  const nome = nomeExibicao(estudio);
+  return nome.charAt(0).toUpperCase();
+}
+
+// Contagens defensivas: RPCs de agregação podem retornar NULL em vez de 0
+// em cenários de LEFT JOIN sem correspondência.
+function contagem(valor) {
+  return Number(valor ?? 0).toLocaleString('pt-BR');
+}
+
 // Menu de acoes por linha
-function MenuAcoes({ estudio, onSuspender, onReativar, onAcessar, acessando }) {
+function MenuAcoes({ estudio, onSuspender, onReativar, onAcessar, acessando, acessarDesabilitado }) {
   const [aberto, setAberto] = useState(false);
   const ativo = estudio.status !== 'suspenso';
 
@@ -49,7 +85,8 @@ function MenuAcoes({ estudio, onSuspender, onReativar, onAcessar, acessando }) {
           <div className="fixed inset-0 z-10" onClick={() => setAberto(false)} />
           <div className="absolute right-0 top-10 z-20 w-52 rounded-2xl border border-border bg-card shadow-card py-1 animate-in fade-in zoom-in-95 duration-150">
             <button
-              className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-bold text-info hover:bg-info-soft transition-colors"
+              className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-bold text-info hover:bg-info-soft transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={acessarDesabilitado}
               onClick={() => { setAberto(false); onAcessar(estudio); }}
             >
               <Eye size={15} /> Acessar como admin
@@ -79,7 +116,7 @@ function MenuAcoes({ estudio, onSuspender, onReativar, onAcessar, acessando }) {
   );
 }
 
-function LinhaEstudio({ estudio, onSuspender, onReativar, onAcessar, acessando }) {
+function LinhaEstudio({ estudio, onSuspender, onReativar, onAcessar, acessando, acessarDesabilitado }) {
   const ativo = estudio.status !== 'suspenso';
 
   return (
@@ -88,12 +125,12 @@ function LinhaEstudio({ estudio, onSuspender, onReativar, onAcessar, acessando }
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-primary-soft flex items-center justify-center shrink-0">
             <span className="text-primary font-black text-sm">
-              {estudio.nome.charAt(0).toUpperCase()}
+              {inicial(estudio)}
             </span>
           </div>
           <div className="min-w-0">
-            <p className="font-bold text-sm text-foreground truncate">{estudio.nome}</p>
-            <p className="text-xs text-muted-foreground font-mono">{estudio.slug}</p>
+            <p className="font-bold text-sm text-foreground truncate">{nomeExibicao(estudio)}</p>
+            <p className="text-xs text-muted-foreground font-mono">{estudio.slug ?? '—'}</p>
           </div>
         </div>
       </td>
@@ -101,14 +138,14 @@ function LinhaEstudio({ estudio, onSuspender, onReativar, onAcessar, acessando }
       <td className="py-4 px-4 text-center">
         <div className="flex items-center justify-center gap-1.5 text-sm font-bold text-foreground">
           <Users size={14} className="text-muted-foreground" />
-          {estudio.total_alunos.toLocaleString('pt-BR')}
+          {contagem(estudio.total_alunos)}
         </div>
       </td>
 
       <td className="py-4 px-4 text-center">
         <div className="flex items-center justify-center gap-1.5 text-sm font-bold text-foreground">
           <GraduationCap size={14} className="text-muted-foreground" />
-          {estudio.total_professores.toLocaleString('pt-BR')}
+          {contagem(estudio.total_professores)}
         </div>
       </td>
 
@@ -132,6 +169,7 @@ function LinhaEstudio({ estudio, onSuspender, onReativar, onAcessar, acessando }
           onReativar={onReativar}
           onAcessar={onAcessar}
           acessando={acessando}
+          acessarDesabilitado={acessarDesabilitado}
         />
       </td>
     </tr>
@@ -203,16 +241,20 @@ export default function TabelaEstudios({ busca }) {
   });
 
   async function handleAcessar(estudio) {
+    // Defesa em profundidade: mesmo com o botão desabilitado durante
+    // `impersonando`, evita corrida se o clique já estava em processamento
+    // (ex.: duplo clique muito rápido antes do React re-renderizar o disabled).
+    if (impersonando) return;
+
     setAcessandoId(estudio.id);
     try {
       await acessarEstudio(estudio);
       navigate('/dashboard');
     } catch (err) {
-      const msg = err?.message ?? '';
       showToast.error(
-        msg.includes('Acesso negado') || msg.includes('super_admin')
+        isErroAcessoNegado(err)
           ? 'Apenas super_admins podem usar esta funcao.'
-          : `Erro ao acessar estudio: ${msg || 'tente novamente.'}`
+          : `Erro ao acessar estudio: ${err?.message || 'tente novamente.'}`
       );
     } finally {
       setAcessandoId(null);
@@ -266,6 +308,10 @@ export default function TabelaEstudios({ busca }) {
                     onReativar={(est)  => setConfirmacao({ estudio: est, acao: 'reativar'  })}
                     onAcessar={handleAcessar}
                     acessando={acessandoId === e.id && impersonando}
+                    // FIX (CR-1): desabilita "Acessar" em TODAS as linhas
+                    // enquanto qualquer troca de estúdio estiver em andamento,
+                    // não só na linha que originou a chamada.
+                    acessarDesabilitado={impersonando}
                   />
                 ))
               }
