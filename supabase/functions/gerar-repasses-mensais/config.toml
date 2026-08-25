@@ -1,0 +1,17 @@
+[functions.gerar-repasses-mensais]
+verify_jwt = false  # Permite chamada do cron sem auth (mesmo padrão de gerar-mensalidades).
+                    # Chamadas manuais continuam exigindo Bearer JWT de admin — ver AUTORIZAÇÃO em index.ts.
+
+# ATENÇÃO (PED-33): este agendamento é um PONTO DE PARTIDA, não uma decisão
+# de produto confirmada. Até este PR, gerar-repasses-mensais só era chamada
+# manualmente pelo admin (botão no painel) — não existia cron nenhum para
+# ela. Antes de habilitar isto em produção, confirme com o time:
+#   - o dia/horário certo (aqui: dia 5, 09h — depois do vencimento das
+#     mensalidades no dia 10 do mês ANTERIOR, mas isso não foi validado);
+#   - se falta rodar isso por estúdio (hoje a function processa só o
+#     estudioId enviado no payload — um cron real precisaria iterar sobre
+#     todos os estúdios ativos, o que esta function ainda não faz).
+[[cron]]
+name = "repasses-mensais"
+schedule = "0 9 5 * *"   # Dia 5 de cada mês, às 09h — A CONFIRMAR
+command = "POST https://<tciiepqmnrrcjnqhspvw>.supabase.co/functions/v1/gerar-repasses-mensais -H 'x-cron-secret: ${CRON_SECRET}'"

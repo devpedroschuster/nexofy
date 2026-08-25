@@ -17,7 +17,15 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { withSentry } from "../_shared/sentry.ts";
+import { withSentry, withCronCheckIn, Sentry } from "../_shared/sentry.ts";
+
+// PED-33: precisa bater com o `schedule` do [[cron]] em config.toml.
+// ATENÇÃO: hoje esta function só é chamada manualmente (via botão no
+// admin, supabase.functions.invoke com JWT) — não existe cron real ainda.
+// O dia/horário abaixo (e o config.toml adicionado junto) é um ponto de
+// partida a confirmar com o time antes de ativar o agendamento de verdade.
+const CRON_MONITOR_SLUG = 'gerar-repasses-mensais';
+const CRON_SCHEDULE = { crontab: '0 9 5 * *', timezone: 'America/Sao_Paulo' };
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -91,6 +99,24 @@ serve(withSentry("gerar-repasses-mensais", async (req: Request) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  // PED-33: mesmo padrão do gerar-mensalidades — calculado antes do parse
+  // do body, pra um payload vazio/errado do cron também contar como falha
+  // monitorada em vez de só um 400 silencioso.
+  const cronSecretHeader = req.headers.get('x-cron-secret') ?? '';
+  const expectedCronSecretEarly = Deno.env.get('CRON_SECRET') ?? '';
+  const isCronInvocation = expectedCronSecretEarly.length > 0 && cronSecretHeader === expectedCronSecretEarly;
+
+  if (isCronInvocation) {
+    return await withCronCheckIn(CRON_MONITOR_SLUG, CRON_SCHEDULE, () => handleRequest(req));
+  }
+  return await handleRequest(req);
+}));
+
+async function handleRequest(req: Request): Promise<Response> {
+  const cronSecret = req.headers.get('x-cron-secret') ?? '';
+  const expectedCronSecret = Deno.env.get('CRON_SECRET') ?? '';
+  const isCronInvocation = expectedCronSecret.length > 0 && cronSecret === expectedCronSecret;
+
   try {
     const { estudioId, mes, ano } = await req.json();
 
@@ -111,38 +137,46 @@ serve(withSentry("gerar-repasses-mensais", async (req: Request) => {
     // ── AUTENTICAÇÃO E AUTORIZAÇÃO ───────────────────────────────────────────
     // Endpoint em lote: sem este guard, qualquer chamador poderia gerar repasses
     // financeiros para todos os professores/alunos de QUALQUER estúdio informado.
-    const authHeader = req.headers.get('Authorization') ?? '';
-    if (!authHeader.startsWith('Bearer ')) {
-      return response({ error: 'Cabeçalho Authorization ausente ou inválido.' }, 401);
-    }
+    //
+    // PED-33: adicionado o mesmo bypass de cron secret já usado em
+    // gerar-mensalidades — necessário pra function poder ser chamada por um
+    // agendamento (sem sessão de usuário) e ainda assim ser monitorada pelo
+    // Sentry Crons acima. "É cron" nunca é inferido pela ausência do header
+    // Authorization, só pelo segredo compartilhado explícito.
+    if (!isCronInvocation) {
+      const authHeader = req.headers.get('Authorization') ?? '';
+      if (!authHeader.startsWith('Bearer ')) {
+        return response({ error: 'Cabeçalho Authorization ausente ou inválido.' }, 401);
+      }
 
-    const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
-      global: { headers: { Authorization: authHeader } },
-    });
+      const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+        global: { headers: { Authorization: authHeader } },
+      });
 
-    const { data: { user: caller }, error: authErr } = await userClient.auth.getUser();
-    if (authErr || !caller) {
-      return response({ error: 'Token inválido ou expirado.' }, 401);
-    }
+      const { data: { user: caller }, error: authErr } = await userClient.auth.getUser();
+      if (authErr || !caller) {
+        return response({ error: 'Token inválido ou expirado.' }, 401);
+      }
 
-    // super_admin tem acesso global (independente de estudio_id); admin só no seu próprio estúdio.
-    const { data: membrosCaller, error: membroErr } = await supabase
-      .from('estudio_membros')
-      .select('role, estudio_id')
-      .eq('user_id', caller.id);
+      // super_admin tem acesso global (independente de estudio_id); admin só no seu próprio estúdio.
+      const { data: membrosCaller, error: membroErr } = await supabase
+        .from('estudio_membros')
+        .select('role, estudio_id')
+        .eq('user_id', caller.id);
 
-    if (membroErr) {
-      console.error('[gerar-repasses-mensais] Erro ao verificar perfil do caller:', membroErr);
-      return response({ error: 'Erro ao verificar permissões do usuário.' }, 500);
-    }
+      if (membroErr) {
+        console.error('[gerar-repasses-mensais] Erro ao verificar perfil do caller:', membroErr);
+        return response({ error: 'Erro ao verificar permissões do usuário.' }, 500);
+      }
 
-    const ehSuperAdmin = (membrosCaller ?? []).some((m) => m.role === 'super_admin');
-    const ehAdminDoEstudio = (membrosCaller ?? []).some(
-      (m) => m.role === 'admin' && m.estudio_id === estudioId,
-    );
+      const ehSuperAdmin = (membrosCaller ?? []).some((m) => m.role === 'super_admin');
+      const ehAdminDoEstudio = (membrosCaller ?? []).some(
+        (m) => m.role === 'admin' && m.estudio_id === estudioId,
+      );
 
-    if (!ehSuperAdmin && !ehAdminDoEstudio) {
-      return response({ error: 'Acesso negado. Apenas admins do estúdio podem gerar repasses.' }, 403);
+      if (!ehSuperAdmin && !ehAdminDoEstudio) {
+        return response({ error: 'Acesso negado. Apenas admins do estúdio podem gerar repasses.' }, 403);
+      }
     }
 
     const mesStr = String(mes).padStart(2, '0');
@@ -450,6 +484,12 @@ serve(withSentry("gerar-repasses-mensais", async (req: Request) => {
           ? JSON.stringify(err)
           : String(err);
     console.error('[gerar-repasses-mensais] ERRO:', message);
+
+    // PED-33: mesmo problema do gerar-mensalidades — esse catch respondia
+    // com um JSON 500 sem nunca relançar o erro, então o Sentry nunca via
+    // essa falha. Reportando explicitamente aqui.
+    Sentry.captureException(err, { tags: { edge_function: 'gerar-repasses-mensais' } });
+
     return response({ error: message }, 500);
   }
-}));
+}

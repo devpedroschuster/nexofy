@@ -62,4 +62,71 @@ export function withSentry(
   };
 }
 
+/**
+ * PED-33 — observabilidade de crons (gerar-mensalidades / gerar-repasses-mensais).
+ *
+ * Envolve a execução de um job disparado por agendamento (pg_cron / Supabase
+ * Cron) com "check-in" do Sentry Crons: reporta início (`in_progress`) e, ao
+ * final, sucesso (`ok`) ou falha (`error`) para o monitor `monitorSlug`.
+ *
+ * Isso cobre os dois cenários pedidos no ticket:
+ *   - a função RODOU mas falhou (exceção, ou respondeu com status >= 400)
+ *     → check-in "error", Sentry cria/atualiza uma issue pro monitor.
+ *   - a função NÃO RODOU no dia/horário esperado (cron desabilitado,
+ *     secret errado, function derrubada, etc.) → nenhum check-in chega,
+ *     e o Sentry detecta a ausência sozinho a partir do `schedule` abaixo
+ *     — não depende de nenhum código rodando pra perceber isso.
+ *
+ * Os alertas em si (e-mail / Slack / Discord) são configurados no Sentry,
+ * não no código: Project Settings > Crons > <monitorSlug> para o e-mail
+ * padrão, ou Alerts > Create Alert Rule > "Issues" filtrando por
+ * `monitor.slug equals <monitorSlug>` e escolhendo a integração de
+ * Slack/Discord (webhook) como destino. Ver supabase/functions/CRON_MONITORING.md.
+ *
+ * IMPORTANTE: `schedule` aqui é só o que o Sentry usa para saber QUANDO
+ * esperar o check-in — precisa ser mantido em sincronia manual com o
+ * `schedule` do `[[cron]]` no `config.toml` da function (não há como
+ * derivar um do outro em runtime).
+ */
+export async function withCronCheckIn<T extends Response>(
+  monitorSlug: string,
+  schedule: { crontab: string; timezone?: string },
+  fn: () => Promise<T>,
+): Promise<T> {
+  const checkInId = Sentry.captureCheckIn(
+    { monitorSlug, status: "in_progress" },
+    {
+      schedule: { type: "crontab", value: schedule.crontab },
+      timezone: schedule.timezone ?? "America/Sao_Paulo",
+      // Tolerância antes de marcar como atrasado/perdido, e runtime máximo
+      // antes de marcar como travado — generosos porque essas functions
+      // fazem várias queries sequenciais por estúdio.
+      checkinMargin: 15,
+      maxRuntime: 10,
+    },
+  );
+
+  try {
+    const result = await fn();
+
+    Sentry.captureCheckIn({
+      checkInId,
+      monitorSlug,
+      // Qualquer resposta que não seja 2xx conta como falha do job pro
+      // monitor, mesmo sem exceção lançada — cobre os `return response(...)`
+      // de erro que essas functions usam em vez de `throw`.
+      status: result.ok ? "ok" : "error",
+    });
+
+    return result;
+  } catch (error) {
+    Sentry.captureCheckIn({ checkInId, monitorSlug, status: "error" });
+    throw error;
+  } finally {
+    // Mesmo motivo do withSentry: processo pode ser encerrado logo após o
+    // retorno, então o flush precisa acontecer antes daqui, não depois.
+    await Sentry.flush(2000).catch(() => {});
+  }
+}
+
 export { Sentry };

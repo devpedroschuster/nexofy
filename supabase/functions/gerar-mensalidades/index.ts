@@ -1,6 +1,10 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { withSentry } from "../_shared/sentry.ts"
+import { withSentry, withCronCheckIn, Sentry } from "../_shared/sentry.ts"
+
+// PED-33: precisa bater com o `schedule` do [[cron]] em config.toml.
+const CRON_MONITOR_SLUG = 'gerar-mensalidades'
+const CRON_SCHEDULE = { crontab: '0 8 1 * *', timezone: 'America/Sao_Paulo' }
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -31,6 +35,20 @@ serve(withSentry("gerar-mensalidades", async (req: Request) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
+  // PED-33: calculado ANTES do parse do body de propósito — se o cron
+  // chamar com payload vazio/errado (ex: sem estudioId), isso também
+  // precisa contar como falha monitorada, não só exceções não tratadas.
+  const cronSecretHeader = req.headers.get('x-cron-secret') ?? ''
+  const expectedCronSecretEarly = Deno.env.get('CRON_SECRET') ?? ''
+  const isCronInvocation = expectedCronSecretEarly.length > 0 && cronSecretHeader === expectedCronSecretEarly
+
+  if (isCronInvocation) {
+    return await withCronCheckIn(CRON_MONITOR_SLUG, CRON_SCHEDULE, () => handleRequest(req))
+  }
+  return await handleRequest(req)
+}))
+
+async function handleRequest(req: Request): Promise<Response> {
   // ISOLAMENTO MULTI-TENANT
   // A service role ignora RLS; todo acesso deve filtrar explicitamente por estudio_id.
   // O payload DEVE conter estudioId — chamadas sem ele são rejeitadas.
@@ -239,9 +257,15 @@ serve(withSentry("gerar-mensalidades", async (req: Request) => {
           ? JSON.stringify(err)
           : String(err)
     console.error('[gerar-mensalidades] Erro:', message)
+
+    // PED-33: este catch responde com um JSON 500 em vez de relançar o
+    // erro, então ele nunca "escapava" até o withSentry — o Sentry nunca
+    // ficava sabendo que a função falhou. Reportando explicitamente aqui.
+    Sentry.captureException(err, { tags: { edge_function: 'gerar-mensalidades' } })
+
     return response({ erro: message }, 500)
   }
-}))
+}
 
 function response(body: object, status = 200) {
   return new Response(JSON.stringify(body), {
