@@ -614,7 +614,7 @@ useEffect(() => {
               name="nome"
               value={form.nome}
               onChange={handleChange}
-              placeholder="Ex: Espaço Iluminus"
+              placeholder="Ex: Espaço Nexofy"
               error={erros.nome}
               disabled={!podeEditar}
             />

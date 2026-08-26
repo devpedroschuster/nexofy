@@ -70,7 +70,7 @@ export default function RepasseAlunoCard({ aluno, mensalidade, resultado, pagame
   const planoNome = mensalidade?.planos?.nome;
 
   const handlePrint = () => {
-    const printArea = document.getElementById('iluminus-recibo');
+    const printArea = document.getElementById('nexofy-recibo');
     if (!printArea) return;
 
     const win = window.open('', '_blank', 'width=480,height=700');
@@ -161,7 +161,7 @@ export default function RepasseAlunoCard({ aluno, mensalidade, resultado, pagame
   };
 
   return (
-    <div id="iluminus-recibo" className="space-y-4">
+    <div id="nexofy-recibo" className="space-y-4">
 
       {/* ── Recibo de Pagamento ─────────────────────────────────────────── */}
       <div className="rounded-2xl border border-success/30 bg-success-soft p-5">
