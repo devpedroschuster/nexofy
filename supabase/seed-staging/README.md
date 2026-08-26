@@ -32,13 +32,23 @@ observações médicas, chaves/ids de gateway de pagamento).
 
 ## Usuários de teste (login)
 
-Staging não tem nenhum usuário em `auth.users` — copiar os reais exporia emails e
-hashes de senha de gente real num ambiente de teste. Pra conseguir logar e testar RLS
-de admin/professor/aluno, crie manualmente pelo Supabase Studio do projeto de
-staging (Authentication → Users → Add user), um e-mail tipo
-`admin@staging.nexofy.test`, e depois insira a linha correspondente em
-`estudio_membros` (ou atualize `auth_id` em `alunos`/`professores`) apontando pro
-`id` do usuário criado.
+Staging não tem nenhum usuário real em `auth.users` — copiar os reais exporia emails
+e hashes de senha de gente real num ambiente de teste. Em vez disso, foram criados
+manualmente pelo Supabase Studio do projeto de staging (Authentication → Users →
+Add user) 3 usuários sintéticos, já vinculados ao estúdio principal
+(`d151fb3f-9435-4d18-a6ea-f26d805b9459`, slug `iluminus`, o mesmo que
+`VITE_DEV_SLUG` aponta):
+
+| Role | Email | user_id | Vínculo extra |
+|---|---|---|---|
+| admin | `admin@staging.nexofy.test` | `a6f32ff3-875d-4d2c-b74c-acae447a6187` | `estudio_membros` (role `admin`) |
+| professor | `professor@staging.nexofy.test` | `74984292-de4b-4f29-94ba-1cf00430154b` | `estudio_membros` (role `professor`) + `professores.auth_id` (Elisa Lima, id `eae6bbda-b3e4-44f5-ad98-6695541f6874`) |
+| aluno | `aluno@staging.nexofy.test` | `a6991ff1-5c31-4d0d-b091-14c800d01bd0` | `estudio_membros` (role `aluno`) + `alunos.auth_id` (Olivia Almeida, id `54`) |
+
+As senhas foram definidas na hora da criação no Studio (não ficam registradas aqui).
+Pra adicionar mais usuários de teste depois, repita o processo e rode um `insert`
+em `estudio_membros` e/ou `update` em `alunos`/`professores.auth_id` apontando pro
+novo `id`.
 
 ## Re-rodar (refresh periódico)
 
