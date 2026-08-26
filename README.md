@@ -102,6 +102,11 @@ CLI executa, só como referência.
 Automatizar esse gate staging → produção via CI é o próximo passo natural (ver
 "Próximos passos" abaixo).
 
+No front-end, cada PR aberto no GitHub dispara automaticamente um **Preview
+Deployment** na Vercel (Git integration conectada ao repositório), com uma URL
+própria por branch — permitindo validar visualmente as mudanças antes do merge
+em `main`, sem passo manual.
+
 ---
 
 ## 🧩 Principais funcionalidades
