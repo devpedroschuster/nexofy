@@ -65,20 +65,42 @@ cd nexofy/webapp
 # 2. Instale as dependências
 npm install
 
-# 3. Configure as variáveis de ambiente
+# 3. Configure as variáveis de ambiente (apontando pro projeto de staging, não produção)
 cp .env.example .env
-# Preencha VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY com os dados do seu projeto Supabase
+# Preencha VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY com os dados do projeto de staging
 
-# 4. Rode as migrations do banco (pasta /supabase)
-# usando a Supabase CLI:
-supabase link --project-ref SEU_PROJECT_REF
-supabase db push
-
-# 5. Inicie o servidor de desenvolvimento
+# 4. Inicie o servidor de desenvolvimento
 npm run dev
 ```
 
 A aplicação sobe em `http://localhost:5173`.
+
+---
+
+## 🚦 Fluxo de deploy: staging → produção
+
+Existem dois projetos Supabase — **staging** (dev local aponta pra cá por padrão) e
+**produção**. Toda migration nova roda em staging primeiro:
+
+```bash
+# 1. Escreva a migration em supabase/migrations/
+# 2. Aplique em staging e teste a app apontada pra lá
+supabase link --project-ref <ref-do-staging>
+supabase db push
+
+# 3. Só depois de validado, promova pra produção
+supabase link --project-ref <ref-de-producao> --password "$SUPABASE_DB_PASSWORD"
+supabase db push
+```
+
+O baseline atual (`supabase/migrations/00000000000000_baseline_current_schema.sql`) foi
+reconstruído via introspecção do schema de produção — antes dele não existia nenhuma
+migration versionada no repo. O histórico real das ~60 migrations aplicadas em produção
+(2026-08 em diante) fica arquivado em `supabase/migration-history/`, fora da pasta que a
+CLI executa, só como referência.
+
+Automatizar esse gate staging → produção via CI é o próximo passo natural (ver
+"Próximos passos" abaixo).
 
 ---
 
@@ -108,8 +130,11 @@ A aplicação sobe em `http://localhost:5173`.
 
 ```
 nexofy/
-├── webapp/       # Aplicação React (front-end)
-├── supabase/     # Migrations, políticas RLS e funções SQL
+├── webapp/                    # Aplicação React (front-end)
+├── supabase/
+│   ├── migrations/            # Migrations que a CLI de fato aplica (staging → produção)
+│   ├── migration-history/     # Histórico real de migrations pré-baseline, só para referência
+│   └── functions/             # Edge Functions
 ├── .gitignore
 └── README.md
 ```
@@ -119,8 +144,10 @@ nexofy/
 ## 🛣️ Próximos passos
 
 - Cobertura de testes automatizados nos services críticos
-- CI com verificação de lint e build antes de merge
+- CI com verificação de lint e build antes de merge, incluindo automatizar o gate
+  staging → produção (rodar `supabase db push` em staging antes de liberar merge)
 - Documentação de API interna dos services
+- Dump anonimizado de produção para popular o staging com dados de teste realistas
 
 ---
 

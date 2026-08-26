@@ -1,0 +1,17 @@
+CREATE INDEX IF NOT EXISTS idx_agenda_modalidade_id ON public.agenda(modalidade_id);
+CREATE INDEX IF NOT EXISTS idx_agenda_professor_id ON public.agenda(professor_id);
+CREATE INDEX IF NOT EXISTS idx_agenda_excecoes_aluno_id ON public.agenda_excecoes(aluno_id);
+CREATE INDEX IF NOT EXISTS idx_agenda_excecoes_aula_id ON public.agenda_excecoes(aula_id);
+CREATE INDEX IF NOT EXISTS idx_agenda_fixa_aula_id ON public.agenda_fixa(aula_id);
+CREATE INDEX IF NOT EXISTS idx_alunos_plano_id ON public.alunos(plano_id);
+CREATE INDEX IF NOT EXISTS idx_configuracoes_repasse_updated_by ON public.configuracoes_repasse(updated_by);
+CREATE INDEX IF NOT EXISTS idx_historico_planos_aluno_id ON public.historico_planos(aluno_id);
+CREATE INDEX IF NOT EXISTS idx_historico_planos_plano_id ON public.historico_planos(plano_id);
+CREATE INDEX IF NOT EXISTS idx_impersonation_sessions_estudio_id ON public.impersonation_sessions(estudio_id);
+CREATE INDEX IF NOT EXISTS idx_leads_aluno_convertido_id ON public.leads(aluno_convertido_id);
+CREATE INDEX IF NOT EXISTS idx_mensalidades_aluno_id ON public.mensalidades(aluno_id);
+CREATE INDEX IF NOT EXISTS idx_mensalidades_plano_id ON public.mensalidades(plano_id);
+CREATE INDEX IF NOT EXISTS idx_mensalidades_professor_id ON public.mensalidades(professor_id);
+CREATE INDEX IF NOT EXISTS idx_modalidades_professor_id ON public.modalidades(professor_id);
+CREATE INDEX IF NOT EXISTS idx_presencas_registrado_por ON public.presencas(registrado_por);
+CREATE INDEX IF NOT EXISTS idx_repasses_lancamentos_aluno_id ON public.repasses_lancamentos(aluno_id);
