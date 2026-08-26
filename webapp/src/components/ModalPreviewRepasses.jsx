@@ -207,6 +207,7 @@ export default function ModalPreviewRepasses({ isOpen, onClose, mesAno, onConfir
     await onConfirm();
     onClose();
   } catch {
+    // erro já tratado/sinalizado por onConfirm; aqui só evita deixar a promise rejeitada solta
   } finally {
     setConfirmando(false);
   }

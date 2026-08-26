@@ -189,7 +189,7 @@ export default function Financeiro() {
   const [lancamentoExcluindo, setLancamentoExcluindo] = useState(null);
   const [formEdicao, setFormEdicao] = useState({});
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
-  const [excluindo, setExcluindo] = useState(false);
+  const [, setExcluindo] = useState(false);
   const [pagamentoSelecionado, setPagamentoSelecionado] = useState(null);
   const [valorPago, setValorPago] = useState('');
   const [formaPagamento, setFormaPagamento] = useState('');
@@ -200,7 +200,7 @@ export default function Financeiro() {
   const [dataPagamentoConfirmar, setDataPagamentoConfirmar] = useState('');
   const [resultadoRepasse, setResultadoRepasse] = useState(null);
   const [dadosPagamento, setDadosPagamento] = useState(null);
-  const [gerando, setGerando] = useState(false);
+  const [, setGerando] = useState(false);
   const [totalAtivos, setTotalAtivos] = useState(null);
 
   useEffect(() => {

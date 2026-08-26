@@ -55,7 +55,7 @@ function urlSegura(url) {
 /**
  * Link para abrir/baixar um arquivo anexado (ex. atestado médico).
  */
-function LinkArquivo({ url }) {
+export function LinkArquivo({ url }) {
   if (typeof url !== 'string' || !urlSegura(url)) {
     return <span className="text-muted-foreground text-sm">Arquivo inválido</span>;
   }

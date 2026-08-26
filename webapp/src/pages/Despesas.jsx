@@ -9,7 +9,7 @@ import {
 import { despesasService } from '../services/despesasService';
 import { showToast } from '../components/shared/Toast';
 import { TableSkeleton, CardSkeleton } from '../components/shared/Loading';
-import { formatarMoeda, formatarData } from '../lib/utils';
+import { formatarMoeda } from '../lib/utils';
 
 import Button from '../components/ui/Button';
 import Input, { Label } from '../components/ui/Input';

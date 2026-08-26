@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
 import './landing.css';
 import { useEstudioPublico } from '../hooks/useEstudioPublico';
 import { usePlanosPublicos } from '../hooks/usePlanosPublicos';
@@ -72,9 +71,7 @@ export default function Landing() {
     slug,
   } = useEstudioPublico();
 
-  if (!slug) {
-    return <LandingNexofy />;
-  }
+  const nomeEstudio = estudioLoading ? '' : (estudio?.nome ?? 'Gestão App');
 
   //  Planos
   const { planos, loading: planosLoading } = usePlanosPublicos(estudio?.id);
@@ -95,7 +92,7 @@ export default function Landing() {
     [estudio?.cor_primaria, estudio?.cor_secundaria]
   );
 
-    useEffect(() => {
+  useEffect(() => {
     if (!estudio) return;
     const titulo = `${nomeEstudio} | ${copy.heroTag}`;
     document.title = titulo;
@@ -112,6 +109,13 @@ export default function Landing() {
   const [leadErro, setLeadErro] = useState('');
   // Honeypot simples anti-bot: campo invisível que um usuário humano nunca preenche
   const [honeypot, setHoneypot] = useState('');
+
+  // Hooks precisam rodar sempre, na mesma ordem, em todo render — por isso
+  // os returns condicionais (inclusive o de domínio sem tenant resolvido)
+  // ficam todos depois deles, nunca entre eles.
+  if (!slug) {
+    return <LandingNexofy />;
+  }
 
   if (!estudioLoading && estudioError) {
     return (
@@ -211,8 +215,6 @@ export default function Landing() {
     const mid = Math.floor(todos.length / 2);
     return todos.indexOf(plano) === mid;
   };
-
-  const nomeEstudio = estudioLoading ? '' : (estudio?.nome ?? 'Gestão App');
 
   const whatsappDigits = normalizarWhatsappDigits(estudio?.whatsapp);
   const WHATSAPP_URL = whatsappDigits

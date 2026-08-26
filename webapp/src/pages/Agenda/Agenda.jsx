@@ -67,7 +67,7 @@ const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
   const { aulas, feriados, loading, isError, refetch } = useAgenda();
   const {
   data: espacos = [],
-  isLoading: espacosLoading,
+  isLoading: _espacosLoading,
   isError: espacosError,
 } = useEspacos(estudioId);
 

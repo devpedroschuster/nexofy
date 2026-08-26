@@ -219,7 +219,7 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
 
 if (motivo === 'inadimplente') {
   let detalhe = {};
-  try { detalhe = JSON.parse(err.details || '{}'); } catch {}
+  try { detalhe = JSON.parse(err.details || '{}'); } catch { /* details vazio/inválido, segue com detalhe = {} */ }
   setModalInadimplente({
     isOpen: true,
     diasAtraso: detalhe.dias_atraso,

@@ -23,7 +23,7 @@ export function useAgenda() {
 
   // Memoizado para não gerar um novo objeto de datas a cada render
   // (evitaria invalidação desnecessária se a janela entrar na queryKey).
-  const janela = useMemo(calcularJanela, []);
+  const janela = useMemo(() => calcularJanela(), []);
 
   const queryGrade = useQuery({
     queryKey: ['agenda', perfil, professorId, estudioId, janela.inicio, janela.fim],

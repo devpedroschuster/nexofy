@@ -186,7 +186,7 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
       setSalvando(false);
     }
   };
-  const { buscarCep, buscandoCep, cepErro } = useBuscaCep((data) => {
+  const { buscarCep, buscandoCep: _buscandoCep, cepErro } = useBuscaCep((data) => {
     setForm(f => ({
       ...f,
       rua:    data.logradouro || f.rua,
@@ -996,9 +996,6 @@ function AbaAgendaFixa({ aluno, alunoId, estudioId }) {
   // BP-01 – substituição de window.confirm
   const [confirmModal, setConfirmModal]     = useState(null);
   // confirmModal: { mensagem, onConfirmar } | null
-  const modalidades = aluno?.modalidades_selecionadas
-    ? [...new Set(aluno.modalidades_selecionadas)]
-    : [];
 
   React.useEffect(() => {
     carregarAgendaFixa();
