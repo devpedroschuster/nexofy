@@ -1,19 +1,16 @@
 // supabase/functions/gerar-repasses/index.ts
 //
 // Gera repasses para UMA mensalidade específica ao ser confirmada.
-//
-// Lógica por tipo de aula:
-//   - regular      → valor fixo por modalidade matriculada (cfg.valor_1_modalidade ou valor_multi)
-//   - plano_livre  → valor_pago × pct_prof, dividido igualmente entre modalidades frequentadas no mês.
-//                    Se nenhuma presença → sem repasse (100% fica para o espaço).
-//   - avulsa       → valor_pago × aula_avulsa_pct_prof para o professor vinculado
-//   - experimental → valor_pago × aula_experimental_pct_prof se pct_prof > 0, caso contrário sem repasse
+// A lógica de cálculo vive em ../_shared/repasses.ts (PED-14) — reaproveitada
+// também pelo webhook-pagamento, que chama gerarRepassesParaMensalidade
+// diretamente (sem passar por este endpoint HTTP, que exige JWT de admin).
 //
 // Chamada via: supabase.functions.invoke('gerar-repasses', { body: { estudioId, mensalidadeId } })
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { withSentry } from "../_shared/sentry.ts";
+import { gerarRepassesParaMensalidade } from "../_shared/repasses.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,45 +22,6 @@ function response(body: object, status = 200): Response {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
-}
-
-// REP-07: distribui `total` em centavos exatos entre `n` parcelas.
-function distribuirCentavos(total: number, n: number): number[] {
-  const totalCentavos = Math.round(total * 100);
-  const baseCentavos = Math.floor(totalCentavos / n);
-  const parcelasCentavos = Array(n).fill(baseCentavos);
-  const restoCentavos = totalCentavos - baseCentavos * n;
-
-  for (let i = 0; i < restoCentavos; i++) {
-    parcelasCentavos[n - 1 - i] += 1;
-  }
-  return parcelasCentavos.map(c => c / 100);
-}
-
-// REP-01: interface expandida com campos de avulsa e experimental
-interface ConfigRepasse {
-  valor_1_modalidade: number;
-  valor_multi_modalidade: number;
-  plano_livre_pct_casa: number;
-  plano_livre_pct_prof: number;
-  aula_avulsa_valor: number;
-  aula_avulsa_pct_prof: number;
-  aula_avulsa_pct_casa: number;
-  aula_experimental_valor: number;
-  aula_experimental_pct_prof: number;
-}
-
-interface Mensalidade {
-  id: string;
-  estudio_id: string;
-  aluno_id: string | null;
-  plano_id: string | null;
-  tipo_aula: string;
-  valor_pago: number;
-  professor_id: string | null;
-  modalidade_nome: string | null;
-  data_pagamento: string | null;
-  data_vencimento: string;
 }
 
 serve(withSentry("gerar-repasses", async (req: Request) => {
@@ -118,261 +76,8 @@ serve(withSentry("gerar-repasses", async (req: Request) => {
       return response({ error: 'Acesso negado.' }, 403);
     }
 
-    // Busca a mensalidade — confirma que pertence a este estúdio
-    const { data: mens, error: errMens } = await supabase
-      .from('mensalidades')
-      .select('id, estudio_id, aluno_id, plano_id, tipo_aula, valor_pago, professor_id, modalidade_nome, data_pagamento, data_vencimento')
-      .eq('id', mensalidadeId)
-      .eq('estudio_id', estudioId)       // ← isolamento: rejeita mensalidade de outro estúdio
-      .single();
-
-    if (errMens || !mens) {
-      return response({ error: 'Mensalidade não encontrada.' }, 404);
-    }
-
-    const mensalidade = mens as Mensalidade;
-
-    // Visitante sem aluno vinculado nunca gera repasse
-    if (!mensalidade.aluno_id) {
-      return response({ aviso: 'Mensalidade sem aluno vinculado. Nenhum repasse gerado.', gerados: 0 });
-    }
-
-    // Configurações de repasse deste estúdio
-    const { data: config, error: errConfig } = await supabase
-      .from('configuracoes_repasse')
-      .select('valor_1_modalidade, valor_multi_modalidade, plano_livre_pct_casa, plano_livre_pct_prof, aula_avulsa_valor, aula_avulsa_pct_prof, aula_avulsa_pct_casa, aula_experimental_valor, aula_experimental_pct_prof')
-      .eq('estudio_id', estudioId)       // ← isolamento
-      .single();
-
-    if (errConfig || !config) throw new Error('Configurações de repasse não encontradas.');
-    const cfg = config as ConfigRepasse;
-
-    // Data de referência = primeiro dia do mês do pagamento
-    const dataBase = mensalidade.data_pagamento || mensalidade.data_vencimento;
-    const [anoRef, mesRef] = dataBase.substring(0, 7).split('-').map(Number);
-    const mesStr = String(mesRef).padStart(2, '0');
-    const dataReferencia = `${anoRef}-${mesStr}-01`;
-    const ultimoDia = new Date(anoRef, mesRef, 0).getDate();
-    const inicioPeriodo = dataReferencia;
-    const fimPeriodo = `${anoRef}-${mesStr}-${String(ultimoDia).padStart(2, '0')}`;
-
-    const itens: {
-      estudio_id: string;
-      professor_id: string;
-      aluno_id: string;
-      mensalidade_id: string;
-      tipo_aula: string;
-      modalidade: string;
-      valor: number;
-      data_referencia: string;
-    }[] = [];
-
-    // Repasses de lote a remover, coletados durante o cálculo abaixo
-    // (antes eram deletados um a um dentro do loop; agora só coletamos os ids
-    // e o delete real acontece junto com o insert, dentro da RPC transacional).
-    const idsLoteRemover: string[] = [];
-
-    // Repasses já gerados pelo lote mensal (mensalidade_id IS NULL)
-    const { data: repassesLote } = await supabase
-      .from('repasses_lancamentos')
-      .select('id, modalidade, tipo_aula')
-      .eq('estudio_id', estudioId)       // ← isolamento
-      .eq('aluno_id', mensalidade.aluno_id)
-      .eq('data_referencia', dataReferencia)
-      .is('mensalidade_id', null);
-
-    const loteJaGerado = new Map<string, string>(); // chave -> id
-    for (const r of repassesLote ?? []) {
-      loteJaGerado.set(`${r.modalidade}|${r.tipo_aula}`, r.id);
-    }
-
-    // PLANO LIVRE
-    if (mensalidade.tipo_aula === 'plano_livre') {
-
-      const { data: presencas, error: errPresencas } = await supabase
-        .from('presencas')
-        .select(`
-          aula_id,
-          agenda (
-            modalidades (
-              id,
-              nome,
-              professor_id
-            )
-          )
-        `)
-        .eq('estudio_id', estudioId)     // ← isolamento
-        .eq('aluno_id', mensalidade.aluno_id)
-        .gte('data_checkin', `${inicioPeriodo}T00:00:00`)
-        .lte('data_checkin', `${fimPeriodo}T23:59:59`)
-        .not('aula_id', 'is', null);
-
-      if (errPresencas) throw errPresencas;
-
-      if (!presencas || presencas.length === 0) {
-        return response({
-          aviso: 'Plano livre sem presenças no mês. Nenhum repasse gerado para professores.',
-          gerados: 0,
-        });
-      }
-
-      const modMap = new Map<string, { nome: string; professor_id: string }>();
-      for (const p of presencas) {
-        const mod = (p.agenda as any)?.modalidades;
-        if (mod?.id && mod?.professor_id) {
-          modMap.set(mod.id, { nome: mod.nome, professor_id: mod.professor_id });
-        }
-      }
-
-      if (modMap.size === 0) {
-        return response({
-          aviso: 'Plano livre: presenças encontradas mas nenhuma modalidade com professor vinculado.',
-          gerados: 0,
-        });
-      }
-
-      const valorTotal = Number(mensalidade.valor_pago);
-      const pctProf = Number(cfg.plano_livre_pct_prof) / 100;
-      const parteProfs = valorTotal * pctProf;
-      const modsArray = [...modMap.values()];
-      const valoresPorMod = distribuirCentavos(parteProfs, modsArray.length);
-
-      for (let i = 0; i < modsArray.length; i++) {
-        const mod = modsArray[i];
-        const chave = `${mod.nome}|plano_livre`;
-        const idLote = loteJaGerado.get(chave);
-        if (idLote) {
-          idsLoteRemover.push(idLote);
-        }
-        itens.push({
-          estudio_id: estudioId,          // ← isolamento
-          professor_id: mod.professor_id,
-          aluno_id: mensalidade.aluno_id!,
-          mensalidade_id: mensalidadeId,
-          tipo_aula: 'plano_livre',
-          modalidade: mod.nome,
-          valor: valoresPorMod[i],
-          data_referencia: dataReferencia,
-        });
-      }
-
-    // REGULAR
-    } else if (mensalidade.tipo_aula === 'regular') {
-      const { data: aluno } = await supabase
-        .from('alunos')
-        .select('modalidades_selecionadas')
-        .eq('id', mensalidade.aluno_id)
-        .eq('estudio_id', estudioId)     // ← isolamento
-        .single();
-
-      const modIds: string[] = aluno?.modalidades_selecionadas ?? [];
-
-      if (modIds.length === 0) {
-        return response({ aviso: 'Aluno sem modalidades vinculadas. Repasse não gerado.', gerados: 0 });
-      }
-
-      const { data: mods } = await supabase
-        .from('modalidades')
-        .select('id, nome, professor_id')
-        .eq('estudio_id', estudioId)     // ← isolamento
-        .in('id', modIds)
-        .not('professor_id', 'is', null);
-
-      const modsValidas = (mods ?? []) as { id: string; nome: string; professor_id: string }[];
-
-      if (modsValidas.length === 0) {
-        return response({ aviso: 'Modalidades sem professor vinculado. Repasse não gerado.', gerados: 0 });
-      }
-
-      const valorPorMod = modsValidas.length === 1
-        ? Number(cfg.valor_1_modalidade)
-        : Number(cfg.valor_multi_modalidade);
-
-      for (const mod of modsValidas) {
-        const chave = `${mod.nome}|regular`;
-        const idLote = loteJaGerado.get(chave);
-        if (idLote) {
-          idsLoteRemover.push(idLote);
-        }
-        itens.push({
-          estudio_id: estudioId,          // ← isolamento
-          professor_id: mod.professor_id,
-          aluno_id: mensalidade.aluno_id!,
-          mensalidade_id: mensalidadeId,
-          tipo_aula: 'regular',
-          modalidade: mod.nome,
-          valor: valorPorMod,
-          data_referencia: dataReferencia,
-        });
-      }
-
-    // AVULSA
-    } else if (mensalidade.tipo_aula === 'avulsa') {
-      if (!mensalidade.professor_id) {
-        return response({ aviso: 'Aula avulsa sem professor. Repasse não gerado.', gerados: 0 });
-      }
-
-      const valorRepasse = Math.round(Number(mensalidade.valor_pago) * (cfg.aula_avulsa_pct_prof / 100) * 100) / 100;
-
-      itens.push({
-        estudio_id: estudioId,            // ← isolamento
-        professor_id: mensalidade.professor_id,
-        aluno_id: mensalidade.aluno_id!,
-        mensalidade_id: mensalidadeId,
-        tipo_aula: 'avulsa',
-        modalidade: mensalidade.modalidade_nome ?? 'Avulsa',
-        valor: valorRepasse,
-        data_referencia: dataReferencia,
-      });
-
-    // EXPERIMENTAL
-    } else if (mensalidade.tipo_aula === 'experimental') {
-      const pctProf = Number(cfg.aula_experimental_pct_prof);
-
-      if (pctProf <= 0) {
-        return response({ aviso: 'Aula experimental com percentual 0. Nenhum repasse gerado.', gerados: 0 });
-      }
-
-      if (!mensalidade.professor_id) {
-        return response({ aviso: 'Aula experimental sem professor vinculado. Repasse não gerado.', gerados: 0 });
-      }
-
-      const valorRepasse = Math.round(Number(mensalidade.valor_pago) * (pctProf / 100) * 100) / 100;
-
-      itens.push({
-        estudio_id: estudioId,            // ← isolamento
-        professor_id: mensalidade.professor_id,
-        aluno_id: mensalidade.aluno_id!,
-        mensalidade_id: mensalidadeId,
-        tipo_aula: 'experimental',
-        modalidade: mensalidade.modalidade_nome ?? 'Experimental',
-        valor: valorRepasse,
-        data_referencia: dataReferencia,
-      });
-    }
-
-    // Insere
-    if (itens.length === 0) {
-      return response({ aviso: 'Nenhum repasse calculado para este tipo de aula.', gerados: 0 });
-    }
-
-    // Delete (antigos + lote sobreposto) e insert (novos) na mesma transação
-    // Postgres — se qualquer parte falhar, tudo é revertido, eliminando a
-    // janela de inconsistência que existia com delete/insert via client.
-    const { error: errRpc } = await supabase.rpc('substituir_repasses_mensalidade', {
-      p_estudio_id: estudioId,
-      p_mensalidade_id: mensalidadeId,
-      p_ids_lote_remover: idsLoteRemover,
-      p_itens: itens,
-    });
-
-    if (errRpc) throw errRpc;
-
-    return response({
-      sucesso: true,
-      gerados: itens.length,
-      itens: itens.map(i => ({ modalidade: i.modalidade, valor: i.valor, tipo: i.tipo_aula })),
-    });
+    const resultado = await gerarRepassesParaMensalidade(supabase, { estudioId, mensalidadeId });
+    return response(resultado);
 
   } catch (err) {
     const message =
@@ -380,6 +85,10 @@ serve(withSentry("gerar-repasses", async (req: Request) => {
       : typeof err === 'object' && err !== null ? JSON.stringify(err)
       : String(err);
     console.error('[gerar-repasses] ERRO:', message);
-    return response({ error: message }, 500);
+    // Preserva o 404 que o endpoint sempre retornou para mensalidade
+    // inexistente (gerarRepassesParaMensalidade lança um Error genérico —
+    // não é um erro de servidor, é um input inválido do chamador).
+    const status = message === 'Mensalidade não encontrada.' ? 404 : 500;
+    return response({ error: message }, status);
   }
 }));
