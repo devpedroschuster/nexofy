@@ -11,6 +11,10 @@ verify_jwt = false  # Permite chamada do cron sem auth (mesmo padrão de gerar-m
 #   - se falta rodar isso por estúdio (hoje a function processa só o
 #     estudioId enviado no payload — um cron real precisaria iterar sobre
 #     todos os estúdios ativos, o que esta function ainda não faz).
+# PED-18: se/quando este cron for habilitado, ele precisa garantir a
+# mesma garantia que o painel admin dá hoje (preview antes de gerar) —
+# ver supabase/functions/gerar-repasses-mensais/RUNBOOK.md. Não habilitar
+# este bloco sem resolver isso primeiro.
 [[cron]]
 name = "repasses-mensais"
 schedule = "0 9 5 * *"   # Dia 5 de cada mês, às 09h — A CONFIRMAR

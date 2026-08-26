@@ -14,6 +14,11 @@
 //   já confirmados não sejam duplicados pelo lote.
 //
 // Chamada manual via: supabase.functions.invoke('gerar-repasses-mensais', { body: { estudioId, mes, ano } })
+//
+// PED-18: esta function insere lançamentos financeiros reais e não tem
+// desfazer via UI. NUNCA chame diretamente sem antes rodar
+// preview-repasses-mensais para o mesmo estúdio/mês — ver o processo
+// obrigatório em ./RUNBOOK.md.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
