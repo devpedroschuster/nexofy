@@ -127,9 +127,15 @@ function ObservacaoLead({ lead, onSalvar, isSalvando }) {
   const [valor, setValor] = useState(lead.observacao_lead || '');
   const [expandido, setExpandido] = useState(!!lead.observacao_lead);
 
-  useEffect(() => {
+  // Resincroniza `valor` quando a observação do lead muda por fora (ex.:
+  // atualização otimista em outro lugar da tela). Ajuste feito durante o
+  // render, não em useEffect, para não deixar o textarea mostrar um valor
+  // desatualizado por um frame.
+  const [ultimaObservacao, setUltimaObservacao] = useState(lead.observacao_lead);
+  if (lead.observacao_lead !== ultimaObservacao) {
+    setUltimaObservacao(lead.observacao_lead);
     setValor(lead.observacao_lead || '');
-  }, [lead.observacao_lead]);
+  }
 
   function handleBlur() {
     const valorTratado = valor.trim();
@@ -183,7 +189,7 @@ export default function Leads() {
 
   // ── Visão Ação (cards pendentes) ──────────────────────────────────────────
   const { data: leadsPendentesTodos = [], isLoading: loadingPendentesTodos } = useLeadsPendentes();
-  const { data: resumoMensalPendentes = [], isLoading: loadingResumoPendentes } = useResumoMensalLeadsPendentes();
+  const { data: resumoMensalPendentes = [], isLoading: _loadingResumoPendentes } = useResumoMensalLeadsPendentes();
 
   const usandoFiltroAcao = periodoAcao !== TODOS_PERIODOS;
   const [anoAcao, mesAcao] = usandoFiltroAcao ? periodoAcao.split('-').map(Number) : [0, 0];

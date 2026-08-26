@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   CheckCircle, Users, DollarSign, FileSpreadsheet,
   PieChart, Calendar, Wallet, RefreshCw, AlertTriangle,
@@ -8,7 +8,7 @@ import {
 import * as XLSX from 'xlsx';
 import { TIPO_AULA_LABELS as TIPO_LABELS } from '../lib/constants/tipoAula';
 import { comissoesService } from '../services/comissoesService';
-import { gerarRepassesMensais, previewRepassesMensais } from '../services/repasseService';
+import { gerarRepassesMensais } from '../services/repasseService';
 import { useAuth } from '../hooks/useAuth';
 import {
   useComissoesProfessor,
@@ -533,7 +533,7 @@ export default function Comissoes() {
     tipoAula: '', // UX-02
   });
   const [aba, setAba] = useState('geral'); // UX-04: 'geral' | 'detalhe'
-  const [gerando, setGerando] = useState(false);
+  const [, setGerando] = useState(false);
   const [resultadoGeracao, setResultadoGeracao] = useState(null);
   const [resumoExpandido, setResumoExpandido] = useState(false);
  

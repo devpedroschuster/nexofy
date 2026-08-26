@@ -41,7 +41,7 @@ export function useEventosCalendario({ aulas, feriados, presencasCalendario, mat
     // a renderização inteira do calendário (não um card isolado). Recuamos para
     // "hoje" e avisamos em dev em vez de propagar o crash.
     const dataBase = currentDate instanceof Date && isValid(currentDate) ? currentDate : new Date();
-    if (currentDate && dataBase !== currentDate && process.env.NODE_ENV !== 'production') {
+    if (currentDate && dataBase !== currentDate && import.meta.env.DEV) {
       console.warn('[useEventosCalendario] currentDate inválido recebido, usando data atual como fallback', currentDate);
     }
 
@@ -55,7 +55,7 @@ export function useEventosCalendario({ aulas, feriados, presencasCalendario, mat
     } else {
       // Fallback explícito: qualquer view desconhecida (ex: uma futura 'agenda')
       // cai aqui silenciosamente sem isso — deixamos o aviso em dev registrado.
-      if (currentView !== 'month' && process.env.NODE_ENV !== 'production') {
+      if (currentView !== 'month' && import.meta.env.DEV) {
         console.warn('[useEventosCalendario] currentView desconhecida, usando range de mês como fallback', currentView);
       }
       return {

@@ -1,5 +1,5 @@
 // webapp/src/hooks/useNotificacoes.js
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { startOfDay } from 'date-fns';
@@ -13,22 +13,31 @@ function chaveResolvidas(estudioId) {
   return storageKey(slug, `notificacoes_resolvidas:${estudioId ?? 'sem-estudio'}`);
 }
 
+function lerResolvidas(idEfetivo) {
+  if (!idEfetivo) return [];
+  try {
+    const salvas = localStorage.getItem(chaveResolvidas(idEfetivo));
+    return salvas ? JSON.parse(salvas) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function useNotificacoes() {
   const { estudioId } = useAuth();
   const { estudioAtivo } = useImpersonation();
   const idEfetivo = estudioAtivo?.id ?? estudioId; // FIX: super_admin em impersonation agora funciona
 
-  const [resolvidas, setResolvidas] = useState([]);
-
-  useEffect(() => {
-    if (!idEfetivo) return;
-    try {
-      const salvas = localStorage.getItem(chaveResolvidas(idEfetivo));
-      setResolvidas(salvas ? JSON.parse(salvas) : []);
-    } catch {
-      setResolvidas([]);
-    }
-  }, [idEfetivo]);
+  const [resolvidas, setResolvidas] = useState(() => lerResolvidas(idEfetivo));
+  // Reidrata `resolvidas` a partir do localStorage sempre que o estúdio
+  // efetivo mudar (troca de impersonation, login). Ajuste feito durante o
+  // render (em vez de em useEffect) para evitar o flash de `resolvidas`
+  // vazio entre o mount e a primeira leitura.
+  const [idEfetivoCarregado, setIdEfetivoCarregado] = useState(idEfetivo);
+  if (idEfetivo !== idEfetivoCarregado) {
+    setIdEfetivoCarregado(idEfetivo);
+    setResolvidas(lerResolvidas(idEfetivo));
+  }
 
   function persistirResolvidas(novas) {
     // FIX: setItem agora protegido — quota excedida / modo privado não quebra o clique do usuário

@@ -87,7 +87,7 @@ const Button = React.forwardRef(function Button(
   const isDisabled = Boolean(disabled || loading);
   const isNativeFormControl = NATIVE_FORM_TAGS.has(typeof Tag === 'string' ? Tag : '');
 
-  if (process.env.NODE_ENV !== 'production') {
+  if (import.meta.env.DEV) {
     // FIX: aliases (ex.: 'brand') são válidos mesmo com valor `null` em
     // VARIANTS — antes o check `!VARIANTS[variant]` disparava um falso
     // positivo para eles. Agora só avisa quando a variante não é nem uma

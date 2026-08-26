@@ -69,7 +69,7 @@ function Tooltip({ text }) {
   );
 }
 
-function DivisaoSimulada({ label, valor, pctProf, pctCasa }) {
+function DivisaoSimulada({ valor, pctProf, pctCasa }) {
   if (!valor || valor <= 0) return null;
   const prof = ((pctProf / 100) * valor).toFixed(2);
   const casa = pctCasa != null ? ((pctCasa / 100) * valor).toFixed(2) : null;

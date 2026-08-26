@@ -37,11 +37,17 @@ export function useAgendaPage() {
   const [filtroProf, setFiltroProf] = useState('todos');
   const [filtroEspaco, setFiltroEspaco] = useState('todos');
 
-  useEffect(() => {
+  // Alterna a view automaticamente ao cruzar o breakpoint mobile/desktop,
+  // a menos que o usuário já tenha escolhido a view manualmente. Ajuste
+  // feito durante o render (em vez de em useEffect) para reagir à mudança
+  // de `isMobile` sem o re-render extra de um effect.
+  const [ultimoIsMobile, setUltimoIsMobile] = useState(isMobile);
+  if (isMobile !== ultimoIsMobile) {
+    setUltimoIsMobile(isMobile);
     if (!viewFoiAlteradaManualmente) {
       setCurrentView(isMobile ? 'day' : 'week');
     }
-  }, [isMobile, viewFoiAlteradaManualmente]);
+  }
 
   const handleSetCurrentView = (view) => {
     setViewFoiAlteradaManualmente(true);

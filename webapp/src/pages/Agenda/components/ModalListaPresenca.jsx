@@ -18,7 +18,6 @@ export default function ModalListaPresenca({
   handleRegistrarFalta, handleDesfazerFalta,
   alunoParaRemover, solicitarRemocao, confirmarRemocao, cancelarRemocao,
   removendoId,
-  triggerRefresh,
   isAdmin,
 }) {
   // Fix: os cliques em "Avisou" / "Não Veio" / "Desfazer Falta" não tinham

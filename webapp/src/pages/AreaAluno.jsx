@@ -302,6 +302,20 @@ export default function AreaAluno() {
   const getStatusTexto = (status, dataVencimento) =>
     status === 'pago' ? 'Pago' : dataVencimento && new Date(dataVencimento) < new Date() ? 'Atrasado' : 'Pendente';
 
+  // FIX: pré-computa o consumo por área uma única vez (Map), em vez de
+  // rodar presencasMes.filter(...) de novo para cada aula renderizada.
+  // Precisa ficar antes dos `return` condicionais abaixo — Hooks não podem
+  // ser chamados condicionalmente.
+  const consumoPorArea = useMemo(() => {
+    const mapa = new Map();
+    (presencasMes || []).forEach((p) => {
+      const area = p.agenda?.modalidades?.area;
+      if (!area) return;
+      mapa.set(area, (mapa.get(area) || 0) + 1);
+    });
+    return mapa;
+  }, [presencasMes]);
+
   if (loadingAluno) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-[#FDF8F5]">
@@ -319,18 +333,6 @@ export default function AreaAluno() {
   }
 
   const regrasPlano = aluno.planos?.regras_acesso || [];
-
-  // FIX: pré-computa o consumo por área uma única vez (Map), em vez de
-  // rodar presencasMes.filter(...) de novo para cada aula renderizada.
-  const consumoPorArea = useMemo(() => {
-    const mapa = new Map();
-    (presencasMes || []).forEach((p) => {
-      const area = p.agenda?.modalidades?.area;
-      if (!area) return;
-      mapa.set(area, (mapa.get(area) || 0) + 1);
-    });
-    return mapa;
-  }, [presencasMes]);
 
   let aulasPermitidas = [];
   if (aulasDoDia) {

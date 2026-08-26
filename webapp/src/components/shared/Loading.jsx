@@ -44,10 +44,9 @@ export function CardSkeleton() {
 }
 
 export function ChartSkeleton() {
-  const heights = React.useMemo(
-    () => Array.from({ length: 7 }, () => Math.random() * 80 + 20),
-    []
-  );
+  // useState (não useMemo) de propósito: Math.random() é impuro e não deve
+  // ser chamado durante o render — só na inicialização preguiçosa do state.
+  const [heights] = React.useState(() => Array.from({ length: 7 }, () => Math.random() * 80 + 20));
   return (
     <div className="bg-white dark:bg-[#1A1A1A] p-8 rounded-[40px] border border-gray-100 dark:border-zinc-800 shadow-sm h-[400px] animate-pulse transition-colors">
       <div className="h-6 w-48 bg-gray-100 dark:bg-zinc-800 rounded-lg mb-8 transition-colors" />

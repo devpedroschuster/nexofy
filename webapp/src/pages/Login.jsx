@@ -375,7 +375,7 @@ function ModalRecuperarSenha({ onClose }) {
       });
       if (error) throw error;
       setEnviado(true);
-    } catch (err) {
+    } catch {
       showToast.error('Não foi possível enviar o link. Tente novamente.');
     } finally {
       setLoading(false);

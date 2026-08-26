@@ -8,7 +8,7 @@ import {
   Home, CheckCircle2, CalendarDays, AlertTriangle, Trash2, Plus,
   Info, Lock, AlertCircle, KeyRound,
 } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { alunosService } from '../services/alunosService';
 import { alunoSchema } from '../lib/validation';
@@ -209,12 +209,12 @@ export default function NovoAluno() {
       setModalidadesSelecionadas([]);
       setCpfDisplay('');
       setCpfErro('');
-      setCepErro('');
+      limparCepErro();
       setStepAtual(1);
       setCadastroSalvo(false);
       setMetadataForm({});
     }
-  }, [location.pathname, reset, alunoParaEditar, leadParaConversao]);
+  }, [location.pathname, reset, alunoParaEditar, leadParaConversao, limparCepErro]);
 
   useEffect(() => {
     if (!planoSelecionadoObj || !dataInicioPlano) return;
@@ -355,7 +355,7 @@ export default function NovoAluno() {
     }
   }
 
-  const { buscarCep, buscandoCep, cepErro } = useBuscaCep((data) => {
+  const { buscarCep, buscandoCep, cepErro, limparCepErro } = useBuscaCep((data) => {
     setValue('rua',    data.logradouro, { shouldValidate: true });
     setValue('bairro', data.bairro,     { shouldValidate: true });
     setValue('cidade', data.localidade, { shouldValidate: true });

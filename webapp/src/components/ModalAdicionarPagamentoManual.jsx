@@ -33,7 +33,7 @@ export default function ModalAdicionarPagamentoManual({ isOpen, onClose, onSuces
   const [planos, setPlanos] = useState([]);
   const [professores, setProfessores] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [carregandoDados, setCarregandoDados] = useState(false);
+  const [, setCarregandoDados] = useState(false);
   const [isVisitante, setIsVisitante] = useState(false);
 
   const initialForm = {
