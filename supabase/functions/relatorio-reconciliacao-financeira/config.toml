@@ -1,0 +1,2 @@
+[functions.relatorio-reconciliacao-financeira]
+verify_jwt = true
