@@ -73,19 +73,19 @@ jobs:
       - name: Run E2E tests
         run: npm run e2e
 
-      # SEGURANÇA: NÃO subir webapp/test-results/ aqui — contém os traces
-      # brutos do Playwright (trace.zip), que gravam headers de requisição
-      # e valores de page.fill() literalmente, incluindo secrets como
-      # E2E_ASAAS_WEBHOOK_TOKEN e as senhas de E2E_ADMIN_*_PASSWORD. Este
-      # repositório é público, então qualquer artifact de Actions é
-      # baixável por qualquer pessoa com acesso de leitura — um run que
-      # falhou já publicou um desses valores antes disso ser corrigido
-      # (ver PED-28). webapp/playwright-report/ (relatório HTML, sem o
-      # trace.zip embutido) é seguro e é só o que sobe.
-      - name: Upload Playwright report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: webapp/playwright-report/
-          retention-days: 7
+      # SEGURANÇA: nenhum artifact de Playwright é publicado — nem
+      # test-results/ (trace.zip bruto) nem playwright-report/ (relatório
+      # HTML). O reporter HTML EMBUTE o trace.zip inteiro dentro de
+      # playwright-report/data/*.zip pra deixar o relatório navegável sem
+      # depender de test-results/ — confirmado empiricamente (um teste
+      # com header/fill fake gerou um .zip embutido contendo o valor em
+      # texto puro). Também embute os .md de error-context, que trazem o
+      # snapshot de acessibilidade da página — incluindo o texto literal
+      # digitado em campos de senha (visto de verdade num trace real
+      # nesta sessão). Ou seja: qualquer um dos dois formatos de artifact
+      # vaza os mesmos segredos (E2E_ASAAS_WEBHOOK_TOKEN,
+      # E2E_ADMIN_*_PASSWORD) num repositório público, onde artifacts de
+      # Actions são baixáveis por qualquer pessoa com acesso de leitura.
+      # Depuração de falha usa `gh run view <id> --log-failed` (texto
+      # puro do stdout do Playwright, sem DOM/headers) — suficiente na
+      # prática pra todo diagnóstico feito até aqui nesta sessão.
