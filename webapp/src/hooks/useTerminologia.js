@@ -19,6 +19,7 @@ import {
   resolverRotuloPlural,
   terminologiaPadraoDoSegmento,
 } from '../lib/terminologia';
+import { moduloEstaAtivo } from '../lib/modulos';
 
 /**
  * useTerminologia()
@@ -51,7 +52,7 @@ export function useTerminologia() {
     modulosAtivos,
     rotulo: (chave) => resolverRotulo(chave, { terminologia, segmento }),
     rotuloPlural: (chave) => resolverRotuloPlural(chave, { terminologia, segmento }),
-    moduloAtivo: (nome) => modulosAtivos.includes(nome),
+    moduloAtivo: (nome) => moduloEstaAtivo(modulosAtivos, nome),
     // Exposto para telas de admin que precisam sugerir o padrão do
     // segmento ao trocar de segmento ou criar tenant novo (não afeta o
     // valor de `terminologia` acima, que é sempre o customizado/efetivo).

@@ -15,8 +15,9 @@
 // mostrar de mais (link quebrado); num guard de acesso, liberar de mais é
 // pior que bloquear de mais.
 import { rotaPorPerfil } from './navigation';
+import { moduloEstaAtivo } from './modulos';
 
 export function destinoRotaModulo(modulosAtivos, moduloExigido, perfil) {
-  if ((modulosAtivos ?? []).includes(moduloExigido)) return null;
+  if (moduloEstaAtivo(modulosAtivos, moduloExigido)) return null;
   return rotaPorPerfil(perfil);
 }
