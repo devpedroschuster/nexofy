@@ -27,6 +27,17 @@ test.beforeAll(() => {
 // permanente (não expira por mês como a geração de mensalidade), então
 // compartilhar fixture com outro teste tornaria o histórico entre eles
 // confuso.
+// data_vencimento/periodo_fim também são load-bearing: a asserção final
+// na UI depende de periodo_fim >= 1º dia do mês corrente (janela padrão
+// da query do Financeiro). Por isso periodo_fim foi propositalmente
+// definido bem no futuro (2099-12-31 no banco), pra este fixture estático
+// não sumir da tela depois do mês em que foi criado.
+// Se algum dia esta mensalidade for resetada para status='pendente' para
+// reexercitar o fluxo de confirmação, é preciso também apagar a linha
+// correspondente em webhook_events (origem='asaas',
+// asaas_event='PAYMENT_RECEIVED', asaas_payment_id='e2e-webhook-test-payment')
+// — senão o dedup do webhook trata toda chamada futura como duplicata e
+// nada é reprocessado. Ver PED-50 para o fix automatizado (beforeAll reset).
 test.describe('Webhook de pagamento', () => {
   test('confirma pagamento e reenvio duplicado é ignorado (idempotência)', async ({ page, request }) => {
     const payload = {
@@ -45,6 +56,12 @@ test.describe('Webhook de pagamento', () => {
     // forma, deve responder com sucesso (200).
     const resposta1 = await request.post(WEBHOOK_URL, { headers, data: payload });
     expect(resposta1.ok(), await resposta1.text()).toBeTruthy();
+    // .ok() sozinho não basta: a function responde 200 também quando
+    // ignora o evento (mensalidade não encontrada). Se o fixture sumir do
+    // staging, isso falha rápido aqui em vez de virar um timeout confuso
+    // na asserção final da UI.
+    const corpo1 = await resposta1.json();
+    expect(corpo1.ignorado, JSON.stringify(corpo1)).toBeFalsy();
 
     // 2ª chamada, payload idêntico, logo em seguida: essa SEMPRE precisa
     // ser um duplicado, independente do histórico de execuções anteriores
@@ -64,6 +81,12 @@ test.describe('Webhook de pagamento', () => {
     await expect(page.getByText('E2E Aluno Webhook', { exact: true }).first()).toBeVisible();
     // exact: true — sem isso, o match por substring pega também o botão
     // de filtro "Pagos" (strict-mode violation: 2 elementos).
-    await expect(page.getByText('PAGO', { exact: true })).toBeVisible();
+    // .first() — este aluno compartilha plano_id (1) e tenant (B) com o
+    // fixture do PED-27; gerar-mensalidades (exercida por aquele teste)
+    // seleciona alunos ativos com esse plano, e este webhook marca
+    // alunos.ativo = true como efeito colateral. Hoje só existe uma linha
+    // aqui, mas com fullyParallel: true as specs podem intercalar, então
+    // blindamos o locator preventivamente.
+    await expect(page.getByText('PAGO', { exact: true }).first()).toBeVisible();
   });
 });
