@@ -1,0 +1,75 @@
+// webapp/e2e/geracao-mensalidade.spec.js
+import { test, expect } from '@playwright/test';
+import { TENANT_B_HOST, urlFor } from './constants.js';
+import { loginComoAdmin } from './helpers/auth.js';
+
+const ADMIN_B = {
+  email: process.env.E2E_ADMIN_B_EMAIL,
+  password: process.env.E2E_ADMIN_B_PASSWORD,
+};
+
+test.beforeAll(() => {
+  for (const name of ['E2E_ADMIN_B_EMAIL', 'E2E_ADMIN_B_PASSWORD']) {
+    if (!process.env[name]) {
+      throw new Error(`Missing required env var: ${name}`);
+    }
+  }
+});
+
+// Depende do fixture de staging (estudio "ronaldo", id
+// e6657270-4d5c-4e52-a3bd-e389e4b32db2): aluno "E2E Aluno Tenant B" com
+// plano_id apontando pro "Plano E2E Teste" (preco 100.00) e ativo=true.
+// Sem plano com preço > 0, gerar-mensalidades ignora o aluno
+// silenciosamente (ver supabase/functions/gerar-mensalidades/index.ts).
+test.describe('Geração de mensalidade', () => {
+  test('admin gera mensalidade do mês para o aluno de teste', async ({ page }) => {
+    await loginComoAdmin(page, TENANT_B_HOST, ADMIN_B.email, ADMIN_B.password, 'Estudio Teste 3');
+
+    await page.goto(urlFor(TENANT_B_HOST, '/financeiro'));
+
+    // O texto do botão inclui o nome do mês atual (ex: "Criar
+    // mensalidades de Agosto") — regex evita depender do mês exato em
+    // que o teste roda.
+    await page.getByRole('button', { name: /Criar mensalidades de/i }).click();
+
+    // handleGerarMensalidades (Financeiro.jsx) não é aguardado pelo clique
+    // em si — o clique só dispara o handler async, que chama a Edge
+    // Function e só then fecha o modal/dispara refetch(). Sem esperar essa
+    // chamada de rede terminar, os passos seguintes (filtrar/buscar) rodam
+    // contra a tabela ainda não atualizada, e a asserção falha por timing,
+    // não por dado ausente.
+    // A chamada via supabase.functions.invoke(...) é cross-origin e envia
+    // Authorization, então o browser dispara um preflight OPTIONS pra essa
+    // mesma URL antes do POST real. Sem checar o método, o preflight (que
+    // também responde 200) pode satisfazer o predicate primeiro e reabrir a
+    // mesma corrida de timing que este waitForResponse existe pra fechar.
+    const respostaGeracao = page.waitForResponse((resp) =>
+      resp.url().includes('/functions/v1/gerar-mensalidades') && resp.request().method() === 'POST'
+    );
+    await page.getByRole('button', { name: 'Confirmar' }).click();
+    const resposta = await respostaGeracao;
+
+    // Sem essa asserção, o teste é vazio a partir da 2ª execução no mesmo
+    // mês (a mensalidade da 1ª execução já está lá) e em qualquer retry
+    // após um 1º attempt bem-sucedido (playwright.config.js: retries: 1) —
+    // passaria mesmo que a Edge Function voltasse a responder 500.
+    expect(resposta.status(), await resposta.text()).toBeLessThan(400);
+
+    // Não valida o texto do toast (difere entre "gerada(s) com sucesso"
+    // e "já estavam geradas para este mês", dependendo se é a primeira
+    // execução do mês) — o sinal confiável é o estado final da tabela.
+    //
+    // Também não filtra por "Pendentes": gerar-mensalidades sempre usa o
+    // dia 10 como data_vencimento (ver index.ts), e o status exibido é
+    // calculado em tempo real comparando essa data com hoje — rodando o
+    // teste depois do dia 10 do mês (a maior parte do tempo), a
+    // mensalidade já aparece como "Atrasado", não "Pendente". "Todos"
+    // é o único filtro de status correto independente de quando o CI roda.
+    await page.getByRole('button', { name: 'Todos' }).click();
+    await page.getByPlaceholder('Buscar aluno...').fill('E2E Aluno Tenant B');
+
+    // .first(): filtro "Todos" (não "Pendentes") deixa a asserção sujeita a
+    // strict-mode violation se o fixture ganhar um 2º lançamento no mês.
+    await expect(page.getByText('E2E Aluno Tenant B', { exact: true }).first()).toBeVisible();
+  });
+});
