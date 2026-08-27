@@ -28,4 +28,8 @@ export default defineConfig({
       },
     },
   },
+
+  preview: {
+    allowedHosts: ['tenant-a.e2e.test', 'tenant-b.e2e.test'],
+  },
 });
