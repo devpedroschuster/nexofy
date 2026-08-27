@@ -22,7 +22,12 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
-    command: `npm run build && npm run preview -- --port ${PORT} --strictPort`,
+    // --host 0.0.0.0: sem isso, `vite preview` só escuta em `::1` (IPv6)
+    // em muitos ambientes (Node 17+ prioriza IPv6 pra "localhost"), e as
+    // entradas de /etc/hosts dos tenants simulados são IPv4 (127.0.0.1) —
+    // o resultado é ECONNREFUSED só no tráfego de teste, enquanto o
+    // health-check do Playwright (via localhost) passa normalmente.
+    command: `npm run build && npm run preview -- --host 0.0.0.0 --port ${PORT} --strictPort`,
     port: PORT,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
