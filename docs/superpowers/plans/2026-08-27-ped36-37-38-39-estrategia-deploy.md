@@ -94,9 +94,7 @@ hash que já existia antes.
 `main` nunca recebe merge sem passar por um **Preview Deployment da
 Vercel** já testado manualmente. Cada PR aberto no GitHub já dispara esse
 preview automaticamente (integração Git da Vercel). A proteção de branch
-de `main` no GitHub exige o check "Vercel" (deployment concluído) e
-"Lint, Test & Build" antes de permitir o merge — ver histórico de
-configuração real em PED-36.
+de `main` no GitHub exige o check "Vercel" (deployment concluído) e "Lint, Test & Build" antes de permitir o merge — ver histórico de configuração real em PED-36.
 
 ## 4. Canary release por tenant (feature flags)
 
