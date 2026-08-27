@@ -80,32 +80,11 @@ A aplicação sobe em `http://localhost:5173`.
 ## 🚦 Fluxo de deploy: staging → produção
 
 Existem dois projetos Supabase — **staging** (dev local aponta pra cá por padrão) e
-**produção**. Toda migration nova roda em staging primeiro:
+**produção**. No front-end, cada PR aberto no GitHub dispara automaticamente um
+**Preview Deployment** na Vercel, validável antes do merge em `main`.
 
-```bash
-# 1. Escreva a migration em supabase/migrations/
-# 2. Aplique em staging e teste a app apontada pra lá
-supabase link --project-ref <ref-do-staging>
-supabase db push
-
-# 3. Só depois de validado, promova pra produção
-supabase link --project-ref <ref-de-producao> --password "$SUPABASE_DB_PASSWORD"
-supabase db push
-```
-
-O baseline atual (`supabase/migrations/00000000000000_baseline_current_schema.sql`) foi
-reconstruído via introspecção do schema de produção — antes dele não existia nenhuma
-migration versionada no repo. O histórico real das ~60 migrations aplicadas em produção
-(2026-08 em diante) fica arquivado em `supabase/migration-history/`, fora da pasta que a
-CLI executa, só como referência.
-
-Automatizar esse gate staging → produção via CI é o próximo passo natural (ver
-"Próximos passos" abaixo).
-
-No front-end, cada PR aberto no GitHub dispara automaticamente um **Preview
-Deployment** na Vercel (Git integration conectada ao repositório), com uma URL
-própria por branch — permitindo validar visualmente as mudanças antes do merge
-em `main`, sem passo manual.
+Sequência completa (migrations, Edge Functions, cache do Service Worker, regra de
+merge e canary release por tenant) documentada em [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
 ---
 
