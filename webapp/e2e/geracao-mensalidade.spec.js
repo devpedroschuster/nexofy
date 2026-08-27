@@ -31,7 +31,18 @@ test.describe('Geração de mensalidade', () => {
     // mensalidades de Agosto") — regex evita depender do mês exato em
     // que o teste roda.
     await page.getByRole('button', { name: /Criar mensalidades de/i }).click();
+
+    // handleGerarMensalidades (Financeiro.jsx) não é aguardado pelo clique
+    // em si — o clique só dispara o handler async, que chama a Edge
+    // Function e só then fecha o modal/dispara refetch(). Sem esperar essa
+    // chamada de rede terminar, os passos seguintes (filtrar/buscar) rodam
+    // contra a tabela ainda não atualizada, e a asserção falha por timing,
+    // não por dado ausente.
+    const respostaGeracao = page.waitForResponse((resp) =>
+      resp.url().includes('/functions/v1/gerar-mensalidades')
+    );
     await page.getByRole('button', { name: 'Confirmar' }).click();
+    await respostaGeracao;
 
     // Não valida o texto do toast (difere entre "gerada(s) com sucesso"
     // e "já estavam geradas para este mês", dependendo se é a primeira
