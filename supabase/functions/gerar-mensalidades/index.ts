@@ -200,15 +200,24 @@ async function handleRequest(req: Request): Promise<Response> {
     //      esse campo falha com 23502 (violação de NOT NULL). Esse era
     //      o bug real: a function nunca tinha sido exercitada de ponta a
     //      ponta com um aluno ativo+plano válido até o teste E2E do
-    //      PED-27 — antes, uma checagem de auth quebrada em
-    //      alunos_com_mensalidade_no_mes fazia a function retornar cedo
-    //      assim que havia pelo menos 1 aluno (ver migration
-    //      fix_alunos_com_mensalidade_no_mes_service_role), então o
-    //      caminho de insert nunca era alcançado em nenhum teste manual
-    //      anterior.
+    //      PED-27 — antes, uma checagem de auth quebrada na RPC
+    //      alunos_com_mensalidade_no_mes (passo 3 abaixo) lançava um erro
+    //      de Postgres (42501), que o `if (errJaGeradas) throw errJaGeradas`
+    //      convertia num 500 bem antes de chegar aqui (ver migration
+    //      fix_alunos_com_mensalidade_no_mes_service_role) — não um
+    //      retorno antecipado por "nenhum aluno ativo" (esse é um bug
+    //      diferente, já corrigido, do filtro pela coluna `ativo`; ver
+    //      comentário no passo 1 acima). De qualquer forma, o caminho de
+    //      insert nunca era alcançado em nenhum teste manual anterior.
     //   2. ON CONFLICT ... DO NOTHING por linha (não pelo lote inteiro) —
     //      mais seguro contra corrida entre duas chamadas concorrentes
     //      do que o pre-filtro em JS (passo 3-4 acima) sozinho.
+    // A segurança do dedup idempotente aqui (índice único parcial da RPC,
+    // e a correlação por igualdade de plano_id dentro dela) depende de
+    // plano_id nunca ser null neste array — hoje isso é garantido pelo
+    // .not('plano_id', 'is', null) na query de `alunos` (passo 1 acima).
+    // Se esse filtro for relaxado no futuro, tanto o índice único quanto
+    // a correlação por plano_id na RPC ficam NULL-unsafe.
     const mensalidades = paraGerar.map((aluno: AlunoComPlano) => ({
       estudio_id: estudioId,         // ← isolamento: salva o vínculo
       aluno_id: aluno.id,
@@ -245,7 +254,7 @@ async function handleRequest(req: Request): Promise<Response> {
       .eq('role', 'admin')
       .returns<MembroAdmin[]>()
 
-    if (admins && admins.length > 0) {
+    if (totalInseridas > 0 && admins && admins.length > 0) {
       // NOTA: a tabela "notificacoes" não foi encontrada no banco durante
       // a sprint de RLS (ALTER TABLE notificacoes falhou com "relation
       // does not exist" — ver 001_rls_multitenant.sql). Esse INSERT abaixo

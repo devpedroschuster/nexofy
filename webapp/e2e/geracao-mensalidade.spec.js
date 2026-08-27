@@ -38,11 +38,22 @@ test.describe('Geração de mensalidade', () => {
     // chamada de rede terminar, os passos seguintes (filtrar/buscar) rodam
     // contra a tabela ainda não atualizada, e a asserção falha por timing,
     // não por dado ausente.
+    // A chamada via supabase.functions.invoke(...) é cross-origin e envia
+    // Authorization, então o browser dispara um preflight OPTIONS pra essa
+    // mesma URL antes do POST real. Sem checar o método, o preflight (que
+    // também responde 200) pode satisfazer o predicate primeiro e reabrir a
+    // mesma corrida de timing que este waitForResponse existe pra fechar.
     const respostaGeracao = page.waitForResponse((resp) =>
-      resp.url().includes('/functions/v1/gerar-mensalidades')
+      resp.url().includes('/functions/v1/gerar-mensalidades') && resp.request().method() === 'POST'
     );
     await page.getByRole('button', { name: 'Confirmar' }).click();
-    await respostaGeracao;
+    const resposta = await respostaGeracao;
+
+    // Sem essa asserção, o teste é vazio a partir da 2ª execução no mesmo
+    // mês (a mensalidade da 1ª execução já está lá) e em qualquer retry
+    // após um 1º attempt bem-sucedido (playwright.config.js: retries: 1) —
+    // passaria mesmo que a Edge Function voltasse a responder 500.
+    expect(resposta.status(), await resposta.text()).toBeLessThan(400);
 
     // Não valida o texto do toast (difere entre "gerada(s) com sucesso"
     // e "já estavam geradas para este mês", dependendo se é a primeira
@@ -57,6 +68,8 @@ test.describe('Geração de mensalidade', () => {
     await page.getByRole('button', { name: 'Todos' }).click();
     await page.getByPlaceholder('Buscar aluno...').fill('E2E Aluno Tenant B');
 
-    await expect(page.getByText('E2E Aluno Tenant B', { exact: true })).toBeVisible();
+    // .first(): filtro "Todos" (não "Pendentes") deixa a asserção sujeita a
+    // strict-mode violation se o fixture ganhar um 2º lançamento no mês.
+    await expect(page.getByText('E2E Aluno Tenant B', { exact: true }).first()).toBeVisible();
   });
 });
