@@ -188,6 +188,27 @@ async function handleRequest(req: Request): Promise<Response> {
     }
 
     // 5. Monta inserção incluindo estudio_id em cada registro
+    // FIX: usa a RPC inserir_mensalidades_regulares_idempotente (PED-16,
+    // ver migration fix_inserir_mensalidades_regulares_ordinality) em vez
+    // de um insert direto na tabela. Essa RPC foi criada especificamente
+    // para esta function (comentário da própria RPC: "Uso restrito à
+    // edge function gerar-mensalidades") e resolve dois problemas que um
+    // insert direto não resolve:
+    //   1. periodo_fim é NOT NULL desde a migration
+    //      cobertura_pagamento_periodo — a RPC preenche
+    //      periodo_fim=data_vencimento por padrão; um insert direto sem
+    //      esse campo falha com 23502 (violação de NOT NULL). Esse era
+    //      o bug real: a function nunca tinha sido exercitada de ponta a
+    //      ponta com um aluno ativo+plano válido até o teste E2E do
+    //      PED-27 — antes, uma checagem de auth quebrada em
+    //      alunos_com_mensalidade_no_mes fazia a function retornar cedo
+    //      assim que havia pelo menos 1 aluno (ver migration
+    //      fix_alunos_com_mensalidade_no_mes_service_role), então o
+    //      caminho de insert nunca era alcançado em nenhum teste manual
+    //      anterior.
+    //   2. ON CONFLICT ... DO NOTHING por linha (não pelo lote inteiro) —
+    //      mais seguro contra corrida entre duas chamadas concorrentes
+    //      do que o pre-filtro em JS (passo 3-4 acima) sozinho.
     const mensalidades = paraGerar.map((aluno: AlunoComPlano) => ({
       estudio_id: estudioId,         // ← isolamento: salva o vínculo
       aluno_id: aluno.id,
@@ -201,11 +222,13 @@ async function handleRequest(req: Request): Promise<Response> {
       juros_aplicados: 0,
     }))
 
-    const { error: errInsert } = await supabase
-      .from('mensalidades')
-      .insert(mensalidades)
+    const { data: resultadoInsercao, error: errInsert } = await supabase
+      .rpc('inserir_mensalidades_regulares_idempotente', { p_mensalidades: mensalidades })
+      .returns<{ out_aluno_id: number; out_inserida: boolean }[]>()
 
     if (errInsert) throw errInsert
+
+    const totalInseridas = (resultadoInsercao ?? []).filter((r) => r.out_inserida).length
 
     // 6. Notifica admins deste estúdio via tabela notificacoes
     // FIX: "profiles" é um sistema de roles paralelo a "estudio_membros" e
@@ -236,7 +259,7 @@ async function handleRequest(req: Request): Promise<Response> {
           user_id: admin.user_id,
           tipo: 'cobranca',
           titulo: '💰 Cobranças geradas',
-          mensagem: `${paraGerar.length} mensalidade(s) gerada(s) para ${mesLabel}.`,
+          mensagem: `${totalInseridas} mensalidade(s) gerada(s) para ${mesLabel}.`,
           lida: false,
         }))
       )
@@ -247,7 +270,7 @@ async function handleRequest(req: Request): Promise<Response> {
       }
     }
 
-    return response({ sucesso: true, geradas: paraGerar.length, mes: mesLabel, data_vencimento })
+    return response({ sucesso: true, geradas: totalInseridas, mes: mesLabel, data_vencimento })
 
   } catch (err: unknown) {
     const message =
