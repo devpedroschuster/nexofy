@@ -1,0 +1,10 @@
+version: 2
+
+secret:
+  ignored_matches:
+    # Falso positivo: senha propositalmente ERRADA usada só pra testar o
+    # caminho negativo de login (credenciais inválidas não autenticam) em
+    # webapp/e2e/login-tenant-isolation.spec.js. Não é segredo real — nunca
+    # foi, nunca será, aceita em nenhum ambiente.
+    - name: e2e-senha-invalida-teste-negativo
+      match: senha-errada-123
