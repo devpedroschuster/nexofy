@@ -33,6 +33,24 @@ jobs:
       - name: Build
         run: npm run build
 
+  db-diff:
+    name: Supabase DB Diff (staging)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Check schema drift against staging
+        run: ./scripts/check-db-diff.sh
+
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
