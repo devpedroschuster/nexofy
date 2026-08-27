@@ -11,9 +11,17 @@ nesse sentido — nunca ao contrário:
 1. **Migration aditiva** em `supabase/migrations/` — só cria (nova coluna
    nullable ou com `DEFAULT`, nova função, novo índice). Nunca `DROP` ou
    `RENAME` de algo que o código em produção ainda lê/escreve. Aplicar em
-   staging primeiro (`supabase link --project-ref <staging> && supabase db
-   push`), validar, só então promover pra produção (ver `README.md` pra o
-   passo a passo de `supabase link`/`db push`).
+   staging primeiro, validar, só então promover pra produção:
+
+   ```bash
+   # 1. Aplica e valida em staging
+   supabase link --project-ref <ref-do-staging>
+   supabase db push
+
+   # 2. Só depois de validado, promove pra produção
+   supabase link --project-ref <ref-de-producao> --password "$SUPABASE_DB_PASSWORD"
+   supabase db push
+   ```
 2. **Deploy da Edge Function nova ou alterada**, já preparada pra conviver
    com o schema pré- *e* pós-migration (a migration do passo 1 já rodou,
    então a function pode contar com a coluna/função nova existir).
