@@ -8,18 +8,12 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['dist']),
   {
+    // Só adiciona os globals de Node (process, __dirname, etc.) aos
+    // arquivos de E2E — o bloco `**/*.{js,jsx}` abaixo já cobre regras
+    // (no-unused-vars) e parserOptions pra estes mesmos arquivos.
     files: ['e2e/**/*.js', 'playwright.config.js'],
-    extends: [js.configs.recommended],
     languageOptions: {
-      ecmaVersion: 2020,
       globals: { ...globals.browser, ...globals.node },
-      parserOptions: {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-      },
-    },
-    rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', ignoreRestSiblings: true }],
     },
   },
   {

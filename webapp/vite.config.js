@@ -30,6 +30,9 @@ export default defineConfig({
   },
 
   preview: {
-    allowedHosts: ['tenant-a.e2e.test', 'tenant-b.e2e.test'],
+    // Deve ficar em sincronia com TENANT_A_HOST/TENANT_B_HOST em
+    // webapp/e2e/constants.js e com as entradas de /etc/hosts em
+    // .github/workflows/ci.yml (job `e2e`).
+    allowedHosts: ['iluminus.e2e.test', 'ronaldo.e2e.test'],
   },
 });

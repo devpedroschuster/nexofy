@@ -33,6 +33,7 @@ jobs:
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: webapp
@@ -63,8 +64,8 @@ jobs:
 
       - name: Add tenant hostnames to /etc/hosts
         run: |
-          echo "127.0.0.1 tenant-a.e2e.test" | sudo tee -a /etc/hosts
-          echo "127.0.0.1 tenant-b.e2e.test" | sudo tee -a /etc/hosts
+          echo "127.0.0.1 iluminus.e2e.test" | sudo tee -a /etc/hosts
+          echo "127.0.0.1 ronaldo.e2e.test" | sudo tee -a /etc/hosts
 
       - name: Run E2E tests
         run: npm run e2e
@@ -74,5 +75,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: webapp/playwright-report/
+          path: |
+            webapp/playwright-report/
+            webapp/test-results/
           retention-days: 7
