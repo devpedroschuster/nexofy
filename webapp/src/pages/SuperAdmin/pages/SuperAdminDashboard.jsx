@@ -7,6 +7,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Building2, Plus, ArrowRight } from 'lucide-react';
 import MetricasGlobais from '../components/MetricasGlobais';
+import SaudeSistema from '../components/SaudeSistema';
 import Button from '../../../components/ui/Button';
 
 export default function SuperAdminDashboard() {
@@ -22,6 +23,9 @@ export default function SuperAdminDashboard() {
 
       {/* Cards de métricas cross-tenant */}
       <MetricasGlobais />
+
+      {/* PED-34: saúde operacional (webhook, mensalidades, erros) */}
+      <SaudeSistema />
 
       {/* Atalhos de ação rápida */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
