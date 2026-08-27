@@ -1,138 +1,14 @@
 -- Captura 38 functions que já existiam no banco de staging mas nunca
--- tinham sido registradas em nenhuma migration (PED-30). Gerado a partir
--- da saída de `supabase db diff --db-url "$STAGING_DB_URL" --schema public`,
--- comparando o schema real de staging contra as migrations existentes —
--- portanto reflete exatamente o que já está em produção/staging hoje,
--- não uma mudança de comportamento. CREATE OR REPLACE é idempotente.
-
-set check_function_bodies = off;
-
-CREATE OR REPLACE FUNCTION public.fake_bairro(seed bigint)
- RETURNS text
- LANGUAGE sql
- IMMUTABLE
-AS $function$
-  select (array['Centro','Jardim America','Vila Nova','Bela Vista','Sao Jose','Boa Vista','Cidade Alta','Parque Industrial','Vila Rica','Santa Cruz'])[1 + (seed % 10)];
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.fake_cep(seed bigint)
- RETURNS text
- LANGUAGE sql
- IMMUTABLE
-AS $function$
-  select lpad((10000000 + (seed*13 % 89999999))::text, 8, '0');
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.fake_cidade(seed bigint)
- RETURNS text
- LANGUAGE sql
- IMMUTABLE
-AS $function$
-  select (array['Sao Paulo','Rio de Janeiro','Belo Horizonte','Curitiba','Porto Alegre','Salvador','Recife','Fortaleza','Campinas','Florianopolis'])[1 + (seed % 10)];
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.fake_cnpj(seed bigint)
- RETURNS text
- LANGUAGE plpgsql
- IMMUTABLE
-AS $function$
-declare
-  base text := lpad(((seed * 104729 + 54321) % 100000000)::text, 8, '0') || '0001';
-  d int[];
-  w13 int[] := array[5,4,3,2,9,8,7,6,5,4,3,2];
-  w14 int[] := array[6,5,4,3,2,9,8,7,6,5,4,3,2];
-  s int; r int; d13 int; d14 int;
-  i int;
-begin
-  for i in 1..12 loop
-    d[i] := substring(base from i for 1)::int;
-  end loop;
-  s := 0;
-  for i in 1..12 loop
-    s := s + d[i] * w13[i];
-  end loop;
-  r := s % 11;
-  d13 := case when r < 2 then 0 else 11 - r end;
-  d[13] := d13;
-  s := 0;
-  for i in 1..13 loop
-    s := s + d[i] * w14[i];
-  end loop;
-  r := s % 11;
-  d14 := case when r < 2 then 0 else 11 - r end;
-  return base || d13::text || d14::text;
-end;
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.fake_cpf(seed bigint)
- RETURNS text
- LANGUAGE plpgsql
- IMMUTABLE
-AS $function$
-declare
-  base text := lpad(((seed * 7919 + 12345) % 1000000000)::text, 9, '0');
-  d int[];
-  s int; r int; d10 int; d11 int;
-  i int;
-begin
-  for i in 1..9 loop
-    d[i] := substring(base from i for 1)::int;
-  end loop;
-  s := 0;
-  for i in 1..9 loop
-    s := s + d[i] * (11 - i);
-  end loop;
-  r := s % 11;
-  d10 := case when r < 2 then 0 else 11 - r end;
-  d[10] := d10;
-  s := 0;
-  for i in 1..10 loop
-    s := s + d[i] * (12 - i);
-  end loop;
-  r := s % 11;
-  d11 := case when r < 2 then 0 else 11 - r end;
-  return base || d10::text || d11::text;
-end;
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.fake_email(seed bigint, prefix text DEFAULT 'user'::text)
- RETURNS text
- LANGUAGE sql
- IMMUTABLE
-AS $function$
-  select prefix || seed::text || '@staging.nexofy.test';
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.fake_nome(seed bigint)
- RETURNS text
- LANGUAGE sql
- IMMUTABLE
-AS $function$
-  select (array['Ana','Bruno','Carla','Diego','Elisa','Fabio','Gabriela','Hugo','Isabela','Joao',
-                'Karina','Lucas','Marina','Nicolas','Olivia','Pedro','Queila','Rafael','Sofia','Thiago'])[1 + (seed % 20)]
-    || ' ' ||
-    (array['Silva','Souza','Oliveira','Santos','Pereira','Costa','Rodrigues','Almeida','Nascimento','Lima',
-           'Araujo','Fernandes','Carvalho','Gomes','Martins','Rocha','Ribeiro','Alves','Monteiro','Cardoso'])[1 + ((seed/7) % 20)];
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.fake_telefone(seed bigint)
- RETURNS text
- LANGUAGE sql
- IMMUTABLE
-AS $function$
-  select '(' || (11 + (seed % 89))::text || ') 9' || lpad(((seed*3 + 10007) % 100000000)::text, 8, '0');
-$function$
-;
+-- tinham sido registradas em nenhuma migration (PED-30). Gerado via
+-- pg_get_functiondef() consultado diretamente em staging (não a partir
+-- do log de CI, que normaliza \r\n -> \n e quebrava o diff de novo,
+-- já que os corpos originais destas functions usam CRLF).
+-- CREATE OR REPLACE é idempotente: não muda staging (já bate) nem
+-- produção (esta migration não é aplicada automaticamente em lugar
+-- nenhum só por existir aqui).
 
 CREATE OR REPLACE FUNCTION public.agendar_avulso(p_estudio_id uuid, p_aluno_id bigint, p_aula_id bigint, p_data_aula date, p_ignorar_avisos boolean DEFAULT false)
- RETURNS public.presencas
+ RETURNS presencas
  LANGUAGE plpgsql
  SET search_path TO 'public'
 AS $function$
@@ -334,7 +210,7 @@ $function$
 ;
 
 CREATE OR REPLACE FUNCTION public.criar_lead_com_presenca(p_estudio_id uuid, p_nome text, p_telefone text, p_aula_id bigint, p_data_visita date)
- RETURNS public.leads
+ RETURNS leads
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -481,6 +357,130 @@ begin
     where id = p_aula_id
       and estudio_id = p_estudio_id;
 end;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.fake_bairro(seed bigint)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  select (array['Centro','Jardim America','Vila Nova','Bela Vista','Sao Jose','Boa Vista','Cidade Alta','Parque Industrial','Vila Rica','Santa Cruz'])[1 + (seed % 10)];
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.fake_cep(seed bigint)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  select lpad((10000000 + (seed*13 % 89999999))::text, 8, '0');
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.fake_cidade(seed bigint)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  select (array['Sao Paulo','Rio de Janeiro','Belo Horizonte','Curitiba','Porto Alegre','Salvador','Recife','Fortaleza','Campinas','Florianopolis'])[1 + (seed % 10)];
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.fake_cnpj(seed bigint)
+ RETURNS text
+ LANGUAGE plpgsql
+ IMMUTABLE
+AS $function$
+declare
+  base text := lpad(((seed * 104729 + 54321) % 100000000)::text, 8, '0') || '0001';
+  d int[];
+  w13 int[] := array[5,4,3,2,9,8,7,6,5,4,3,2];
+  w14 int[] := array[6,5,4,3,2,9,8,7,6,5,4,3,2];
+  s int; r int; d13 int; d14 int;
+  i int;
+begin
+  for i in 1..12 loop
+    d[i] := substring(base from i for 1)::int;
+  end loop;
+  s := 0;
+  for i in 1..12 loop
+    s := s + d[i] * w13[i];
+  end loop;
+  r := s % 11;
+  d13 := case when r < 2 then 0 else 11 - r end;
+  d[13] := d13;
+  s := 0;
+  for i in 1..13 loop
+    s := s + d[i] * w14[i];
+  end loop;
+  r := s % 11;
+  d14 := case when r < 2 then 0 else 11 - r end;
+  return base || d13::text || d14::text;
+end;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.fake_cpf(seed bigint)
+ RETURNS text
+ LANGUAGE plpgsql
+ IMMUTABLE
+AS $function$
+declare
+  base text := lpad(((seed * 7919 + 12345) % 1000000000)::text, 9, '0');
+  d int[];
+  s int; r int; d10 int; d11 int;
+  i int;
+begin
+  for i in 1..9 loop
+    d[i] := substring(base from i for 1)::int;
+  end loop;
+  s := 0;
+  for i in 1..9 loop
+    s := s + d[i] * (11 - i);
+  end loop;
+  r := s % 11;
+  d10 := case when r < 2 then 0 else 11 - r end;
+  d[10] := d10;
+  s := 0;
+  for i in 1..10 loop
+    s := s + d[i] * (12 - i);
+  end loop;
+  r := s % 11;
+  d11 := case when r < 2 then 0 else 11 - r end;
+  return base || d10::text || d11::text;
+end;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.fake_email(seed bigint, prefix text DEFAULT 'user'::text)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  select prefix || seed::text || '@staging.nexofy.test';
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.fake_nome(seed bigint)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  select (array['Ana','Bruno','Carla','Diego','Elisa','Fabio','Gabriela','Hugo','Isabela','Joao',
+                'Karina','Lucas','Marina','Nicolas','Olivia','Pedro','Queila','Rafael','Sofia','Thiago'])[1 + (seed % 20)]
+    || ' ' ||
+    (array['Silva','Souza','Oliveira','Santos','Pereira','Costa','Rodrigues','Almeida','Nascimento','Lima',
+           'Araujo','Fernandes','Carvalho','Gomes','Martins','Rocha','Ribeiro','Alves','Monteiro','Cardoso'])[1 + ((seed/7) % 20)];
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.fake_telefone(seed bigint)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  select '(' || (11 + (seed % 89))::text || ') 9' || lpad(((seed*3 + 10007) % 100000000)::text, 8, '0');
 $function$
 ;
 
@@ -841,7 +841,7 @@ $function$
 ;
 
 CREATE OR REPLACE FUNCTION public.substituir_repasses_mensalidade(p_estudio_id uuid, p_mensalidade_id bigint, p_ids_lote_remover uuid[], p_itens jsonb)
- RETURNS SETOF public.repasses_lancamentos
+ RETURNS SETOF repasses_lancamentos
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -1108,6 +1108,3 @@ AS $function$
   limit 1;
 $function$
 ;
-
-
-
