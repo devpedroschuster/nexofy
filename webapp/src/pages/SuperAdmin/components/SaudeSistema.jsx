@@ -11,7 +11,7 @@ import { Activity, Timer, Bug } from 'lucide-react';
 import { superAdminService } from '../../../services/superAdminService';
 import MetricCard from '../../../components/ui/MetricCard';
 import Badge from '../../../components/ui/Badge';
-import { webhookDentroDoSlo, formatarSegundos } from './saudeSistemaHelpers';
+import { WEBHOOK_SLO_MS, webhookDentroDoSlo, formatarSegundos } from './saudeSistemaHelpers';
 
 const SENTRY_ISSUES_URL = 'https://dev-pedro-schuster.sentry.io/issues/';
 
@@ -50,7 +50,7 @@ export default function SaudeSistema() {
           footer={
             temAmostras ? (
               <Badge tone={webhookDentroDoSlo(p95) ? 'success' : 'destructive'} className="mt-2">
-                Meta: {'<'}5s em 99% dos casos
+                Meta: p95 {'<'} {formatarSegundos(WEBHOOK_SLO_MS)}
               </Badge>
             ) : null
           }
