@@ -46,9 +46,15 @@ test.describe('Geração de mensalidade', () => {
 
     // Não valida o texto do toast (difere entre "gerada(s) com sucesso"
     // e "já estavam geradas para este mês", dependendo se é a primeira
-    // execução do mês) — o sinal confiável é o estado final da tabela,
-    // que é o mesmo nos dois casos: a mensalidade existe e está pendente.
-    await page.getByRole('button', { name: 'Pendentes' }).click();
+    // execução do mês) — o sinal confiável é o estado final da tabela.
+    //
+    // Também não filtra por "Pendentes": gerar-mensalidades sempre usa o
+    // dia 10 como data_vencimento (ver index.ts), e o status exibido é
+    // calculado em tempo real comparando essa data com hoje — rodando o
+    // teste depois do dia 10 do mês (a maior parte do tempo), a
+    // mensalidade já aparece como "Atrasado", não "Pendente". "Todos"
+    // é o único filtro de status correto independente de quando o CI roda.
+    await page.getByRole('button', { name: 'Todos' }).click();
     await page.getByPlaceholder('Buscar aluno...').fill('E2E Aluno Tenant B');
 
     await expect(page.getByText('E2E Aluno Tenant B', { exact: true })).toBeVisible();
