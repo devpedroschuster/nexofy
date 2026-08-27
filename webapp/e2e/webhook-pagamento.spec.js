@@ -62,6 +62,8 @@ test.describe('Webhook de pagamento', () => {
     await page.getByPlaceholder('Buscar aluno...').fill('E2E Aluno Webhook');
 
     await expect(page.getByText('E2E Aluno Webhook', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('PAGO')).toBeVisible();
+    // exact: true — sem isso, o match por substring pega também o botão
+    // de filtro "Pagos" (strict-mode violation: 2 elementos).
+    await expect(page.getByText('PAGO', { exact: true })).toBeVisible();
   });
 });
