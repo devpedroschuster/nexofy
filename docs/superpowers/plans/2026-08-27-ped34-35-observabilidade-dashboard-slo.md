@@ -17,6 +17,7 @@
 - Não ligar `tracesSampleRate` do Sentry (continua 0 — decisão de custo já registrada em `_shared/sentry.ts:23`) e não criar proxy de API do Sentry nesta ficha — o card de erro de Edge Function é só um link.
 - Não existe `@testing-library/react` (nem qualquer runner de teste de componente) neste projeto — não introduzir essa infraestrutura aqui. Vitest já é usado para lógica pura em `webapp/src/lib/*.test.js`; qualquer lógica nova com ramificação (ex.: comparação contra SLO) deve ser extraída pra uma função pura testável nesse mesmo padrão. Componentes React são validados manualmente (dev server / browser), igual o resto do projeto.
 - Migration é testada **localmente** (`supabase start` + `supabase migration up` ou `db reset`) contra o stack local — não aplicar diretamente em staging/produção. Promoção pra staging/prod segue o gate de CI (`db-diff`, PED-30) já existente, acionado no merge, não manualmente.
+- `.gitattributes` marca `supabase/migrations/*.sql -text` (sem normalização de line-ending pelo git) — o gate `db-diff` do PED-30 compara bytes exatos contra staging. Criar o arquivo da migration com `Write` normalmente (sem editor/ferramenta que reescreva line endings) é suficiente; não rodar nenhum passo extra de "normalização" nesse arquivo.
 - `webhook_events` tem `revoke all from anon, authenticated` (só service role acessa) — por isso `latencia_webhook_pagamento_mes()` PRECISA ser `SECURITY DEFINER` pra conseguir ler a tabela por baixo do gate de `eh_super_admin()`.
 
 ---
