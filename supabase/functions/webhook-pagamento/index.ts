@@ -53,6 +53,8 @@ const EVENTOS_FALHOU = new Set([
 ])
 
 serve(withSentry("webhook-pagamento", async (req) => {
+  const inicio = Date.now()
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
   }
@@ -203,6 +205,23 @@ serve(withSentry("webhook-pagamento", async (req) => {
   }
 
   // ── 3) ACK RÁPIDO ────────────────────────────────────────────────────
+  // PED-34: grava a duração do processamento (ms) na própria linha de
+  // webhook_events já inserida no passo de idempotência acima. Precisa
+  // acontecer AQUI, antes do return — mesmo motivo do flush do Sentry em
+  // withSentry (_shared/sentry.ts): o processo pode ser congelado logo
+  // após a resposta, e perderíamos justamente a métrica de latência que
+  // o SLO do PED-35 depende. Só o caminho de sucesso grava duração —
+  // eventos duplicados/fora de ordem/mensalidade não encontrada retornam
+  // antes daqui de propósito, e não devem contar como "processado" pro SLO.
+  const duracaoMs = Date.now() - inicio
+  const { error: duracaoErr } = await supabase
+    .from("webhook_events")
+    .update({ duracao_ms: duracaoMs })
+    .eq("id", eventoRow.id)
+  if (duracaoErr) {
+    console.error("[webhook-pagamento] Falha ao gravar duracao_ms:", duracaoErr)
+  }
+
   // A partir daqui, tudo que resta é pesado (calcular repasse cruzando
   // várias tabelas, chamar a Expo Push API) — não pode competir com o
   // prazo do Asaas para considerar a entrega bem-sucedida.
