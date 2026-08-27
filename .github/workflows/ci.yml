@@ -48,6 +48,7 @@ jobs:
       E2E_ADMIN_A_PASSWORD: ${{ secrets.E2E_ADMIN_A_PASSWORD }}
       E2E_ADMIN_B_EMAIL: ${{ secrets.E2E_ADMIN_B_EMAIL }}
       E2E_ADMIN_B_PASSWORD: ${{ secrets.E2E_ADMIN_B_PASSWORD }}
+      E2E_ASAAS_WEBHOOK_TOKEN: ${{ secrets.E2E_ASAAS_WEBHOOK_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
