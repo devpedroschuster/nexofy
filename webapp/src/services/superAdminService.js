@@ -51,6 +51,26 @@ async function metricasGlobais() {
   };
 }
 
+async function saudeSistema() {
+  const [
+    { data: mensalidades, error: errMensalidades },
+    { data: latencia, error: errLatencia },
+  ] = await Promise.all([
+    supabase.rpc('mensalidades_geradas_vs_esperado_mes').single(),
+    supabase.rpc('latencia_webhook_pagamento_mes').single(),
+  ]);
+
+  if (errMensalidades) throw errMensalidades;
+  if (errLatencia) throw errLatencia;
+
+  return {
+    mensalidadesGeradas: Number(mensalidades?.gerado ?? 0),
+    mensalidadesEsperadas: Number(mensalidades?.esperado ?? 0),
+    webhookP95Ms: latencia?.p95_ms != null ? Number(latencia.p95_ms) : null,
+    webhookAmostras: Number(latencia?.amostras ?? 0),
+  };
+}
+
 const STATUS_VALIDOS = ['ativo', 'suspenso'];
 
 async function alterarStatusEstudio(estudioId, novoStatus) {
@@ -90,6 +110,7 @@ async function criarEstudio({ nome, slug, adminEmail, adminNome, whatsapp, insta
 export const superAdminService = {
   listarEstudios,
   metricasGlobais,
+  saudeSistema,
   alterarStatusEstudio,
   criarEstudio,
 };
