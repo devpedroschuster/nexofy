@@ -57,15 +57,17 @@ hash que já existia antes.
 `main` nunca recebe merge sem passar por um **Preview Deployment da
 Vercel** já testado manualmente. Cada PR aberto no GitHub já dispara esse
 preview automaticamente (integração Git da Vercel). A proteção de branch
-de `main` no GitHub exige o check "Vercel" (deployment concluído) e "Lint, Test & Build" antes de permitir o merge.
+de `main` no GitHub (Settings → Branches) exige os checks `Lint, Test &
+Build` e `Vercel` antes de permitir o merge — confirmar com `gh api
+repos/devpedroschuster/nexofy/branches/main/protection` sempre que um
+workflow do CI for renomeado, já que um required check com nome
+desatualizado não trava merge nenhum, só fica "pendente" pra sempre (foi
+o que aconteceu até aqui com o check antigo "Lint & Build", órfão desde
+que o job de CI passou a se chamar "Lint, Test & Build").
 
-Checks obrigatórios hoje na proteção de `main` (GitHub → Settings →
-Branches): `Lint, Test & Build` e `Vercel`. Confirmar com
-`gh api repos/devpedroschuster/nexofy/branches/main/protection` sempre que
-um workflow do CI for renomeado — um required check com nome desatualizado
-não trava merge nenhum, só fica "pendente" pra sempre (foi o que aconteceu
-até aqui com o check antigo "Lint & Build", órfão desde que o job de CI
-passou a se chamar "Lint, Test & Build").
+`enforce_admins` está `false`: o admin (único usuário do repo hoje) ainda
+consegue mergear com um check pendente ou vermelho, numa emergência. O
+gate acima é uma convenção reforçada por CI, não um bloqueio absoluto.
 
 ## 4. Canary release por tenant (feature flags)
 
@@ -83,8 +85,27 @@ reaproveite o mecanismo de módulos já existente (`estudios.modulos_ativos`,
    — some do menu de quem não tem a chave (com a salvaguarda de "lista
    vazia não esconde nada" já existente, pra não sumir o sidebar inteiro
    numa corrida de carregamento).
-4. Na(s) rota(s) da feature em si (`App.jsx`), envolva com
-   `<RotaComModulo modulo="landing_page_builder">` (ver PED-39) — sem
-   isso, esconder o link do menu não impede acesso direto pela URL.
+4. Na(s) rota(s) da feature em si (`App.jsx`), envolva como rota-pai —
+   `RotaComModulo` ignora `children` e renderiza `<Outlet/>`, mesmo
+   padrão de `RotaPrivada`/`RotaSuperAdmin` (ver PED-39):
+
+   ```jsx
+   <Route element={<RotaComModulo modulo="landing_page_builder" />}>
+     <Route path="/landing-builder" element={<LandingPageBuilder />} />
+   </Route>
+   ```
+
+   Sem isso, esconder o link do menu (passo 3) não impede acesso direto
+   pela URL.
 5. Quando a feature estiver pronta pra todo mundo, adicione a chave ao
    `DEFAULT` da coluna (migration) em vez de ativar tenant por tenant.
+
+**Atenção:** os passos 3 e 4 têm semânticas opostas pra lista vazia de
+`modulos_ativos` — o Sidebar (passo 3) mostra o item quando a lista está
+vazia (salvaguarda deliberada contra corrida de carregamento), mas
+`RotaComModulo` (passo 4) bloqueia nesse mesmo caso (fail-closed
+deliberado, ver comentário em `rotaModulo.js`). Na prática: o link
+aparece, mas clicar bloqueia. Isso também afeta super_admin fora de
+impersonation, cujo `modulos_ativos` é o array vazio default — rotas
+com módulo continuam bloqueadas pra ele até que esteja impersonando um
+tenant com a chave ativa.
