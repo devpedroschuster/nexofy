@@ -122,26 +122,38 @@ export function AuthProvider({ children }) {
       const authId = session.user.id;
 
       try {
-        
-// Ordena por created_at (vínculo mais antigo primeiro) de forma
-// determinística. Ajustar a coluna/critério conforme a regra de negócio real
-// desejada (ex: se deveria ser o vínculo mais RECENTE, trocar ascending para
-// false).
+        // Ordena por created_at (vínculo mais antigo primeiro) de forma
+        // determinística. Ajustar a coluna/critério conforme a regra de negócio real
+        // desejada (ex: se deveria ser o vínculo mais RECENTE, trocar ascending para
+        // false).
+        const membrosPromise = supabase
+          .from('estudio_membros')
+          .select('estudio_id, role, created_at, estudios(segmento, terminologia, modulos_ativos)')
+          .eq('user_id', authId)
+          .order('created_at', { ascending: true })
+          .limit(5);
 
-const { data: membros, error: errMembro } = await supabase
-  .from('estudio_membros')
-  .select('estudio_id, role, created_at, estudios(segmento, terminologia, modulos_ativos)')
-  .eq('user_id', authId)
-  .order('created_at', { ascending: true })
-  .limit(5);
- 
-if (errMembro) {
-  throw errMembro;
-}
- 
-if (cancelled) return;
- 
-const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ?? null;
+        // Disparada em paralelo com a query acima em vez de depois dela:
+        // verificar_status_estudio() é SECURITY DEFINER e deriva o vínculo
+        // direto de auth.uid() (não depende do resultado de `membros`), então
+        // esperar uma terminar pra só então iniciar a outra só empilhava mais
+        // um round-trip sequencial no caminho crítico do redirect pós-login —
+        // exatamente o tipo de latência evitável que, sob runner de CI
+        // carregado, estourava o timeout do E2E em auth.js:29 (PED-72).
+        const statusPromise = supabase.rpc('verificar_status_estudio');
+
+        const [
+          { data: membros, error: errMembro },
+          { data: statusRows, error: errStatus },
+        ] = await Promise.all([membrosPromise, statusPromise]);
+
+        if (errMembro) {
+          throw errMembro;
+        }
+
+        if (cancelled) return;
+
+        const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ?? null;
 
         if (membro) {
           perfilJaCarregado.current = true;
@@ -167,13 +179,9 @@ const membro = membros?.find((m) => m.role === 'super_admin') ?? membros?.[0] ??
           setEstudioId(membro.estudio_id);
           aplicarSegmentoDoEstudio(membro.estudios);
 
-          // Bloqueio de acesso por status do estúdio. Roda para todo
-          // membro não-super_admin (admin, professor, etc). A RPC é
-          // SECURITY DEFINER e consulta estudio_membros/estudios
-          // diretamente, sem passar por meu_estudio_id() — por isso
-          // funciona mesmo que o estúdio já esteja bloqueado (que é
-          // justamente quando meu_estudio_id() retornaria null).
-          const { data: statusRows, error: errStatus } = await supabase.rpc('verificar_status_estudio');
+          // Bloqueio de acesso por status do estúdio. Vale para todo membro
+          // não-super_admin (admin, professor, etc) — resultado da RPC já
+          // resolvido acima, em paralelo com a query de estudio_membros.
           if (errStatus) {
             console.error('Erro ao verificar status do estúdio:', errStatus);
           }

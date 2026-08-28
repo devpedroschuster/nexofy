@@ -26,5 +26,13 @@ export async function loginComoAdmin(page, host, email, password, nomeEstudio) {
   await page.getByLabel('E-mail').fill(email);
   await page.getByLabel('Senha').fill(password);
   await page.getByRole('button', { name: 'Entrar' }).click();
-  await expect(page).toHaveURL(urlFor(host, '/dashboard'), { timeout: 15_000 });
+
+  // Timeout generoso de propósito (PED-72): o redirect pra /dashboard só
+  // acontece depois do signInWithPassword + resolução de perfil (useAuth) —
+  // chamadas reais contra o projeto de staging, então sob CI/runner
+  // carregado (fullyParallel) a latência varia mais do que localmente.
+  // A causa raiz de round-trips sequenciais evitáveis foi corrigida em
+  // useAuth.jsx (Promise.all); esta margem cobre a variação de rede/CI
+  // residual que continua sendo inerente a bater num backend real.
+  await expect(page).toHaveURL(urlFor(host, '/dashboard'), { timeout: 25_000 });
 }
