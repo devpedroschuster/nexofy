@@ -29,6 +29,21 @@ observações médicas, chaves/ids de gateway de pagamento).
    copiadas — a primeira depende de usuários reais em `auth.users`, que
    propositalmente não são replicados (ver seção abaixo); as outras duas são dado
    transacional sem valor pra teste.
+4. **Sequences precisam ser corrigidas depois da cópia (PED-48).** Como o `id`
+   é copiado explícito de produção (pra preservar as referências de FK), a
+   sequence de cada tabela com PK `bigint`/`integer` gerado por identity (não
+   uuid) nunca é chamada via `nextval()` — fica presa no valor default (1).
+   Sem corrigir, o primeiro INSERT novo depois do dump colide com um id já
+   existente (`duplicate key value violates unique constraint`). Rode, pra
+   cada tabela afetada, logo após o dump:
+   ```sql
+   select setval('public.<tabela>_id_seq', (select max(id) from public.<tabela>), true);
+   ```
+   Tabelas com PK uuid (`estudios`, `professores`, `modalidades`, `espacos`,
+   `historico_planos`, `repasses_lancamentos`, `configuracoes_repasse`,
+   `fechamento_comissoes`, `despesas`, `feriados`, `campos_dinamicos`,
+   `tabela_colunas_config`, `estudio_dados_asaas`) não têm esse problema —
+   `gen_random_uuid()` não depende de sequence.
 
 ## Usuários de teste (login)
 
