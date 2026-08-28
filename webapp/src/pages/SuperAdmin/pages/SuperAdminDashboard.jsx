@@ -8,7 +8,6 @@ import { Link } from 'react-router-dom';
 import { Building2, Plus, ArrowRight } from 'lucide-react';
 import MetricasGlobais from '../components/MetricasGlobais';
 import SaudeSistema from '../components/SaudeSistema';
-import Button from '../../../components/ui/Button';
 
 export default function SuperAdminDashboard() {
   return (
