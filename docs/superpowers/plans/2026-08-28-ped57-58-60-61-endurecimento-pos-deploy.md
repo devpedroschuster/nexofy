@@ -406,7 +406,7 @@ git commit -m "fix(seguranca): moduloEstaAtivo fail-closed se modulos_ativos nao
 ### Task 4: PED-57 — alinhar `gerar-mensalidades/config.toml` com o estado real de produção
 
 **Files:**
-- Modify: `supabase/functions/gerar-mensalidades/config.toml` (arquivo inteiro, 7 linhas)
+- Modify: `supabase/functions/gerar-mensalidades/config.toml` (arquivo inteiro, 30 linhas após a revisão final — ver Investigação abaixo)
 
 **Interfaces:** N/A — mudança de configuração/documentação, sem código nem função nova.
 
