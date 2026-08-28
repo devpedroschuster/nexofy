@@ -1,5 +1,11 @@
-const CACHE_NAME = '%%VITE_APP_SLUG%%-v3';
-const STATIC_CACHE_NAME = '%%VITE_APP_SLUG%%-static-v3';
+// %%CACHE_VERSION%% é substituído no build (vite.config.js,
+// swCacheVersionPlugin) pelo SHA curto do commit (Vercel) ou um
+// timestamp (build local) — cada deploy troca o nome das caches
+// automaticamente, sem depender de bumpar um número à mão. Isolamento
+// entre tenants já vem de graça do Cache Storage ser escopado por
+// origem (cada estúdio é um subdomínio) — não precisa de slug no nome.
+const CACHE_NAME = 'nexofy-%%CACHE_VERSION%%';
+const STATIC_CACHE_NAME = 'nexofy-static-%%CACHE_VERSION%%';
 
 const PRECACHE_URLS = [
   '/',

@@ -11,7 +11,9 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useAuth, AuthProvider } from './hooks/useAuth';
 import { useSuperAdmin } from './hooks/useSuperAdmin';
 import { useEstudio } from './hooks/useEstudio';
+import { useTerminologia } from './hooks/useTerminologia';
 import { rotaPorPerfil } from './lib/navigation';
+import { destinoRotaModulo } from './lib/rotaModulo';
 import { ThemeProvider } from './providers/ThemeProvider';
 import { ToastProvider } from './components/shared/Toast';
 import ErrorBoundary from './components/shared/ErrorBoundary';
@@ -165,6 +167,19 @@ function RotaSuperAdmin() {
   if (loading)       return <Spinner />;
   if (!autenticado)  return <Navigate to="/login" replace />;
   if (!isSuperAdmin) return <Navigate to={rotaPorPerfil('admin')} replace />;
+  return <Outlet />;
+}
+
+// Guard de módulo — controla acesso a uma rota inteira por
+// estudios.modulos_ativos, pra canary release de features grandes por
+// tenant (PED-39). Complementa RotaPrivada (auth/role): usado aninhado
+// dentro dela, nunca sozinho, pra também herdar a checagem de
+// sessão/perfil/estúdio bloqueado.
+function RotaComModulo({ modulo }) {
+  const { perfil } = useAuth();
+  const { modulosAtivos } = useTerminologia();
+  const destino = destinoRotaModulo(modulosAtivos, modulo, perfil);
+  if (destino) return <Navigate to={destino} replace />;
   return <Outlet />;
 }
 
