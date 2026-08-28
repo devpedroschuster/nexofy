@@ -67,6 +67,11 @@ jobs:
       E2E_ADMIN_B_EMAIL: ${{ secrets.E2E_ADMIN_B_EMAIL }}
       E2E_ADMIN_B_PASSWORD: ${{ secrets.E2E_ADMIN_B_PASSWORD }}
       E2E_ASAAS_WEBHOOK_TOKEN: ${{ secrets.E2E_ASAAS_WEBHOOK_TOKEN }}
+      # PED-50: service role key do projeto de staging — usada só pelo
+      # beforeAll de webhook-pagamento.spec.js pra resetar o fixture
+      # (webhook_events não tem policy pra anon/authenticated; só service
+      # role escreve/lê essa tabela). NÃO reaproveitar a anon key aqui.
+      E2E_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
