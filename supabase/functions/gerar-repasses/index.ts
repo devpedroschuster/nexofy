@@ -11,6 +11,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { withSentry } from "../_shared/sentry.ts";
 import { gerarRepassesParaMensalidade } from "../_shared/repasses.ts";
+import { createLogger } from "../_shared/logger.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -29,8 +30,16 @@ serve(withSentry("gerar-repasses", async (req: Request) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const correlationId = crypto.randomUUID();
+  const logger = createLogger("gerar-repasses", correlationId);
+
+  let estudioId: string | undefined;
+  let mensalidadeId: string | undefined;
+
   try {
-    const { estudioId, mensalidadeId } = await req.json();
+    const body = await req.json();
+    estudioId = body.estudioId;
+    mensalidadeId = body.mensalidadeId;
 
     // ISOLAMENTO MULTI-TENANT
     // A service role ignora RLS; todo acesso deve filtrar explicitamente por estudio_id.
@@ -77,6 +86,9 @@ serve(withSentry("gerar-repasses", async (req: Request) => {
     }
 
     const resultado = await gerarRepassesParaMensalidade(supabase, { estudioId, mensalidadeId });
+    logger.info("Repasse processado.", {
+      estudio_id: estudioId, mensalidade_id: mensalidadeId, gerados: resultado.gerados, aviso: resultado.aviso,
+    });
     return response(resultado);
 
   } catch (err) {
@@ -84,7 +96,7 @@ serve(withSentry("gerar-repasses", async (req: Request) => {
       err instanceof Error ? err.message
       : typeof err === 'object' && err !== null ? JSON.stringify(err)
       : String(err);
-    console.error('[gerar-repasses] ERRO:', message);
+    logger.error("Erro ao gerar repasse.", { estudio_id: estudioId, mensalidade_id: mensalidadeId, erro: message });
     // Preserva o 404 que o endpoint sempre retornou para mensalidade
     // inexistente (gerarRepassesParaMensalidade lança um Error genérico —
     // não é um erro de servidor, é um input inválido do chamador).
