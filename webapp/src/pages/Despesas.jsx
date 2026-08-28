@@ -10,6 +10,7 @@ import { despesasService } from '../services/despesasService';
 import { showToast } from '../components/shared/Toast';
 import { TableSkeleton, CardSkeleton } from '../components/shared/Loading';
 import { formatarMoeda } from '../lib/utils';
+import { ehFalhaDeChunkDesatualizado } from '../lib/chunkLoadError';
 
 import Button from '../components/ui/Button';
 import Input, { Label } from '../components/ui/Input';
@@ -245,6 +246,21 @@ export default function Despesas() {
       showToast.success("Relatório exportado com sucesso!");
     } catch (err) {
       console.error('[Despesas] exportarRelatorio falhou:', err); // CR FIX: try/catch adicionado
+      // PED-63: import('xlsx') acima é um chunk separado, buscado sob
+      // demanda — se um deploy rodou enquanto esta aba ficou aberta, o SW
+      // já pode ter purgado o cache da versão antiga (PED-37) e esse
+      // import falha. Essa falha específica está no ignoreErrors do Sentry
+      // (main.jsx) — sem esta checagem, o usuário só via "Erro ao gerar o
+      // relatório" e tentava de novo, caindo no mesmo erro sem entender
+      // por quê nem saber que recarregar resolve.
+      if (ehFalhaDeChunkDesatualizado(err)) {
+        showToast.custom(
+          'Nova versão disponível. Recarregue a página para exportar.',
+          () => window.location.reload(),
+          'Atualizar'
+        );
+        return;
+      }
       showToast.error("Erro ao gerar o relatório.");
     }
   }
