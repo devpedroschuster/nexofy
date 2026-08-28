@@ -55,6 +55,55 @@ O botão "Gerar Mensalidades" (página Financeiro, `webapp/src/pages/Financeiro.
   check-in inteiro como erro, só geram um evento de exceção separado no
   Sentry por estúdio (ver PED-33 se isso precisar de um alerta mais direto).
 
+## Agendar o cron de verdade em produção (ainda pendente)
+
+Confirmado em 28/08/2026: `cron.job` está vazio — **nenhum cron desta ou de
+qualquer outra function já foi agendado de verdade** neste projeto. O
+`[[cron]]` em `config.toml` é só documentação/intenção; ele não cria nada
+sozinho. Faltam três passos manuais, nessa ordem, **só contra produção**
+(`tciiepqmnrrcjnqhspvw`) — nunca via `supabase db push` (que aplicaria a
+mesma migration em staging também, e a URL abaixo é fixa de produção):
+
+1. **Confirmar (ou criar) o segredo no Vault** — `CRON_SECRET` como *Edge
+   Function secret* (o que `index.ts` lê via `Deno.env.get('CRON_SECRET')`)
+   e `CRON_SECRET` no **Vault** (`vault.decrypted_secrets`) são duas
+   storages diferentes; o SQL abaixo lê do Vault. Se ainda não existir lá:
+   ```sql
+   select vault.create_secret('<mesmo valor do Edge Function secret CRON_SECRET>', 'CRON_SECRET');
+   ```
+2. **Deploy da function** com o código atual deste diretório e
+   `verify_jwt=false` (ver bloco `[functions.gerar-mensalidades]` em
+   `supabase/config.toml` da raiz) — confirmar no resultado do deploy que
+   `verify_jwt` voltou `false`, não assumir.
+3. **Agendar o job** (rodar uma vez, direto no SQL Editor do painel Supabase
+   do projeto de produção, ou via uma chamada isolada — não como migration
+   versionada):
+   ```sql
+   select cron.schedule(
+     'cobrancas-mensais',
+     '0 8 1 * *',
+     $$
+     select net.http_post(
+       url := 'https://tciiepqmnrrcjnqhspvw.supabase.co/functions/v1/gerar-mensalidades',
+       headers := jsonb_build_object(
+         'Content-Type', 'application/json',
+         'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'CRON_SECRET')
+       ),
+       body := '{}'::jsonb
+     );
+     $$
+   );
+   ```
+   Depois de agendado, confirmar com `select * from cron.job;` e, no próximo
+   dia 1, com `select * from cron.job_run_details order by start_time desc limit 5;`.
+
+Recomendação: antes do passo 3, testar o modo batch manualmente (`curl -X
+POST .../gerar-mensalidades -H 'x-cron-secret: <valor real>' -H
+'Content-Type: application/json'`) contra produção ou staging e conferir
+`resultados[]` na resposta, já que este modo ainda não foi exercitado de
+ponta a ponta nesta sessão (deploy foi bloqueado pelo classifier de auto
+mode do Claude Code).
+
 ## Checklist antes de mexer neste cron em produção
 
 - [ ] Confirmar que `CRON_SECRET` está setado nos secrets do projeto de
