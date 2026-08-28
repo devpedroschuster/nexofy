@@ -897,11 +897,22 @@ Expected: sem erros.
 supabase functions serve webhook-pagamento --env-file supabase/.env.local
 ```
 
+> **Nota (PED-54, adicionada depois desta validação original):** mesmo com
+> `verify_jwt = false`, o gateway local (Kong/edge-runtime) pode devolver
+> 401 `UNAUTHORIZED_NO_AUTH_HEADER` antes de chamar a function se o `curl`
+> não incluir um header `Authorization`. Inclua `-H "Authorization: Bearer
+> <SUPABASE_ANON_KEY local>"` (pegue o valor em `supabase status`) nos
+> comandos abaixo — não muda o comportamento da function (quem autentica de
+> verdade é o `asaas-access-token`). Detalhes em
+> [`docs/DEV_LOCAL.md`](../../DEV_LOCAL.md) e no ticket
+> [PED-54](https://linear.app/pedro-schuster/issue/PED-54/dev-local-supabase-functions-serve-nome-env-file-nao-respeita-verify).
+
 Em outro terminal, envie o mesmo evento duas vezes (troque `SEU_TOKEN` e `pay_teste123` por um `asaas_payment_id` real de uma mensalidade de teste no seu banco local):
 
 ```bash
 curl -s -X POST http://localhost:54321/functions/v1/webhook-pagamento \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer SEU_ANON_KEY_LOCAL" \
   -H "asaas-access-token: SEU_TOKEN" \
   -d '{"event":"PAYMENT_CONFIRMED","dateCreated":"2026-08-26T10:00:00Z","payment":{"id":"pay_teste123","status":"CONFIRMED"}}'
 ```

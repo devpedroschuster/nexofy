@@ -75,6 +75,12 @@ npm run dev
 
 A aplicação sobe em `http://localhost:5173`.
 
+> Os passos acima sobem só o front-end, contra o projeto de **staging**.
+> Para rodar o stack Supabase completo localmente (Postgres, Auth,
+> Storage, Edge Functions via Docker) — necessário só para testar
+> migrations ou Edge Functions antes de aplicar em staging — veja
+> [`docs/DEV_LOCAL.md`](docs/DEV_LOCAL.md).
+
 ---
 
 ## 🚦 Fluxo de deploy: staging → produção
