@@ -16,13 +16,27 @@ import { resolve } from 'node:path';
 // VERCEL_GIT_COMMIT_SHA em todo build) porque amarra a versão da cache à
 // revisão de código real, não a um horário; timestamp como fallback pra
 // build local, onde essa env var não existe.
-function swCacheVersionPlugin() {
+export function swCacheVersionPlugin() {
   const versao = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ?? String(Date.now());
+  let root;
+  let outDir;
   return {
     name: 'sw-cache-version',
+    apply: 'build',
+    configResolved(config) {
+      root = config.root;
+      outDir = config.build.outDir;
+    },
     closeBundle() {
-      const caminho = resolve(process.cwd(), 'dist', 'sw.js');
-      if (!existsSync(caminho)) return;
+      const caminho = resolve(root, outDir, 'sw.js');
+      if (!existsSync(caminho)) {
+        // Antes retornava em silêncio: se o build algum dia rodar de outro
+        // cwd ou com build.outDir customizado, o sw.js deployado ficava com
+        // o literal %%CACHE_VERSION%% pra sempre, sem o build "quebrar" em
+        // lugar nenhum (PED-60). this.error interrompe o build de propósito.
+        this.error(`sw-cache-version: ${caminho} não encontrado — CACHE_VERSION não foi substituído em sw.js.`);
+        return;
+      }
       // Restrito às linhas `const ..._NAME = ...`: um replaceAll sobre o
       // arquivo inteiro também atingiria o token %%CACHE_VERSION%% citado
       // no comentário explicativo acima, corrompendo-o (PED-59).

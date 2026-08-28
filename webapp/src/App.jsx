@@ -12,6 +12,7 @@ import { useAuth, AuthProvider } from './hooks/useAuth';
 import { useSuperAdmin } from './hooks/useSuperAdmin';
 import { useEstudio } from './hooks/useEstudio';
 import { useTerminologia } from './hooks/useTerminologia';
+import { useSWUpdateNotifier } from './hooks/useSWUpdateNotifier';
 import { rotaPorPerfil } from './lib/navigation';
 import { destinoRotaModulo } from './lib/rotaModulo';
 import { ThemeProvider } from './providers/ThemeProvider';
@@ -201,6 +202,7 @@ const RotaCadastroEstudio = ({ sessao, perfil, loading }) => {
 // inteira no primeiro render.
 function AppRoutes() {
   const { sessao, perfil, loading, nomeUsuario, estudioId, estudioBloqueado } = useAuth();
+  useSWUpdateNotifier();
 
   if (loading) return <Spinner />;
 
