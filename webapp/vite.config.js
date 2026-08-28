@@ -23,7 +23,13 @@ function swCacheVersionPlugin() {
     closeBundle() {
       const caminho = resolve(process.cwd(), 'dist', 'sw.js');
       if (!existsSync(caminho)) return;
-      const conteudo = readFileSync(caminho, 'utf-8').replaceAll('%%CACHE_VERSION%%', versao);
+      // Restrito às linhas `const ..._NAME = ...`: um replaceAll sobre o
+      // arquivo inteiro também atingiria o token %%CACHE_VERSION%% citado
+      // no comentário explicativo acima, corrompendo-o (PED-59).
+      const conteudo = readFileSync(caminho, 'utf-8').replace(
+        /^(const (?:CACHE_NAME|STATIC_CACHE_NAME) = .*)$/gm,
+        (linha) => linha.replaceAll('%%CACHE_VERSION%%', versao)
+      );
       writeFileSync(caminho, conteudo);
     },
   };
