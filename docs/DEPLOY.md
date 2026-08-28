@@ -1,7 +1,9 @@
 # Deploy — Nexofy
 
-Este documento formaliza as práticas de deploy do projeto (Frente 5 do
-backlog). Complementa a seção "Como rodar localmente" do `README.md`.
+Este documento formaliza as práticas de deploy do projeto (seções 1-4,
+Frente 5 do backlog) e o rollback de frontend e de banco (seções 5-6,
+Frente 6 do backlog). Complementa a seção "Como rodar localmente" do
+`README.md`.
 
 ## 1. Sequência segura de deploy de backend
 
