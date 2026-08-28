@@ -1,5 +1,6 @@
 // webapp/e2e/webhook-pagamento.spec.js
 import { test, expect } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
 import { TENANT_B_HOST, urlFor } from './constants.js';
 import { loginComoAdmin } from './helpers/auth.js';
 
@@ -11,11 +12,52 @@ const ADMIN_B = {
 const WEBHOOK_URL = 'https://qjmybxkfjkxttggdjxga.supabase.co/functions/v1/webhook-pagamento';
 const ASAAS_PAYMENT_ID = 'e2e-webhook-test-payment';
 
-test.beforeAll(() => {
-  for (const name of ['E2E_ADMIN_B_EMAIL', 'E2E_ADMIN_B_PASSWORD', 'E2E_ASAAS_WEBHOOK_TOKEN']) {
+test.beforeAll(async () => {
+  for (const name of [
+    'E2E_ADMIN_B_EMAIL',
+    'E2E_ADMIN_B_PASSWORD',
+    'E2E_ASAAS_WEBHOOK_TOKEN',
+    'VITE_SUPABASE_URL',
+    'E2E_SUPABASE_SERVICE_ROLE_KEY',
+  ]) {
     if (!process.env[name]) {
       throw new Error(`Missing required env var: ${name}`);
     }
+  }
+
+  // PED-50: o dedup de webhook_events (origem, asaas_event,
+  // asaas_payment_id) é permanente — sem resetar o fixture antes de cada
+  // execução, a 1ª chamada real do teste "usa" o dedup pra sempre, e toda
+  // execução seguinte passa a validar apenas um valor gravado uma única
+  // vez (tautologia), mesmo que a lógica de confirmação de pagamento seja
+  // quebrada depois. webhook_events não tem policy pra anon/authenticated
+  // (só service role escreve/lê — ver migration 20260823154114), então o
+  // reset exige um client autenticado com a service role key, não o login
+  // de admin usado no resto do teste.
+  const supabaseAdmin = createClient(process.env.VITE_SUPABASE_URL, process.env.E2E_SUPABASE_SERVICE_ROLE_KEY);
+
+  const { error: erroMensalidade } = await supabaseAdmin
+    .from('mensalidades')
+    .update({
+      status: 'pendente',
+      asaas_status: null,
+      valor_pago: null,
+      data_pagamento: null,
+      asaas_event_timestamp: null,
+    })
+    .eq('asaas_payment_id', ASAAS_PAYMENT_ID);
+  if (erroMensalidade) {
+    throw new Error(`Falha ao resetar mensalidade do fixture: ${erroMensalidade.message}`);
+  }
+
+  const { error: erroWebhookEvents } = await supabaseAdmin
+    .from('webhook_events')
+    .delete()
+    .eq('origem', 'asaas')
+    .eq('asaas_event', 'PAYMENT_RECEIVED')
+    .eq('asaas_payment_id', ASAAS_PAYMENT_ID);
+  if (erroWebhookEvents) {
+    throw new Error(`Falha ao limpar webhook_events do fixture: ${erroWebhookEvents.message}`);
   }
 });
 
@@ -23,21 +65,13 @@ test.beforeAll(() => {
 // e6657270-4d5c-4e52-a3bd-e389e4b32db2): aluno "E2E Aluno Webhook" (id 3)
 // com uma mensalidade (id 123) vinculada a asaas_payment_id
 // 'e2e-webhook-test-payment'. Dedicado só a este teste — não reaproveita
-// o aluno/mensalidade do PED-27, porque o dedup de webhook_events é
-// permanente (não expira por mês como a geração de mensalidade), então
-// compartilhar fixture com outro teste tornaria o histórico entre eles
-// confuso.
+// o aluno/mensalidade do PED-27, pra manter o histórico de cada teste
+// isolado do outro.
 // data_vencimento/periodo_fim também são load-bearing: a asserção final
 // na UI depende de periodo_fim >= 1º dia do mês corrente (janela padrão
 // da query do Financeiro). Por isso periodo_fim foi propositalmente
 // definido bem no futuro (2099-12-31 no banco), pra este fixture estático
 // não sumir da tela depois do mês em que foi criado.
-// Se algum dia esta mensalidade for resetada para status='pendente' para
-// reexercitar o fluxo de confirmação, é preciso também apagar a linha
-// correspondente em webhook_events (origem='asaas',
-// asaas_event='PAYMENT_RECEIVED', asaas_payment_id='e2e-webhook-test-payment')
-// — senão o dedup do webhook trata toda chamada futura como duplicata e
-// nada é reprocessado. Ver PED-50 para o fix automatizado (beforeAll reset).
 test.describe('Webhook de pagamento', () => {
   test('confirma pagamento e reenvio duplicado é ignorado (idempotência)', async ({ page, request }) => {
     const payload = {
@@ -50,18 +84,16 @@ test.describe('Webhook de pagamento', () => {
       'asaas-access-token': process.env.E2E_ASAAS_WEBHOOK_TOKEN,
     };
 
-    // 1ª chamada: pode ser o processamento real (1ª vez que este
-    // payment_id é visto) ou já um duplicado de uma execução anterior do
-    // CI — o dedup de webhook_events não expira por mês. De qualquer
-    // forma, deve responder com sucesso (200).
+    // 1ª chamada: com o reset do beforeAll, esta é sempre o processamento
+    // real (1ª vez que este payment_id é visto desde o reset) — dá pra
+    // validar o resultado de verdade (status: 'pago'), não só "sucesso
+    // genérico". Antes do PED-50 isso não dava pra garantir (podia já vir
+    // duplicado de uma execução anterior), então a asserção só checava
+    // !ignorado.
     const resposta1 = await request.post(WEBHOOK_URL, { headers, data: payload });
     expect(resposta1.ok(), await resposta1.text()).toBeTruthy();
-    // .ok() sozinho não basta: a function responde 200 também quando
-    // ignora o evento (mensalidade não encontrada). Se o fixture sumir do
-    // staging, isso falha rápido aqui em vez de virar um timeout confuso
-    // na asserção final da UI.
     const corpo1 = await resposta1.json();
-    expect(corpo1.ignorado, JSON.stringify(corpo1)).toBeFalsy();
+    expect(corpo1.status, JSON.stringify(corpo1)).toBe('pago');
 
     // 2ª chamada, payload idêntico, logo em seguida: essa SEMPRE precisa
     // ser um duplicado, independente do histórico de execuções anteriores

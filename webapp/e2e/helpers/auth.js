@@ -3,9 +3,10 @@ import { urlFor } from '../constants.js';
 
 /**
  * Faz login como admin e espera o redirect pro dashboard.
- * Não valida toast de sucesso — ver nota no plano do PED-26 sobre o
- * toast de erro espúrio pra admins vinculados só via estudio_membros
- * (PED-46). O sinal confiável de login bem-sucedido é a URL mudar.
+ * Não valida toast de sucesso — o texto exato não é o que importa aqui
+ * (era motivo de flakiness antes do PED-46 corrigir o toast de erro
+ * espúrio pra admins vinculados só via estudio_membros). O sinal
+ * confiável de login bem-sucedido é a URL mudar.
  *
  * Se `nomeEstudio` for passado, valida (antes de preencher credenciais)
  * que o heading da tela de login mostra "Entrar em {nomeEstudio}" — isso

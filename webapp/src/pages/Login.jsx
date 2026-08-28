@@ -215,6 +215,29 @@ export default function Login() {
         return;
       }
 
+      // 4. estudio_membros (fluxo "moderno" — ver useAuth.jsx): cobre
+      // admin/professor cujo vínculo já não passa pelas tabelas legadas
+      // acima. Sem este check, esse usuário caía direto no fallback de
+      // erro abaixo — mesmo logando com sucesso (PED-46).
+      const { data: membro, error: membroError } = await supabase
+        .from('estudio_membros')
+        .select('role')
+        .eq('user_id', authData.user.id)
+        .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
+        .maybeSingle();
+
+      if (membroError) throw membroError;
+
+      if (membro) {
+        // Sem primeiro_acesso nem nome prontos nesta tabela — mesmo padrão
+        // já usado acima para "sem estúdio de tenant resolvido": navega pra
+        // raiz e deixa o guard reativo de useAuth()/App.jsx (que já resolve
+        // estudio_membros) decidir o destino final por perfil.
+        showToast.success('Login realizado!');
+        navigate('/');
+        return;
+      }
+
       // Fallback: nenhum perfil encontrado neste estúdio.
       // FIX: antes caía aqui silenciosamente até em casos de erro descartado;
       // agora só chega aqui de fato quando não existe vínculo nenhum.
