@@ -186,3 +186,16 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/criar-subconta-asaas/deno.json"
 entrypoint = "./functions/criar-subconta-asaas/index.ts"
+
+[functions.gerar-mensalidades]
+enabled = true
+# PED-57/PED-68: precisa ser false para o cron (autenticado via x-cron-secret, sem
+# JWT — ver AUTORIZAÇÃO em index.ts) conseguir chamar esta function. Este bloco na
+# RAIZ é o que efetivamente vale: confirmado via inspeção do deploy em produção que
+# rodava com verify_jwt=true mesmo com supabase/functions/gerar-mensalidades/config.toml
+# dizendo false, porque este arquivo (raiz) nunca teve um bloco
+# [functions.gerar-mensalidades] antes deste fix — o config.toml por-function sozinho
+# não é suficiente.
+verify_jwt = false
+import_map = "./functions/gerar-mensalidades/deno.json"
+entrypoint = "./functions/gerar-mensalidades/index.ts"
