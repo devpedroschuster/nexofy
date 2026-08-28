@@ -23,6 +23,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { withSentry, withCronCheckIn, Sentry } from "../_shared/sentry.ts";
+import { createLogger } from "../_shared/logger.ts";
 
 // PED-33: precisa bater com o `schedule` do [[cron]] em config.toml.
 // ATENÇÃO: hoje esta function só é chamada manualmente (via botão no
@@ -122,8 +123,15 @@ async function handleRequest(req: Request): Promise<Response> {
   const expectedCronSecret = Deno.env.get('CRON_SECRET') ?? '';
   const isCronInvocation = expectedCronSecret.length > 0 && cronSecret === expectedCronSecret;
 
+  const correlationId = crypto.randomUUID();
+  const logger = createLogger("gerar-repasses-mensais", correlationId);
+
+  let estudioId: string | undefined;
+
   try {
-    const { estudioId, mes, ano } = await req.json();
+    const body = await req.json();
+    estudioId = body.estudioId;
+    const { mes, ano } = body;
 
     // ISOLAMENTO MULTI-TENANT
     // A service role ignora RLS; todo acesso deve filtrar explicitamente por estudio_id.
@@ -170,7 +178,7 @@ async function handleRequest(req: Request): Promise<Response> {
         .eq('user_id', caller.id);
 
       if (membroErr) {
-        console.error('[gerar-repasses-mensais] Erro ao verificar perfil do caller:', membroErr);
+        logger.error("Erro ao verificar perfil do caller.", { estudio_id: estudioId, erro: membroErr });
         return response({ error: 'Erro ao verificar permissões do usuário.' }, 500);
       }
 
@@ -473,6 +481,10 @@ async function handleRequest(req: Request): Promise<Response> {
       resumoMap.set(item.professor_id, atual);
     }
 
+    logger.info("Repasses mensais gerados.", {
+      estudio_id: estudioId, mes: mesStr, ano, gerados: itens.length,
+    });
+
     return response({
       sucesso: true,
       mes: `${mesStr}/${ano}`,
@@ -488,12 +500,14 @@ async function handleRequest(req: Request): Promise<Response> {
         : typeof err === 'object' && err !== null
           ? JSON.stringify(err)
           : String(err);
-    console.error('[gerar-repasses-mensais] ERRO:', message);
+    logger.error("Erro ao gerar repasses mensais.", { estudio_id: estudioId, erro: message });
 
     // PED-33: mesmo problema do gerar-mensalidades — esse catch respondia
     // com um JSON 500 sem nunca relançar o erro, então o Sentry nunca via
     // essa falha. Reportando explicitamente aqui.
-    Sentry.captureException(err, { tags: { edge_function: 'gerar-repasses-mensais' } });
+    Sentry.captureException(err, {
+      tags: { edge_function: 'gerar-repasses-mensais', correlation_id: correlationId, ...(estudioId ? { estudio_id: estudioId } : {}) },
+    });
 
     return response({ error: message }, 500);
   }

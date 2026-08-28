@@ -4,6 +4,7 @@ import { withSentry } from "../_shared/sentry.ts"
 import { runInBackground } from "../_shared/backgroundTask.ts"
 import { gerarRepassesParaMensalidade } from "../_shared/repasses.ts"
 import { enviarPushUnico } from "../_shared/expoPush.ts"
+import { createLogger } from "../_shared/logger.ts"
 
 // ─────────────────────────────────────────────────────────────────────────
 // webhook-pagamento
@@ -54,6 +55,8 @@ const EVENTOS_FALHOU = new Set([
 
 serve(withSentry("webhook-pagamento", async (req) => {
   const inicio = Date.now()
+  const correlationId = crypto.randomUUID()
+  const logger = createLogger("webhook-pagamento", correlationId)
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
@@ -65,7 +68,7 @@ serve(withSentry("webhook-pagamento", async (req) => {
   const expectedToken = Deno.env.get("ASAAS_WEBHOOK_TOKEN") ?? ""
   const receivedToken = req.headers.get("asaas-access-token") ?? ""
   if (!expectedToken || receivedToken !== expectedToken) {
-    console.error("[webhook-pagamento] Token de webhook inválido ou ausente.")
+    logger.error("Token de webhook inválido ou ausente.")
     return response({ erro: "Não autorizado." }, 401)
   }
 
@@ -85,7 +88,7 @@ serve(withSentry("webhook-pagamento", async (req) => {
   const asaasPaymentId = payment?.id
 
   if (!evento || !asaasPaymentId) {
-    console.warn("[webhook-pagamento] Evento sem payment.id, ignorado:", evento)
+    logger.warn("Evento sem payment.id, ignorado.", { evento })
     return response({ recebido: true, ignorado: true })
   }
 
@@ -109,11 +112,11 @@ serve(withSentry("webhook-pagamento", async (req) => {
     .maybeSingle()
 
   if (eventoErr) {
-    console.error("[webhook-pagamento] Erro ao gravar webhook_events:", eventoErr)
+    logger.error("Erro ao gravar webhook_events.", { evento, asaas_payment_id: asaasPaymentId, erro: eventoErr })
     return response({ erro: "Erro interno." }, 500)
   }
   if (!eventoRow) {
-    console.log("[webhook-pagamento] Evento duplicado (reentrega), ignorando:", evento, asaasPaymentId)
+    logger.info("Evento duplicado (reentrega), ignorando.", { evento, asaas_payment_id: asaasPaymentId })
     return response({ recebido: true, duplicado: true })
   }
 
@@ -127,12 +130,12 @@ serve(withSentry("webhook-pagamento", async (req) => {
     .maybeSingle()
 
   if (buscaErr) {
-    console.error("[webhook-pagamento] Erro ao buscar mensalidade:", buscaErr)
+    logger.error("Erro ao buscar mensalidade.", { asaas_payment_id: asaasPaymentId, erro: buscaErr })
     return response({ erro: "Erro interno." }, 500)
   }
 
   if (!mensalidade) {
-    console.warn("[webhook-pagamento] Mensalidade não encontrada para payment:", asaasPaymentId)
+    logger.warn("Mensalidade não encontrada para payment.", { asaas_payment_id: asaasPaymentId })
     return response({ recebido: true, ignorado: true })
   }
 
@@ -145,10 +148,9 @@ serve(withSentry("webhook-pagamento", async (req) => {
   if (timestampValido && mensalidade.asaas_event_timestamp) {
     const timestampAtual = new Date(mensalidade.asaas_event_timestamp)
     if (timestampAtual > eventoTimestamp!) {
-      console.warn(
-        "[webhook-pagamento] Evento fora de ordem (mais antigo que o último processado), ignorado:",
-        evento, asaasPaymentId,
-      )
+      logger.warn("Evento fora de ordem (mais antigo que o último processado), ignorado.", {
+        estudio_id: mensalidade.estudio_id, evento, asaas_payment_id: asaasPaymentId,
+      })
       return response({ recebido: true, fora_de_ordem: true })
     }
   }
@@ -179,7 +181,7 @@ serve(withSentry("webhook-pagamento", async (req) => {
     .eq("id", mensalidade.id)
 
   if (updateErr) {
-    console.error("[webhook-pagamento] Erro ao atualizar mensalidade:", updateErr)
+    logger.error("Erro ao atualizar mensalidade.", { estudio_id: mensalidade.estudio_id, mensalidade_id: mensalidade.id, erro: updateErr })
     return response({ erro: "Erro ao atualizar mensalidade." }, 500)
   }
 
@@ -198,7 +200,7 @@ serve(withSentry("webhook-pagamento", async (req) => {
       .maybeSingle()
 
     if (alunoErr) {
-      console.error("[webhook-pagamento] Falha ao reativar aluno:", alunoErr)
+      logger.error("Falha ao reativar aluno.", { estudio_id: mensalidade.estudio_id, aluno_id: mensalidade.aluno_id, erro: alunoErr })
     } else {
       alunoParaNotificar = alunoAtualizado
     }
@@ -219,7 +221,7 @@ serve(withSentry("webhook-pagamento", async (req) => {
     .update({ duracao_ms: duracaoMs })
     .eq("id", eventoRow.id)
   if (duracaoErr) {
-    console.error("[webhook-pagamento] Falha ao gravar duracao_ms:", duracaoErr)
+    logger.error("Falha ao gravar duracao_ms.", { estudio_id: mensalidade.estudio_id, evento_id: eventoRow.id, erro: duracaoErr })
   }
 
   // A partir daqui, tudo que resta é pesado (calcular repasse cruzando
@@ -233,15 +235,29 @@ serve(withSentry("webhook-pagamento", async (req) => {
     const primeiroNome = alunoParaNotificar?.nome_completo?.split(" ")[0]
 
     runInBackground(async () => {
-      await gerarRepassesParaMensalidade(supabase, { estudioId, mensalidadeId })
+      try {
+        const resultado = await gerarRepassesParaMensalidade(supabase, { estudioId, mensalidadeId })
+        logger.info("Repasse pós-pagamento processado.", {
+          estudio_id: estudioId, mensalidade_id: mensalidadeId, gerados: resultado.gerados, aviso: resultado.aviso,
+        })
 
-      await enviarPushUnico(
-        alunoParaNotificar?.push_token,
-        "✅ Pagamento confirmado",
-        primeiroNome
-          ? `Olá, ${primeiroNome}! Recebemos a confirmação do seu pagamento.`
-          : "Recebemos a confirmação do seu pagamento.",
-      )
+        await enviarPushUnico(
+          alunoParaNotificar?.push_token,
+          "✅ Pagamento confirmado",
+          primeiroNome
+            ? `Olá, ${primeiroNome}! Recebemos a confirmação do seu pagamento.`
+            : "Recebemos a confirmação do seu pagamento.",
+        )
+      } catch (err) {
+        // Log estruturado com o correlation_id do webhook antes de relançar —
+        // o catch de runInBackground (_shared/backgroundTask.ts) continua
+        // reportando ao Sentry normalmente, sem duplicar esse report aqui.
+        logger.error("Falha no pós-processamento do pagamento (repasse ou notificação).", {
+          estudio_id: estudioId, mensalidade_id: mensalidadeId,
+          erro: err instanceof Error ? err.message : String(err),
+        })
+        throw err
+      }
     }, "webhook-pagamento:pos-processamento")
   }
 
