@@ -419,7 +419,7 @@ git commit -m "fix(seguranca): moduloEstaAtivo fail-closed se modulos_ativos nao
 
 Esta task **não inclui nenhum redeploy de produção** — só alinha a documentação local pra refletir a realidade e evitar que alguém assuma que o cron existe. O passo de redeploy fica como Step 3, manual e não executado por este plano (ver nota).
 
-- [ ] **Step 1: Atualizar `supabase/functions/gerar-mensalidades/config.toml`**
+- [x] **Step 1: Atualizar `supabase/functions/gerar-mensalidades/config.toml`**
 
 Substituir o conteúdo inteiro do arquivo por:
 
@@ -446,7 +446,7 @@ schedule = "0 8 1 * *"   # Dia 1 de cada mês, às 08h
 command = "POST https://tciiepqmnrrcjnqhspvw.supabase.co/functions/v1/gerar-mensalidades -H 'x-cron-secret: ${CRON_SECRET}'"
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add supabase/functions/gerar-mensalidades/config.toml
