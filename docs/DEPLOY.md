@@ -57,7 +57,15 @@ hash que já existia antes.
 `main` nunca recebe merge sem passar por um **Preview Deployment da
 Vercel** já testado manualmente. Cada PR aberto no GitHub já dispara esse
 preview automaticamente (integração Git da Vercel). A proteção de branch
-de `main` no GitHub exige o check "Vercel" (deployment concluído) e "Lint, Test & Build" antes de permitir o merge — ver histórico de configuração real em PED-36.
+de `main` no GitHub exige o check "Vercel" (deployment concluído) e "Lint, Test & Build" antes de permitir o merge.
+
+Checks obrigatórios hoje na proteção de `main` (GitHub → Settings →
+Branches): `Lint, Test & Build` e `Vercel`. Confirmar com
+`gh api repos/devpedroschuster/nexofy/branches/main/protection` sempre que
+um workflow do CI for renomeado — um required check com nome desatualizado
+não trava merge nenhum, só fica "pendente" pra sempre (foi o que aconteceu
+até aqui com o check antigo "Lint & Build", órfão desde que o job de CI
+passou a se chamar "Lint, Test & Build").
 
 ## 4. Canary release por tenant (feature flags)
 
