@@ -41,6 +41,17 @@ roda, antes de qualquer deploy de código — a janela de erro começa antes
 mesmo do primeiro deploy. Migration aditiva elimina essa janela: código
 antigo e novo convivem com o mesmo schema até o passo 4.
 
+Essa disciplina de staging-first do passo 1 já é reforçada automaticamente
+pelo CI: o job **`Supabase DB Diff (staging)`** (`.github/workflows/ci.yml`,
+script `scripts/check-db-diff.sh`) roda `supabase db diff` contra staging em
+todo PR e falha (exit 1) se houver qualquer schema drift entre staging e as
+migrations do repositório — ou seja, um PR só passa nesse check se staging
+já refletir as migrations daquele PR. Se um PR ficar barrado nesse check, a
+causa costuma ser: staging ainda não recebeu a migration (rode o passo 1
+acima antes de abrir o PR), ou a migration foi editada depois de já ter
+sido aplicada em staging (edite uma nova migration em vez de alterar uma já
+aplicada).
+
 ## 2. Cache do Service Worker (PWA)
 
 Ver `webapp/public/sw.js`. O `CACHE_NAME`/`STATIC_CACHE_NAME` carregam um
@@ -53,6 +64,16 @@ estilos, fontes e imagens continuam cache-first deliberadamente — como o
 Vite já dá hash de conteúdo a esses arquivos, um deploy novo gera nomes de
 arquivo novos, e cache-first nunca serve um arquivo desatualizado sob um
 hash que já existia antes.
+
+Nem todo asset estático tem hash: arquivos em `webapp/public/` (ex.:
+`manifest.json`, `favicon.svg`, `icons/`) são copiados como estão, sem
+passar pelo hashing de conteúdo do Vite — o nome do arquivo nunca muda
+entre deploys. Esses ficam cobertos pela rotação de `CACHE_NAME`/
+`STATIC_CACHE_NAME` (o `%%CACHE_VERSION%%` do início desta seção) em vez do
+hash: como o nome da cache inteira muda a cada build, o `activate` do
+`sw.js` purga a cache antiga (com a versão velha desses arquivos) e a
+próxima busca cache-first já grava a versão nova sob o mesmo nome de
+arquivo, dentro da cache nova.
 
 ## 3. Regra de merge: sempre via Preview Deployment testado
 
