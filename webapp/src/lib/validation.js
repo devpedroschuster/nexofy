@@ -1,16 +1,11 @@
 import * as yup from 'yup';
 import { validarCPF } from '../lib/utils';
 
-// Regex simples para bloquear strings só-espaço (yup.required() sozinho não pega isso)
-const naoApenasEspacos = (msg) => (value) =>
-  value == null || value.trim().length > 0 || new yup.ValidationError(msg);
-
 export const alunoSchema = yup.object().shape({
   nome_completo: yup
     .string()
     .trim()
     .required('O nome completo é obrigatório.')
-    .test('nao-so-espacos', 'O nome completo não pode conter apenas espaços.', naoApenasEspacos('O nome completo não pode conter apenas espaços.'))
     .max(150, 'O nome completo deve ter no máximo 150 caracteres.'),
 
   email: yup

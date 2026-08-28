@@ -15,9 +15,8 @@ describe('alunoSchema', () => {
     });
 
     it('rejeita string só com espaços (vira required após o trim)', async () => {
-      // .trim() roda antes do required()/test() na cadeia do yup, então uma
-      // string só de espaços já chega vazia nos validators seguintes — quem
-      // pega esse caso é o required(), não o teste customizado 'nao-so-espacos'.
+      // .trim() roda antes do required() na cadeia do yup, então uma string
+      // só de espaços já chega vazia no required(), que é quem rejeita.
       await expect(alunoSchema.validate({ ...base, nome_completo: '   ' })).rejects.toThrow(
         'O nome completo é obrigatório.'
       );
