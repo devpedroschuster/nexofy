@@ -6,5 +6,5 @@
 // porque precisa continuar sendo função pura e testável sem montar
 // componente.
 export function moduloEstaAtivo(modulosAtivos, chave) {
-  return (modulosAtivos ?? []).includes(chave);
+  return Array.isArray(modulosAtivos) && modulosAtivos.includes(chave);
 }
