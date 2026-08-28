@@ -1,19 +1,29 @@
 [functions.gerar-mensalidades]
 verify_jwt = false  # Permite chamada do cron sem auth (autorização real é o check de
                     # x-cron-secret dentro da própria function — ver AUTORIZAÇÃO em
-                    # index.ts). PED-57: o deploy em produção está com verify_jwt=true,
-                    # divergente deste arquivo — corrigir exige um redeploy manual,
-                    # fora do escopo de qualquer automação deste repo.
+                    # index.ts). PED-57: o deploy em produção está com verify_jwt=true.
+                    # INCERTEZA (revisão final, 28/08/2026): não está confirmado que este
+                    # config.toml POR-FUNCTION seja lido por `supabase functions deploy` —
+                    # o `supabase/config.toml` da RAIZ (o arquivo que a doc oficial da
+                    # Supabase confirma que a CLI lê) só tem blocos [functions.*] pra
+                    # lembretes-aula e criar-subconta-asaas, nunca teve um pra
+                    # gerar-mensalidades. Um redeploy simples pode não mudar nada. Antes
+                    # de tentar sincronizar produção, confirmar se é preciso adicionar
+                    # [functions.gerar-mensalidades] verify_jwt=false no config.toml da
+                    # RAIZ, ou usar a flag --no-verify-jwt no deploy, em vez de assumir
+                    # que só redeployar com este arquivo basta.
 
 # ATENÇÃO (PED-57/PED-68): este [[cron]] NUNCA esteve ativo em produção — confirmado
-# em 28/08/2026 via cron.job (vazio) e function_edge_logs (zero invocações em
-# 01/08/2026, a própria data do agendamento abaixo). Não é só o verify_jwt: o
-# command abaixo não envia corpo nenhum, mas handleRequest() em index.ts exige
-# `estudioId` no payload (400 sem ele), e a function só processa UM estudioId por
-# chamada — um cron real precisaria iterar sobre todos os estúdios ativos, o que
-# ela não faz hoje (mesma lacuna já registrada em gerar-repasses-mensais/config.toml,
-# PED-33/PED-18). Ver PED-68 pra decisão de produto antes de habilitar isto de
-# verdade.
+# em 28/08/2026 via cron.job vazio (evidência definitiva: uma tabela pg_cron não
+# expira nem é podada, então vazio = nunca existiu um job aqui). function_edge_logs
+# também não mostrou nenhuma invocação em 01/08/2026, mas essa evidência é mais fraca
+# (retenção de log pode ser curta no plano free) — cron.job é a prova que sustenta a
+# conclusão. Não é só o verify_jwt: o command abaixo não envia corpo nenhum, mas
+# handleRequest() em index.ts exige `estudioId` no payload (400 sem ele), e a
+# function só processa UM estudioId por chamada — um cron real precisaria iterar
+# sobre todos os estúdios ativos, o que ela não faz hoje (mesma lacuna já registrada
+# em gerar-repasses-mensais/config.toml, PED-33/PED-18). Ver PED-68 pra decisão de
+# produto antes de habilitar isto de verdade.
 [[cron]]
 name = "cobrancas-mensais"
 schedule = "0 8 1 * *"   # Dia 1 de cada mês, às 08h

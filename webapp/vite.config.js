@@ -22,6 +22,7 @@ export function swCacheVersionPlugin() {
   let outDir;
   return {
     name: 'sw-cache-version',
+    apply: 'build',
     configResolved(config) {
       root = config.root;
       outDir = config.build.outDir;

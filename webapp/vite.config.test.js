@@ -41,15 +41,18 @@ describe('swCacheVersionPlugin', () => {
     expect(caminhoLido).toBe(resolve('/app', 'build-custom', 'sw.js'));
   });
 
-  it('chama this.error em vez de retornar em silêncio quando sw.js não existe no outDir resolvido', () => {
+  it('chama this.error (que interrompe o build de verdade) em vez de retornar em silêncio quando sw.js não existe no outDir resolvido', () => {
     existsSync.mockReturnValue(false);
     const plugin = swCacheVersionPlugin();
     plugin.configResolved({ root: '/app', build: { outDir: 'dist' } });
-    const errorFn = vi.fn();
+    const errorFn = vi.fn((mensagem) => {
+      throw new Error(mensagem);
+    });
 
-    plugin.closeBundle.call({ error: errorFn });
+    expect(() => plugin.closeBundle.call({ error: errorFn })).toThrow(/não encontrado/);
 
     expect(errorFn).toHaveBeenCalledTimes(1);
+    expect(readFileSync).not.toHaveBeenCalled();
     expect(writeFileSync).not.toHaveBeenCalled();
   });
 });

@@ -6,7 +6,7 @@
 
 **Architecture:** Mudanças pontuais e independentes, sem nenhuma interseção de arquivos entre si: um guard defensivo (`Array.isArray`) em `webapp/src/lib/modulos.js`; uma falha explícita (`this.error`) + resolução de caminho via `configResolved` no plugin `swCacheVersionPlugin` de `webapp/vite.config.js`; um novo hook (`useSWUpdateNotifier`) que reaproveita a infraestrutura de toast já existente (`react-hot-toast` via `showToast.custom`) pra avisar sobre nova versão do Service Worker; e (Task 4) alinhamento de `gerar-mensalidades/config.toml` com o estado real de produção — investigação concluída ao vivo (via Supabase MCP, autorizado pelo usuário): **o cron nunca esteve ativo** (`cron.job` vazio, zero invocações em `function_edge_logs` no dia do agendamento), então não há incidente ativo a corrigir, só documentação a alinhar. Achados registrados em comentário no [PED-57](https://linear.app/pedro-schuster/issue/PED-57) (rebaixado pra Low) e numa issue nova, [PED-68](https://linear.app/pedro-schuster/issue/PED-68), pra decisão de produto sobre habilitar o cron de verdade (fora de escopo aqui).
 
-**Tech Stack:** React 18, Vite 6, Vitest 4 (ambiente `node`, sem jsdom/@testing-library — ver Global Constraints), Supabase Edge Functions (Deno), react-hot-toast.
+**Tech Stack:** React 19, Vite 8 (beta, bundler Rolldown), Vitest 4 (ambiente `node`, sem jsdom/@testing-library — ver Global Constraints), Supabase Edge Functions (Deno), react-hot-toast.
 
 **Spec:** Tickets Linear [PED-57](https://linear.app/pedro-schuster/issue/PED-57), [PED-58](https://linear.app/pedro-schuster/issue/PED-58), [PED-60](https://linear.app/pedro-schuster/issue/PED-60), [PED-61](https://linear.app/pedro-schuster/issue/PED-61) — todos achados "[Deploy]" adjacentes a PED-37/39/47, sem relação de bloqueio entre si.
 
@@ -416,6 +416,7 @@ git commit -m "fix(seguranca): moduloEstaAtivo fail-closed se modulos_ativos nao
 - `query_logs` em `function_edge_logs`, filtrado por `gerar-mensalidades`, janela `2026-08-01T00:00:00Z`–`2026-08-01T23:59:59Z` (dia do `schedule = "0 8 1 * *"`): zero entradas — o cron nunca disparou, nem com sucesso nem com 401.
 - **Conclusão: o `[[cron]]` deste arquivo nunca esteve ligado a um scheduler real em produção** — confirma `docs/RUNBOOK_INCIDENTE.md` ("hoje não existe nenhum cron ativo em produção"), que contradizia a premissa original de PED-57. Além disso, o `command` não envia o `estudioId` que `handleRequest()` exige no payload (400 garantido, independente do gateway) e tem um typo de sintaxe (`<tciiepqmnrrcjnqhspvw>` com colchetes literais em vez de hostname válido).
 - Registrado em comentário em [PED-57](https://linear.app/pedro-schuster/issue/PED-57) (rebaixado pra Low — não é mais um incidente ativo) e na issue de acompanhamento [PED-68](https://linear.app/pedro-schuster/issue/PED-68) (decisão de produto sobre iteração por estúdio + quando habilitar de verdade, fora de escopo aqui).
+- **Achado da revisão final (28/08/2026, análise estática do repo, não MCP):** o `supabase/config.toml` da RAIZ do repo — o arquivo que a documentação oficial da Supabase confirma que a CLI lê pra blocos `[functions.*]` — só tem entradas pra `[functions.lembretes-aula]` e `[functions.criar-subconta-asaas]`; nunca teve uma pra `[functions.gerar-mensalidades]`. Isso deixa incerto se o `config.toml` POR-FUNCTION (este arquivo, em `supabase/functions/gerar-mensalidades/`) é sequer lido por `supabase functions deploy` — um redeploy simples pode não mudar o `verify_jwt` de produção. Ver a nota em Step 3 antes de executá-lo.
 
 Esta task **não inclui nenhum redeploy de produção** — só alinha a documentação local pra refletir a realidade e evitar que alguém assuma que o cron existe. O passo de redeploy fica como Step 3, manual e não executado por este plano (ver nota).
 
@@ -427,19 +428,29 @@ Substituir o conteúdo inteiro do arquivo por:
 [functions.gerar-mensalidades]
 verify_jwt = false  # Permite chamada do cron sem auth (autorização real é o check de
                     # x-cron-secret dentro da própria function — ver AUTORIZAÇÃO em
-                    # index.ts). PED-57: o deploy em produção está com verify_jwt=true,
-                    # divergente deste arquivo — corrigir exige um redeploy manual,
-                    # fora do escopo de qualquer automação deste repo.
+                    # index.ts). PED-57: o deploy em produção está com verify_jwt=true.
+                    # INCERTEZA (revisão final, 28/08/2026): não está confirmado que este
+                    # config.toml POR-FUNCTION seja lido por `supabase functions deploy` —
+                    # o `supabase/config.toml` da RAIZ (o arquivo que a doc oficial da
+                    # Supabase confirma que a CLI lê) só tem blocos [functions.*] pra
+                    # lembretes-aula e criar-subconta-asaas, nunca teve um pra
+                    # gerar-mensalidades. Um redeploy simples pode não mudar nada. Antes
+                    # de tentar sincronizar produção, confirmar se é preciso adicionar
+                    # [functions.gerar-mensalidades] verify_jwt=false no config.toml da
+                    # RAIZ, ou usar a flag --no-verify-jwt no deploy, em vez de assumir
+                    # que só redeployar com este arquivo basta.
 
 # ATENÇÃO (PED-57/PED-68): este [[cron]] NUNCA esteve ativo em produção — confirmado
-# em 28/08/2026 via cron.job (vazio) e function_edge_logs (zero invocações em
-# 01/08/2026, a própria data do agendamento abaixo). Não é só o verify_jwt: o
-# command abaixo não envia corpo nenhum, mas handleRequest() em index.ts exige
-# `estudioId` no payload (400 sem ele), e a function só processa UM estudioId por
-# chamada — um cron real precisaria iterar sobre todos os estúdios ativos, o que
-# ela não faz hoje (mesma lacuna já registrada em gerar-repasses-mensais/config.toml,
-# PED-33/PED-18). Ver PED-68 pra decisão de produto antes de habilitar isto de
-# verdade.
+# em 28/08/2026 via cron.job vazio (evidência definitiva: uma tabela pg_cron não
+# expira nem é podada, então vazio = nunca existiu um job aqui). function_edge_logs
+# também não mostrou nenhuma invocação em 01/08/2026, mas essa evidência é mais fraca
+# (retenção de log pode ser curta no plano free) — cron.job é a prova que sustenta a
+# conclusão. Não é só o verify_jwt: o command abaixo não envia corpo nenhum, mas
+# handleRequest() em index.ts exige `estudioId` no payload (400 sem ele), e a
+# function só processa UM estudioId por chamada — um cron real precisaria iterar
+# sobre todos os estúdios ativos, o que ela não faz hoje (mesma lacuna já registrada
+# em gerar-repasses-mensais/config.toml, PED-33/PED-18). Ver PED-68 pra decisão de
+# produto antes de habilitar isto de verdade.
 [[cron]]
 name = "cobrancas-mensais"
 schedule = "0 8 1 * *"   # Dia 1 de cada mês, às 08h
@@ -460,5 +471,7 @@ O `config.toml` já diz `verify_jwt = false`; produção ainda está com `true`.
 ```bash
 supabase functions deploy gerar-mensalidades --project-ref tciiepqmnrrcjnqhspvw
 ```
+
+**INCERTEZA (revisão final, 28/08/2026):** não está confirmado que este comando, do jeito que está escrito, realmente aplique `verify_jwt = false` em produção — ele depende do `config.toml` POR-FUNCTION ser lido por `supabase functions deploy`, mas o `supabase/config.toml` da RAIZ (o arquivo que a doc oficial confirma que a CLI lê) nunca teve um bloco `[functions.gerar-mensalidades]`. Antes de rodar este passo, confirmar qual é o mecanismo certo — adicionar `[functions.gerar-mensalidades]` com `verify_jwt = false` no `config.toml` da raiz, usar a flag `--no-verify-jwt` no deploy, ou confirmar que o arquivo por-function já é suficiente — em vez de assumir que o comando acima, sozinho, resolve.
 
 (Alternativa disponível: a tool MCP `deploy_edge_function`.) Como o cron não está ligado a nada hoje (Step 1), isto não corrige um incidente ativo — só deixa o deploy coerente com a documentação, antecipando PED-68. Por isso fica como passo manual, separado do commit local, e só deve rodar se o usuário confirmar explicitamente que quer sincronizar produção agora.
