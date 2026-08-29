@@ -5,7 +5,6 @@ import {
   ChevronDown, ChevronUp, Hash, LayoutGrid, UserCheck,
   TrendingUp, Filter, ArrowRight,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { TIPO_AULA_LABELS as TIPO_LABELS } from '../lib/constants/tipoAula';
 import { comissoesService } from '../services/comissoesService';
 import { gerarRepassesMensais } from '../services/repasseService';
@@ -139,8 +138,9 @@ const handleFecharMes = async () => {
 };
 
   // UX-02: exporta somente os lançamentos do filtro ativo
-  const exportarExcel = () => {
+  const exportarExcel = async () => {
     if (!lancamentosFiltrados.length) return;
+    const XLSX = await import('xlsx');
     const tipoLabel = filtros.tipoAula
       ? `_${TIPO_LABELS[filtros.tipoAula] ?? filtros.tipoAula}`
       : '';

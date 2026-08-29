@@ -4,7 +4,6 @@ import {
   Banknote, Clock, CheckCircle, Search, RefreshCw, AlertCircle, Calendar, FileSpreadsheet, Plus,
   Pencil, Trash2
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
 import { financeiroService } from '../services/financeiroService';
 import { gerarRepassesDaMensalidade } from '../services/repasseService';

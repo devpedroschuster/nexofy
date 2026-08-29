@@ -164,13 +164,42 @@ export default function Login() {
 
       // ⚠️ ASSUMIR/VALIDAR: mesma suposição de estudio_id + RLS pública citada acima,
       // agora para a tabela `alunos`.
+      // FIX (PED-73): as 3 queries de perfil (alunos/professores/estudio_membros)
+      // rodavam em sequência — para um usuário do fluxo "moderno" (só existe em
+      // estudio_membros, sem linha em alunos/professores), isso custava 2
+      // round-trips desperdiçados (alunos e professores, ambos vazios) antes da
+      // query que realmente resolve. Agora as 3 disparam em paralelo via
+      // Promise.all e a MESMA precedência de antes (alunos > professores >
+      // estudio_membros) é aplicada sobre os resultados já resolvidos — essa
+      // ordem não foi alterada (pode ser intencional para o caso de um mesmo
+      // auth_id existir em mais de uma tabela). Efeito colateral aceito: antes,
+      // um erro em `alunos` interrompia tudo antes de professores/estudio_membros
+      // rodarem; agora as 3 já dispararam e os outros dois resultados são apenas
+      // computados e descartados (só afeta o caminho raro de erro, não o de
+      // sucesso).
+      const [alunoResult, profResult, membroResult] = await Promise.all([
+        supabase
+          .from('alunos')
+          .select('primeiro_acesso, nome_completo, role')
+          .eq('auth_id', authData.user.id)
+          .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
+          .maybeSingle(),
+        supabase
+          .from('professores')
+          .select('primeiro_acesso, nome')
+          .eq('auth_id', authData.user.id)
+          .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
+          .maybeSingle(),
+        supabase
+          .from('estudio_membros')
+          .select('role')
+          .eq('user_id', authData.user.id)
+          .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
+          .maybeSingle(),
+      ]);
+
       // 1. Verificar primeiro_acesso em alunos
-      const { data: alunoData, error: alunoError } = await supabase
-        .from('alunos')
-        .select('primeiro_acesso, nome_completo, role')
-        .eq('auth_id', authData.user.id)
-        .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
-        .maybeSingle();
+      const { data: alunoData, error: alunoError } = alunoResult;
 
       if (alunoError) throw alunoError; // FIX: erro não é mais descartado
 
@@ -183,12 +212,7 @@ export default function Login() {
 
       // 2. Verificar primeiro_acesso em professores
       if (!alunoData) {
-        const { data: profData, error: profError } = await supabase
-          .from('professores')
-          .select('primeiro_acesso, nome')
-          .eq('auth_id', authData.user.id)
-          .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
-          .maybeSingle();
+        const { data: profData, error: profError } = profResult;
 
         if (profError) throw profError; // FIX: erro não é mais descartado
 
@@ -219,12 +243,7 @@ export default function Login() {
       // admin/professor cujo vínculo já não passa pelas tabelas legadas
       // acima. Sem este check, esse usuário caía direto no fallback de
       // erro abaixo — mesmo logando com sucesso (PED-46).
-      const { data: membro, error: membroError } = await supabase
-        .from('estudio_membros')
-        .select('role')
-        .eq('user_id', authData.user.id)
-        .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
-        .maybeSingle();
+      const { data: membro, error: membroError } = membroResult;
 
       if (membroError) throw membroError;
 

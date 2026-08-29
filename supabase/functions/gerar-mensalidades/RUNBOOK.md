@@ -124,7 +124,7 @@ banco está em `GMT`, então o job na verdade dispara às 05h de Brasília, não
 08h como os comentários acima assumem — o Sentry Cron Monitor (PED-33) vai
 marcar isso como "missed" todo mês por ficar 3h fora da `checkinMargin`. Não é
 escopo do PED-56 (a geração em si não quebra — 05h ainda é dia 1), registrado
-separadamente em PED-75.
+separadamente em PED-75 (corrigido — ver seção abaixo).
 
 **Ainda não feito:** um teste manual autenticado de ponta a ponta do modo
 batch (`curl -X POST .../gerar-mensalidades -H 'x-cron-secret: <valor
@@ -139,6 +139,38 @@ depois do dia 1, e os Sentry Cron Monitors (`gerar-mensalidades`) pra
 alerta de falha.
 
 Pra desligar em uma emergência: `select cron.unschedule('cobrancas-mensais');`.
+
+## Correção PED-75 (29/08/2026) — schedule do pg_cron ajustado
+
+A verificação do PED-56 acima encontrou `cron.timezone = GMT` no banco de
+produção, fazendo o job `cobrancas-mensais` (`schedule = '0 8 1 * *'`)
+disparar às 08h **UTC** = 05h Brasília, não 08h Brasília como o comentário
+em `config.toml` e o `CRON_SCHEDULE` (`timezone: 'America/Sao_Paulo'`) em
+`index.ts` assumem — o Sentry Cron Monitor (PED-33) marcaria "missed" todo
+mês por ficar 3h fora do `checkinMargin`, mesmo com a function rodando com
+sucesso.
+
+Corrigido ajustando só o `schedule` do job já existente, sem tocar em mais
+nada (`command`, `active`, a injeção do secret via Vault — tudo idêntico):
+
+```sql
+select cron.alter_job(job_id := 1, schedule := '0 11 1 * *');
+```
+
+Confirmado via `select * from cron.job where jobname = 'cobrancas-mensais';`:
+`jobid=1`, `schedule='0 11 1 * *'`, `active=true`, `command` inalterado.
+11h UTC = 8h Brasília — agora bate com o que `index.ts`/o Sentry Cron
+Monitor já esperavam, **sem precisar de nenhuma mudança de código ou
+redeploy da function**.
+
+Não havia nenhuma execução registrada em `cron.job_run_details` até este
+ajuste (a primeira execução real seria só 01/09/2026), então não havia
+risco de interromper um disparo em andamento.
+
+Próxima execução real: 01/09/2026, 11h UTC (8h Brasília). Confirmar depois
+com `select * from cron.job_run_details where jobid = 1 order by start_time
+desc limit 3;` e checar no Sentry que o monitor `gerar-mensalidades` não
+aparece mais como "missed".
 
 ## Checklist antes de mexer neste cron em produção
 

@@ -68,7 +68,7 @@ export const showToast = {
     });
   },
 
-  custom: (mensagem, onAction, textoAcao = 'Desfazer') => {
+  custom: (mensagem, onAction, textoAcao = 'Desfazer', duracao = 5000) => {
     toast((t) => (
       <div className="flex items-center justify-between gap-4">
         <span className="text-sm font-medium">{safeMessage(mensagem, '')}</span>
@@ -87,7 +87,7 @@ export const showToast = {
         </button>
       </div>
     ), {
-      duration: 5000,
+      duration: duracao,
     });
   },
 
