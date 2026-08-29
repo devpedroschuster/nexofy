@@ -52,6 +52,13 @@ acima antes de abrir o PR), ou a migration foi editada depois de já ter
 sido aplicada em staging (edite uma nova migration em vez de alterar uma já
 aplicada).
 
+O baseline atual (`supabase/migrations/00000000000000_baseline_current_schema.sql`)
+foi reconstruído via introspecção do schema de produção — antes dele não
+existia nenhuma migration versionada no repositório. O histórico real das
+migrations anteriores ao baseline fica arquivado em
+`supabase/migration-history/`, só como referência — nunca é aplicado por
+`supabase db push` nem pelo CI.
+
 ## 2. Cache do Service Worker (PWA)
 
 Ver `webapp/public/sw.js`. O `CACHE_NAME`/`STATIC_CACHE_NAME` carregam um
