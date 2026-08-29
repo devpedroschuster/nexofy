@@ -51,7 +51,7 @@ export function useSWUpdateNotifier() {
 
     function aoTrocarController() {
       if (deveNotificar()) {
-        showToast.custom('Nova versão disponível.', () => window.location.reload(), 'Atualizar');
+        showToast.custom('Nova versão disponível.', () => window.location.reload(), 'Atualizar', Infinity);
       }
     }
 
