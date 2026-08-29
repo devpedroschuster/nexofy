@@ -88,6 +88,16 @@ interface ConfigRepasse {
   aula_experimental_pct_prof: number;
 }
 
+// PED-66: supabase-js infere `agenda` como array (`{ modalidade_id }[]`) a
+// partir da string de .select() sem um tipo Database gerado, mesmo sendo
+// uma relação 1:1 (presencas.aula_id → agenda.id) — deno check falha sem
+// esta anotação manual. Mesmo padrão de interface explícita já usado acima
+// para Modalidade/Professor/Aluno/Plano.
+interface PresencaAgenda {
+  aluno_id: string;
+  agenda: { modalidade_id: string } | null;
+}
+
 // REP-07: distribui `total` em centavos exatos entre `n` parcelas.
 function distribuirCentavos(total: number, n: number): number[] {
   const base = Math.floor((total / n) * 100) / 100;
@@ -331,7 +341,8 @@ async function handleRequest(req: Request): Promise<Response> {
       .eq('estudio_id', estudioId)       // ← isolamento
       .gte('data_checkin', `${inicioPeriodo}T00:00:00`)
       .lte('data_checkin', `${fimPeriodo}T23:59:59`)
-      .not('aula_id', 'is', null);
+      .not('aula_id', 'is', null)
+      .returns<PresencaAgenda[]>();
 
     const presencasPorAluno = new Map<string, Set<string>>();
     for (const p of presencasRaw ?? []) {
