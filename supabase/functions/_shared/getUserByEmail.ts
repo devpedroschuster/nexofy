@@ -5,9 +5,9 @@
 // (ex: get_user_id_by_email(p_email text) returns uuid), evitando paginação
 // no client. Mantido aqui como correção mínima e imediata.
 
-import type { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-type AdminClient = ReturnType<typeof createClient>;
+type AdminClient = SupabaseClient;
 
 const PAGE_SIZE = 200;
 const MAX_PAGES = 25;
