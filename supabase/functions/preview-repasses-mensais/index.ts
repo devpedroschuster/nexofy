@@ -68,6 +68,14 @@ interface ConfigRepasse {
   aula_experimental_pct_prof: number;
 }
 
+// PED-66: mesmo gap de tipagem corrigido em gerar-repasses-mensais/index.ts —
+// supabase-js infere `agenda` como array a partir da string de .select() sem
+// um tipo Database gerado, mesmo sendo relação 1:1 (presencas.aula_id → agenda.id).
+interface PresencaAgenda {
+  aluno_id: string;
+  agenda: { modalidade_id: string } | null;
+}
+
 function distribuirCentavos(total: number, n: number): number[] {
   const base = Math.floor((total / n) * 100) / 100;
   const parcelas = Array(n).fill(base);
@@ -279,7 +287,8 @@ serve(withSentry("preview-repasses-mensais", async (req: Request) => {
       .eq('estudio_id', estudioId)       // ← isolamento
       .gte('data_checkin', `${inicioPeriodo}T00:00:00`)
       .lte('data_checkin', `${fimPeriodo}T23:59:59`)
-      .not('aula_id', 'is', null);
+      .not('aula_id', 'is', null)
+      .returns<PresencaAgenda[]>();
 
     const presencasPorAluno = new Map<string, Set<string>>();
     for (const p of presencasRaw ?? []) {
