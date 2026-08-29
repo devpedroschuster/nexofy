@@ -21,13 +21,47 @@ const DIAS_SEMANA = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira',
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const EXPO_BATCH_SIZE = 100; // limite documentado da Expo Push API
 
-function normalizarAgenda(agendaRelacionada) {
-  // O join do Supabase pode retornar objeto único ou array de 1, dependendo
-  // da cardinalidade inferida — normalizamos para sempre lidar com objeto.
-  return Array.isArray(agendaRelacionada) ? agendaRelacionada[0] : agendaRelacionada;
+// PED-76: supabase-js infere relações embutidas a partir da string de
+// .select() sem um tipo Database gerado — a cardinalidade (objeto único
+// vs array) inferida varia por relação, mesmo entre joins com a mesma
+// forma (já era o caso de `agenda` abaixo; `matricula.alunos` e
+// `ag.alunos` tinham o mesmo risco sem normalização, mascarado só porque
+// os parâmetros de montarNotificacao/enviarEmLotes eram `any` implícito).
+// Normalizamos em runtime, não só o tipo, porque a ambiguidade é real na
+// resposta do PostgREST, não só uma limitação do type-check.
+function normalizarUm<T>(relacionado: T | T[] | null): T | null {
+  return Array.isArray(relacionado) ? (relacionado[0] ?? null) : relacionado;
 }
 
-function montarNotificacao(pushToken, nomeCompleto, atividade, horario, nomeEstudio) {
+interface AlunoFixo {
+  id: string;
+  push_token: string | null;
+  nome_completo: string | null;
+  data_inicio_plano: string | null;
+  data_fim_plano: string | null;
+}
+
+interface AlunoAvulso {
+  push_token: string | null;
+  nome_completo: string | null;
+}
+
+interface AgendaInfo {
+  atividade: string;
+  horario: string;
+}
+
+interface ExpoTicket {
+  status?: string;
+}
+
+function montarNotificacao(
+  pushToken: string | null,
+  nomeCompleto: string | null,
+  atividade: string | null | undefined,
+  horario: string | null | undefined,
+  nomeEstudio: string,
+) {
   if (!pushToken || !nomeCompleto || !atividade || !horario) return null;
   const primeiroNome = nomeCompleto.split(' ')[0];
   return {
@@ -38,7 +72,10 @@ function montarNotificacao(pushToken, nomeCompleto, atividade, horario, nomeEstu
   };
 }
 
-async function enviarEmLotes(notificacoes, log) {
+async function enviarEmLotes(
+  notificacoes: Array<ReturnType<typeof montarNotificacao>>,
+  log: (msg: string) => void,
+) {
   let enviados = 0;
   let falhas = 0;
 
@@ -60,13 +97,19 @@ async function enviarEmLotes(notificacoes, log) {
 
       // A Expo retorna um "ticket" por notificação — nem todo HTTP 200
       // significa que cada mensagem individual foi aceita.
-      const corpo = await resposta.json().catch(() => null);
+      const corpo = (await resposta.json().catch(() => null)) as { data?: ExpoTicket[] } | null;
       const tickets = corpo?.data ?? [];
       const errosNoLote = tickets.filter((t) => t?.status === 'error').length;
       enviados += lote.length - errosNoLote;
       falhas += errosNoLote;
     } catch (err) {
-      log(`❌ Falha de rede ao enviar lote ${i / EXPO_BATCH_SIZE + 1}: ${err.message}`);
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null
+            ? JSON.stringify(err)
+            : String(err);
+      log(`❌ Falha de rede ao enviar lote ${i / EXPO_BATCH_SIZE + 1}: ${message}`);
       falhas += lote.length;
     }
   }
@@ -187,7 +230,8 @@ serve(withSentry("lembretes-aula", async (req) => {
       const { data: matriculasFixas, error: errFixos } = await supabase
         .from('agenda_fixa')
         .select('aula_id, alunos (id, push_token, nome_completo, data_inicio_plano, data_fim_plano)')
-        .in('aula_id', idsAulas);
+        .in('aula_id', idsAulas)
+        .returns<Array<{ aula_id: string; alunos: AlunoFixo | AlunoFixo[] | null }>>();
       if (errFixos) throw errFixos;
 
       // Faltas já registradas para amanhã (ex: professor encerrou a matrícula
@@ -202,7 +246,7 @@ serve(withSentry("lembretes-aula", async (req) => {
       const chavesFalta = new Set((faltasAntecipadas ?? []).map((f) => `${f.aluno_id}-${f.aula_id}`));
 
       for (const matricula of matriculasFixas ?? []) {
-        const aluno = matricula.alunos;
+        const aluno = normalizarUm(matricula.alunos);
         if (!aluno) continue;
 
         // Respeita vigência do plano (não notifica quem já venceu ou ainda não começou).
@@ -229,12 +273,13 @@ serve(withSentry("lembretes-aula", async (req) => {
       .eq('estudio_id', estudioId)
       .eq('data_aula', dataIso)
       .neq('origem', 'fixo')
-      .in('status', ['agendado', 'presente']);
+      .in('status', ['agendado', 'presente'])
+      .returns<Array<{ id: string; origem: string; agenda: AgendaInfo | AgendaInfo[] | null; alunos: AlunoAvulso | AlunoAvulso[] | null }>>();
     if (errAvulsos) throw errAvulsos;
 
     for (const ag of agendamentosAvulsos ?? []) {
-      const agenda = normalizarAgenda(ag.agenda);
-      const aluno = ag.alunos;
+      const agenda = normalizarUm(ag.agenda);
+      const aluno = normalizarUm(ag.alunos);
       if (!aluno || !agenda) continue;
       const notif = montarNotificacao(aluno.push_token, aluno.nome_completo, agenda.atividade, agenda.horario, nomeEstudio);
       if (notif) notificacoes.push(notif);
@@ -258,8 +303,14 @@ serve(withSentry("lembretes-aula", async (req) => {
     });
 
   } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : typeof err === 'object' && err !== null
+          ? JSON.stringify(err)
+          : String(err);
     console.error("❌ Erro fatal no robô:", err);
-    return new Response(JSON.stringify({ error: err.message, logs }), {
+    return new Response(JSON.stringify({ error: message, logs }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });
