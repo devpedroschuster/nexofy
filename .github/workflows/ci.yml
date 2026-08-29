@@ -51,6 +51,28 @@ jobs:
       - name: Check schema drift against staging
         run: ./scripts/check-db-diff.sh
 
+  deno-check:
+    name: Deno Check (Supabase Functions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # PED-77: valida supabase/functions/ no CI — antes só era checado
+      # manualmente (foi assim que o erro de type-check da PED-66 passou
+      # despercebido). PED-76/77 zeraram os erros pré-existentes que
+      # bloqueavam este gate (lembretes-aula, e mais os achados durante o
+      # trabalho da PED-77 em criar-acesso-aluno/criar-estudio/
+      # gerenciar-acesso-professor/gerar-mensalidades).
+      - name: Type-check edge functions
+        run: deno check supabase/functions/*/index.ts
+
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest

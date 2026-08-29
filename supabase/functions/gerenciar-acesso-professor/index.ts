@@ -1,5 +1,5 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { getUserByEmail } from '../_shared/getUserByEmail.ts';
 import { withSentry } from "../_shared/sentry.ts";
 
@@ -24,7 +24,7 @@ function resp(body: object, status = 200): Response {
  * Retorna o auth_id do usuário criado.
  */
 async function criarUsuarioSemSenha(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseClient,
   emailNormalizado: string,
   nome: string,
 ): Promise<string> {

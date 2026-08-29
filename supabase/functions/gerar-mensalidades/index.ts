@@ -16,7 +16,7 @@ const corsHeaders = {
 // infere tipo a partir da string de .select() sem um tipo Database gerado,
 // então anotamos manualmente o shape relevante para esta função.
 interface AlunoComPlano {
-  id: number
+  id: string
   nome_completo: string
   plano_id: number | null
   planos: { id: number; preco: number | string } | null
@@ -281,11 +281,15 @@ async function gerarMensalidadesDoEstudio(
       p_estudio_id: estudioId,
       p_data_referencia: data_vencimento, // já é '${ano}-${mesStr}-10', mesmo mês de referência
     })
-    .returns<MensalidadeExistente[]>()
 
   if (errJaGeradas) throw errJaGeradas
 
-  const comMensalidade = new Set((jaGeradas || []).map((m: MensalidadeExistente) => m.aluno_id))
+  // PED-77: .returns<T[]>() aqui aciona um falso positivo do type-helper
+  // interno do supabase-js ("Cannot cast single object to array type"),
+  // mesmo sem nenhum .single()/.maybeSingle() na chain — a RPC é
+  // RETURNS TABLE(...) (genuinamente array). Cast pós-chamada evita o
+  // type-helper sem mudar nada em runtime.
+  const comMensalidade = new Set(((jaGeradas ?? []) as MensalidadeExistente[]).map((m) => m.aluno_id))
 
   // 4. Filtra só quem ainda não tem mensalidade neste mês
   const paraGerar = alunosValidos.filter((a: AlunoComPlano) => !comMensalidade.has(a.id))
@@ -331,11 +335,13 @@ async function gerarMensalidadesDoEstudio(
 
   const { data: resultadoInsercao, error: errInsert } = await supabase
     .rpc('inserir_mensalidades_regulares_idempotente', { p_mensalidades: mensalidades })
-    .returns<{ out_aluno_id: number; out_inserida: boolean }[]>()
 
   if (errInsert) throw errInsert
 
-  const totalInseridas = (resultadoInsercao ?? []).filter((r) => r.out_inserida).length
+  // PED-77: mesmo falso positivo do type-helper de .returns<T[]>() acima —
+  // RPC é RETURNS TABLE(...), cast pós-chamada não muda nada em runtime.
+  const totalInseridas = ((resultadoInsercao ?? []) as { out_aluno_id: number; out_inserida: boolean }[])
+    .filter((r) => r.out_inserida).length
 
   // 6. Notifica admins deste estúdio via tabela notificacoes
   // FIX: "profiles" é um sistema de roles paralelo a "estudio_membros" e
