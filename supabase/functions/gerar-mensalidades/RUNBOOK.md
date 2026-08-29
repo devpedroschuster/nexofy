@@ -91,6 +91,41 @@ select cron.schedule(
 );
 ```
 
+## Verificação PED-56 (29/08/2026) — confirmado contra produção
+
+O PED-56 pediu pra confirmar, contra o projeto Supabase real, se o mecanismo
+que roda em produção é o `[[cron]]` declarativo deste `config.toml` (cenário
+1: URL com placeholder `<...>` e sem body — quebrado) ou o job `pg_cron`
+separado descrito na seção acima (cenário 2: este `config.toml` é só
+referência/documentação). Confirmado direto em `tciiepqmnrrcjnqhspvw`:
+
+- `select * from cron.job;` → `jobid=1`, `jobname='cobrancas-mensais'`,
+  `schedule='0 8 1 * *'`, `active=true`, `command` chamando a URL real (sem
+  placeholder) com `Content-Type: application/json` e `body := '{}'::jsonb` —
+  bate exatamente com o modo batch do PED-68 (payload vazio → todos os
+  estúdios ativos).
+- `select * from cron.job_run_details;` → vazio (esperado: a primeira
+  execução real é 01/09/2026 08:00 UTC).
+- `select name, created_at from vault.secrets where name = 'CRON_SECRET';` →
+  existe, criado em 28/08/2026 21:45 UTC.
+- `get_edge_function` (MCP) na function deployada → `verify_jwt: false`
+  confirmado no deploy ativo (não só no arquivo local), código idêntico ao
+  deste repo (versão 23).
+
+**Conclusão: cenário 2.** O `[[cron]]` deste arquivo nunca foi o mecanismo
+real (nem antes nem depois do PED-68) — é só documentação/referência, e já
+está anotado como tal nos comentários acima. Os dois problemas que o PED-56
+descreveu (placeholder na URL, ausência de body) já tinham sido corrigidos
+pelo PED-57/PED-68 antes desta verificação; não havia mais nada quebrado pra
+corrigir aqui.
+
+Esta verificação encontrou um problema não relacionado: `cron.timezone` do
+banco está em `GMT`, então o job na verdade dispara às 05h de Brasília, não
+08h como os comentários acima assumem — o Sentry Cron Monitor (PED-33) vai
+marcar isso como "missed" todo mês por ficar 3h fora da `checkinMargin`. Não é
+escopo do PED-56 (a geração em si não quebra — 05h ainda é dia 1), registrado
+separadamente em PED-75.
+
 **Ainda não feito:** um teste manual autenticado de ponta a ponta do modo
 batch (`curl -X POST .../gerar-mensalidades -H 'x-cron-secret: <valor
 real>' -H 'Content-Type: application/json'`, conferindo `resultados[]` na
