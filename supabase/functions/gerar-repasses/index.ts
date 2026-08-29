@@ -9,7 +9,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { withSentry } from "../_shared/sentry.ts";
+import { withSentry, Sentry } from "../_shared/sentry.ts";
 import { gerarRepassesParaMensalidade } from "../_shared/repasses.ts";
 import { createLogger } from "../_shared/logger.ts";
 
@@ -101,6 +101,20 @@ serve(withSentry("gerar-repasses", async (req: Request) => {
     // inexistente (gerarRepassesParaMensalidade lança um Error genérico —
     // não é um erro de servidor, é um input inválido do chamador).
     const status = message === 'Mensalidade não encontrada.' ? 404 : 500;
+    if (status === 500) {
+      // PED-65: mesmo gap que a PED-33 corrigiu em gerar-repasses-mensais —
+      // este catch sempre retornava uma Response normal, então withSentry
+      // nunca via a exceção. Reportando explicitamente aqui (exceto no 404
+      // de input inválido acima, que não é falha de servidor).
+      Sentry.captureException(err, {
+        tags: {
+          edge_function: 'gerar-repasses',
+          correlation_id: correlationId,
+          ...(estudioId ? { estudio_id: estudioId } : {}),
+          ...(mensalidadeId ? { mensalidade_id: mensalidadeId } : {}),
+        },
+      });
+    }
     return response({ error: message }, status);
   }
 }));
