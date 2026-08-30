@@ -14,6 +14,12 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     strategy:
+      # fail-fast: false porque staging e produção são backups independentes
+      # — sem isso, a perna que roda mais devagar é cancelada assim que a
+      # outra falha (visto na prática: staging cancelado só porque produção
+      # falhou rápido por falta do secret, mesmo staging tendo tudo pra
+      # funcionar). Um backup não deveria depender do outro pra existir.
+      fail-fast: false
       matrix:
         environment: [staging, production]
     steps:
