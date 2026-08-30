@@ -18,8 +18,16 @@ jobs:
         environment: [staging, production]
     steps:
       - name: Install postgresql-client 17
+        # PED-22: ubuntu-latest (24.04 "noble") não tem postgresql-client-17
+        # no repositório padrão (só client-16) — as 3 execuções agendadas
+        # anteriores (27-29/08) falharam aqui com "E: Unable to locate
+        # package postgresql-client-17", antes mesmo de chegar no pg_dump.
+        # postgresql-common já traz o script oficial que registra o repo
+        # apt.postgresql.org (PGDG) com a chave de assinatura correta.
         run: |
           sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y postgresql-client-17
 
       - name: Dump database
