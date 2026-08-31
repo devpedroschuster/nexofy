@@ -34,5 +34,16 @@ export async function loginComoAdmin(page, host, email, password, nomeEstudio) {
   // A causa raiz de round-trips sequenciais evitáveis foi corrigida em
   // useAuth.jsx (Promise.all); esta margem cobre a variação de rede/CI
   // residual que continua sendo inerente a bater num backend real.
-  await expect(page).toHaveURL(urlFor(host, '/dashboard'), { timeout: 25_000 });
+  //
+  // PED-87: `toHaveURL` sozinho continuou flaky mesmo após o fix da PED-72
+  // (2 recorrências em runs sem nenhuma mudança de auth/routing/frontend).
+  // Espera pelo heading real do Dashboard em vez de só a URL mudar — o
+  // heading renderiza assim que o componente monta, sem depender das
+  // queries de dados do dashboard (que têm seus próprios skeletons), então
+  // é um sinal mais direto de "login concluído e SPA navegou" do que a URL
+  // isolada, que pode mudar antes do React terminar de montar a rota nova.
+  await expect(page.getByRole('heading', { name: 'Painel de Avisos' })).toBeVisible({
+    timeout: 25_000,
+  });
+  await expect(page).toHaveURL(urlFor(host, '/dashboard'));
 }
