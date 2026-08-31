@@ -18,4 +18,4 @@ verify_jwt = false  # Permite chamada do cron sem auth (mesmo padrão de gerar-m
 [[cron]]
 name = "repasses-mensais"
 schedule = "0 9 5 * *"   # Dia 5 de cada mês, às 09h — A CONFIRMAR
-command = "POST https://<tciiepqmnrrcjnqhspvw>.supabase.co/functions/v1/gerar-repasses-mensais -H 'x-cron-secret: ${CRON_SECRET}'"
+command = "POST https://tciiepqmnrrcjnqhspvw.supabase.co/functions/v1/gerar-repasses-mensais -H 'x-cron-secret: ${CRON_SECRET}'"
