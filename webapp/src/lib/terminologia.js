@@ -57,17 +57,23 @@ export function resolverRotulo(chave, { terminologia, segmento } = {}) {
 }
 
 /**
- * Plural simples (só sufixo 's') — cobre os casos atuais do dicionário.
- * Se algum rótulo custom precisar de plural irregular no futuro, a via é
- * o próprio tenant digitar o plural certo num campo `_plural` dedicado;
- * não complicar agora por um caso hipotético.
+ * Plural regular em pt-BR — cobre os casos atuais do dicionário (palavras
+ * terminadas em vogal, e em 'r'/'s'/'z', que é o padrão de "Professor" →
+ * "Professores"). Corrige regressão (PED-94) em que o sufixo naive 's'
+ * produzia "Professors" (lê como inglês) em vez de "Professores".
+ * Se algum rótulo custom precisar de plural irregular no futuro (ex.:
+ * terminado em 'ão'), a via é o próprio tenant digitar o plural certo num
+ * campo `_plural` dedicado; não complicar agora por um caso hipotético.
  *
  * @param {string} chave
  * @param {{ terminologia?: Record<string,string>, segmento?: string }} ctx
  * @returns {string}
  */
 export function resolverRotuloPlural(chave, ctx) {
-  return `${resolverRotulo(chave, ctx)}s`;
+  const singular = resolverRotulo(chave, ctx);
+  const ultima = singular.charAt(singular.length - 1).toLowerCase();
+  if (ultima === 'r' || ultima === 's' || ultima === 'z') return `${singular}es`;
+  return `${singular}s`;
 }
 
 /**
