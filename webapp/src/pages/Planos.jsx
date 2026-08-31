@@ -357,7 +357,8 @@ export default function Planos() {
                     <span className="text-success font-black">R$ {plano.preco}</span>
                     <span className="w-1 h-1 bg-border rounded-full" />
                     <span className="flex items-center gap-1">
-                      <Calendar size={12} /> {plano.frequencia_semanal}
+                      <Calendar size={12} />
+                      {plano.frequencia_semanal === LIMITE_ILIMITADO_SEMANA ? 'Ilimitado' : plano.frequencia_semanal}
                     </span>
                     <span className="w-1 h-1 bg-border rounded-full" />
                     <span className="flex items-center gap-1 text-info font-bold">
