@@ -14,12 +14,26 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     strategy:
+      # fail-fast: false porque staging e produção são backups independentes
+      # — sem isso, a perna que roda mais devagar é cancelada assim que a
+      # outra falha (visto na prática: staging cancelado só porque produção
+      # falhou rápido por falta do secret, mesmo staging tendo tudo pra
+      # funcionar). Um backup não deveria depender do outro pra existir.
+      fail-fast: false
       matrix:
         environment: [staging, production]
     steps:
       - name: Install postgresql-client 17
+        # PED-22: ubuntu-latest (24.04 "noble") não tem postgresql-client-17
+        # no repositório padrão (só client-16) — as 3 execuções agendadas
+        # anteriores (27-29/08) falharam aqui com "E: Unable to locate
+        # package postgresql-client-17", antes mesmo de chegar no pg_dump.
+        # postgresql-common já traz o script oficial que registra o repo
+        # apt.postgresql.org (PGDG) com a chave de assinatura correta.
         run: |
           sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y postgresql-client-17
 
       - name: Dump database
@@ -31,7 +45,12 @@ jobs:
             exit 1
           fi
           mkdir -p backup
-          pg_dump "$DB_URL" \
+          # Caminho versionado explicito: o runner ubuntu-latest ja vem com
+          # postgresql-client-16 pre-instalado, e o `pg_dump` generico do
+          # PATH resolve pra ele mesmo com o 17 tambem instalado — causava
+          # "aborting because of server version mismatch" (servidor 17.x,
+          # client 16.x). Postgres exige client >= server major version.
+          /usr/lib/postgresql/17/bin/pg_dump "$DB_URL" \
             --no-owner --no-privileges --format=custom \
             --file="backup/${{ matrix.environment }}-$(date -u +%Y%m%dT%H%M%SZ).dump"
 
