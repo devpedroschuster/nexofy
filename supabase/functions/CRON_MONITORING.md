@@ -12,6 +12,15 @@ comentário no próprio arquivo). O que **não** existe por padrão é o
 check-ins — ele não notifica ninguém até uma das opções abaixo ser
 configurada manualmente na UI do Sentry (não há como fazer isso via código).
 
+**Status atual: alerta ativo, por e-mail.** Confirmado no painel do
+monitor no Sentry (Monitors → `nexofy-edge-functions` → "Project Alerts")
+que a regra de projeto "Send a notification for high priority issues"
+(ação: Email) está conectada e se aplica às issues geradas por este
+monitor — não é preciso nenhuma Alert Rule adicional filtrando por
+`monitor.slug` pra cobrir o cenário do PED-33. Discord/Slack não são
+usados de propósito (decisão do time — só e-mail mesmo); se isso mudar no
+futuro, use a Opção 2 abaixo pra rotear pra um desses canais.
+
 Monitores hoje (slug = `CRON_MONITOR_SLUG` em cada `index.ts`):
 `gerar-mensalidades`, `gerar-repasses-mensais`.
 
