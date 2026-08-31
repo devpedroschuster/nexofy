@@ -42,6 +42,20 @@ Os três itens sugeridos na issue:
 
 ## Verificação
 
-Query do `audit-security-definer-grants.sql` rodada em produção antes das mudanças: retorna só as 3 RPCs públicas por design — confirma que a correção da PED-83 de 29/08 continua valendo lá e que o script funciona.
+Migration aplicada em staging primeiro, depois em produção (onde é no-op, como esperado).
 
-**Pendente:** aplicar `20260831120000_align_rpc_execute_grants_staging_prod.sql` em staging e em produção. As tools de escrita no banco (`apply_migration`/`execute_sql`) foram bloqueadas pelo classificador de permissão nesta sessão; a migration está commitada e precisa ser aplicada com aprovação. Depois de aplicar, rodar o script de auditoria nos dois ambientes: o resultado esperado é idêntico nos dois — só `estudio_publico`, `modalidades_publicas` e `planos_publicos`.
+`scripts/audit-security-definer-grants.sql` rodado nos dois ambientes depois de aplicar: resultado **idêntico**, só `estudio_publico`, `modalidades_publicas` e `planos_publicos`. Nenhuma outra function `SECURITY DEFINER` de `public` é alcançável por `anon`, nem por grant direto nem herdado de `PUBLIC`.
+
+Checagem pontual com `has_function_privilege` em staging, para confirmar que o revoke não passou do ponto:
+
+| grantee → function | antes | depois |
+| --- | --- | --- |
+| `anon` → `matricular_aluno` | `true` | `false` |
+| `anon` → `set_estudio_override` | `true` | `false` |
+| `anon` → `estudio_publico` (pública por design) | `true` | `true` |
+| `authenticated` → `matricular_aluno` | `true` | `true` |
+| `authenticated` → `verificar_status_estudio` | `true` | `true` |
+| `authenticated` → `substituir_repasses_mensalidade` | `true` | `false` (igual a produção) |
+| `service_role` → `substituir_repasses_mensalidade` | `true` | `true` |
+
+`get_advisors` (security) em staging depois de aplicar: o lint `0028_anon_security_definer_function_executable` lista agora só as 3 RPCs públicas por design — igual a produção. Os WARN restantes são conhecidos e de outras issues: `pg_net` no schema `public` (PED-81, aceito), leaked password protection (PED-82, pendente de Dashboard), e as functions de seed `fake_*` sem `search_path`, que só existem em staging ([PED-88](https://linear.app/pedro-schuster/issue/PED-88)).
