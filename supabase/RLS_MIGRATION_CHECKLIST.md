@@ -11,7 +11,7 @@ Isolamento multi-tenant neste projeto depende inteiramente de RLS: toda tabela d
 1. **Escreva a migration normalmente** em `supabase/migrations/`, aplique local ou em staging (`qjmybxkfjkxttggdjxga`) primeiro — nunca direto em produção (`tciiepqmnrrcjnqhspvw`).
 2. **Rode a simulação de 2 tenants** (script abaixo) contra o ambiente onde a migration acabou de ser aplicada. Precisa de pelo menos 2 `estudio_id` diferentes com pelo menos 1 linha cada na(s) tabela(s) afetada(s) pela policy — use dados de staging ou o estúdio de teste QA (`supabase/migration-history/20260819023144_criar_estudio_teste_qa_asaas.sql`).
 3. **Confirme isolamento**: cada tenant simulado só pode ver/alterar as próprias linhas. Qualquer linha do "outro" tenant aparecendo no resultado é reprovação — não aplicar em produção até corrigir.
-4. **Rode os advisors de segurança** (`get_advisors` / `supabase inspect db` — ou via MCP) depois de aplicar, procurando por `rls_enabled_no_policy` e por policies novas sem `USING`/`WITH CHECK`.
+4. **Rode os advisors de segurança** (`get_advisors` / `supabase inspect db` — ou via MCP) depois de aplicar, procurando por `rls_enabled_no_policy` e por policies novas sem `USING`/`WITH CHECK`. Se a migration criou ou redefiniu alguma function, rode também `scripts/audit-security-definer-grants.sql` — ver a seção sobre `DROP FUNCTION` no fim deste documento.
 5. **Só então** aplique em produção, e rode a mesma simulação lá também (produção pode ter dados/roles que staging não tem).
 
 ## Script de simulação (SQL Editor / `execute_sql`)
@@ -59,6 +59,15 @@ Notas:
 - Se a tabela/função usa `auth.jwt() ->> 'algum_claim'` além de `auth.uid()`, inclua esse claim no JSON de `request.jwt.claims` também.
 - Para funções `SECURITY DEFINER` chamadas por `anon`/`authenticated` sem guarda interna (`eh_super_admin()` etc.), o teste do passo 4 é obrigatório — é a categoria de bug do advisor `anon_security_definer_function_executable`.
 
-## Achado deste levantamento (não é RLS, mas é adjacente)
+## `DROP FUNCTION` + `CREATE FUNCTION` apaga os `GRANT`/`REVOKE` (PED-84)
 
-Os advisors de segurança de produção mostram várias funções `SECURITY DEFINER` de impersonação (`set_estudio_override`, `clear_estudio_override`, `estudio_ativo_via_override`) com `EXECUTE` liberado para `anon`. Hoje elas se protegem internamente checando `eh_super_admin()` (que retorna `false` para `anon`, já que `auth.uid()` é `null`), então não são exploráveis como estão — mas é defesa em profundidade fraca: bastaria alguém remover essa checagem numa migration futura sem perceber que `anon` ainda tem `EXECUTE`. Recomendação: `revoke execute on function public.set_estudio_override(uuid), public.clear_estudio_override() from anon, authenticated;` e conceder só para o role que efetivamente deveria chamar (provavelmente só usuários autenticados que sejam super_admin). Isso não bloqueia PED-20 — é um item separado, sinalizado aqui para não se perder.
+**Toda migration que redefine uma function `SECURITY DEFINER` via `DROP FUNCTION` + `CREATE FUNCTION` precisa re-aplicar os `GRANT`/`REVOKE` explicitamente, na mesma migration.**
+
+`CREATE OR REPLACE FUNCTION` mantém o mesmo OID e, com ele, os privilégios existentes. `DROP` + `CREATE` cria um objeto novo, que nasce com o ACL default do Postgres — `EXECUTE` liberado para `PUBLIC`, o que inclui `anon` e `authenticated`. Qualquer `REVOKE` anterior desaparece sem erro e sem aviso. E o `DROP` não é opcional quando muda a assinatura ou o tipo de retorno: `CREATE OR REPLACE` recusa esses casos, então é fácil cair nisso sem perceber que se está reabrindo um acesso.
+
+Isso já aconteceu aqui: `supabase/migration-history/20260812225200_revoke_unnecessary_execute_grants.sql` revogou `EXECUTE ... FROM anon` de cinco helpers internos em 12/08, e em 29/08 quatro deles (`eh_admin_do_estudio_atual`, `eh_super_admin`, `estudio_ativo_via_override`, `estudio_id_atual`) estavam expostos para `anon` de novo (PED-83, corrigido em `supabase/migrations/20260829201000_revoke_anon_execute_internal_helpers.sql`).
+
+Duas consequências práticas:
+
+- **Não confie no `REVOKE ... FROM anon` sozinho.** O grant real pode estar em `PUBLIC` (`=X/postgres` no `proacl`), que `anon` herda por ser um role comum — foi exatamente essa a divergência entre staging (grant em `PUBLIC`) e produção (grant direto em `anon`) na PED-83. Revogue dos dois: `revoke execute on function ... from public, anon;`. Revogar de um grantee que nunca teve o grant é no-op silencioso, então é seguro.
+- **Verifique o ACL real, não o que a migration diz.** Rode `scripts/audit-security-definer-grants.sql` (lê `pg_proc.proacl` direto) em staging **e** em produção depois de aplicar, e compare os dois — divergência é drift e deve virar migration, com produção como referência. O `get_advisors` do Supabase (lints `0028`/`0029_*_security_definer_function_executable`) cobre parte disso, mas o script mostra também o grant em `PUBLIC`. Vale rodar periodicamente, não só quando se mexe em function: é o que pega esse tipo de regressão cedo.
