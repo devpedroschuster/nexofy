@@ -6,16 +6,18 @@
 
 import React, { useState, useId } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Building2, Link2, Mail, User, Phone, Instagram,
-  CheckCircle, XCircle, ArrowLeft,
+  CheckCircle, XCircle, Loader2, ArrowLeft,
 } from 'lucide-react';
 import Button from '../../../components/ui/Button';
-import Input, { Label } from '../../../components/ui/Input';
+import Input, { Label, ErrorMessage } from '../../../components/ui/Input';
 import Surface from '../../../components/ui/Surface';
 import { showToast } from '../../../components/shared/Toast';
 import { superAdminService } from '../../../services/superAdminService';
+import { useDebounce } from '../../../hooks/useDebounce';
+import { formatarTelefone, validarTelefone } from '../../../lib/utils';
 
 const SLUG_RE = /^[a-z0-9-]{3,50}$/;
 
@@ -47,9 +49,24 @@ export default function SuperAdminNovoEstudio() {
 
   const [form, setForm]           = useState(FORM_VAZIO);
   const [slugManual, setSlugManual] = useState(false);
+  const [whatsappErro, setWhatsappErro] = useState('');
 
   const slugValido = SLUG_RE.test(form.slug);
   const slugTocado = form.slug.length > 0;
+
+  const slugDebounced = useDebounce(form.slug, 400);
+
+  const { data: slugDisponivel, isFetching: verificandoSlug } = useQuery({
+    queryKey: ['super-admin', 'slug-disponivel', slugDebounced],
+    queryFn: () => superAdminService.verificarSlugDisponivel(slugDebounced),
+    enabled: SLUG_RE.test(slugDebounced),
+    staleTime: 1000 * 30,
+  });
+
+  // Só considera "duplicado" quando o slug debounced bate com o slug atual
+  // do campo — evita mostrar um resultado desatualizado enquanto o usuário
+  // ainda está digitando um valor diferente do que foi checado.
+  const slugDuplicado = form.slug === slugDebounced && slugDisponivel === false;
 
   function set(campo, valor) {
     setForm((f) => ({ ...f, [campo]: valor }));
@@ -64,6 +81,18 @@ export default function SuperAdminNovoEstudio() {
   function handleSlugChange(e) {
     setSlugManual(true);
     set('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''));
+  }
+
+  function handleWhatsappChange(e) {
+    const bruto = e.target.value;
+    const digitos = bruto.replace(/\D/g, '');
+    const formatado = digitos.length >= 10 ? formatarTelefone(digitos) : bruto;
+    set('whatsapp', formatado);
+    setWhatsappErro(
+      digitos.length > 0 && !validarTelefone(digitos)
+        ? 'WhatsApp inválido. Use DDD + número (10 ou 11 dígitos).'
+        : ''
+    );
   }
 
   const { mutate: criar, isPending } = useMutation({
@@ -90,6 +119,14 @@ export default function SuperAdminNovoEstudio() {
     e.preventDefault();
     if (!slugValido) {
       showToast.error('Slug inválido. Use letras minúsculas, números e hífens (3–50 chars).');
+      return;
+    }
+    if (slugDuplicado) {
+      showToast.error('Esse slug já está em uso. Escolha outro.');
+      return;
+    }
+    if (form.whatsapp.trim() && !validarTelefone(form.whatsapp)) {
+      showToast.error('WhatsApp inválido. Corrija o campo antes de continuar.');
       return;
     }
     criar();
@@ -152,9 +189,13 @@ export default function SuperAdminNovoEstudio() {
               leftIcon={<Link2 size={16} />}
               rightIcon={
                 slugTocado
-                  ? slugValido
-                    ? <CheckCircle size={16} className="text-success" />
-                    : <XCircle    size={16} className="text-destructive" />
+                  ? !slugValido
+                    ? <XCircle    size={16} className="text-destructive" />
+                    : verificandoSlug
+                      ? <Loader2  size={16} className="animate-spin text-muted-foreground" />
+                      : slugDuplicado
+                        ? <XCircle  size={16} className="text-destructive" />
+                        : <CheckCircle size={16} className="text-success" />
                   : null
               }
               placeholder="espaco-movimento"
@@ -167,6 +208,11 @@ export default function SuperAdminNovoEstudio() {
             <p id={`${uid}-slug-hint`} className="mt-1 text-[11px] text-muted-foreground">
               Apenas letras minúsculas, números e hífens · 3–50 caracteres
             </p>
+            {slugDuplicado && (
+              <p className="mt-1 text-[11px] text-destructive font-medium">
+                Esse slug já está em uso por outro estúdio.
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -177,9 +223,12 @@ export default function SuperAdminNovoEstudio() {
                 leftIcon={<Phone size={16} />}
                 placeholder="51 9 9999-0000"
                 value={form.whatsapp}
-                onChange={(e) => set('whatsapp', e.target.value)}
+                onChange={handleWhatsappChange}
+                error={!!whatsappErro}
+                errorId={`${uid}-whats-error`}
                 disabled={isPending}
               />
+              <ErrorMessage id={`${uid}-whats-error`}>{whatsappErro}</ErrorMessage>
             </div>
             <div>
               <Label htmlFor={`${uid}-insta`}>Instagram</Label>

@@ -93,6 +93,15 @@ export const formatarTelefone = (telefone) => {
   return n.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3');
 };
 
+// Mesma regra já usada em alunoSchema.telefone (src/lib/validation.js):
+// aceita 10 dígitos (fixo + DDD) ou 11 (celular + DDD), ignorando qualquer
+// formatação/máscara já presente no valor.
+export const validarTelefone = (telefone) => {
+  if (typeof telefone !== 'string') return false;
+  const digitos = telefone.replace(/\D/g, '');
+  return digitos.length === 10 || digitos.length === 11;
+};
+
 export const coresStatus = {
   pago:     { bg: 'bg-success-soft', text: 'text-success' },
   pendente: { bg: 'bg-warning-soft', text: 'text-warning' },
