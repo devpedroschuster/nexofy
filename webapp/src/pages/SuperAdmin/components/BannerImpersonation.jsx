@@ -43,12 +43,12 @@ export default function BannerImpersonation() {
     <div
       role="alert"
       aria-live="polite"
-      className="fixed top-0 inset-x-0 z-[200] flex items-center justify-between gap-3 px-4 py-2 bg-warning text-warning-foreground shadow-lg"
+      className="fixed top-0 inset-x-0 z-[200] flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 px-4 py-2 bg-warning text-warning-foreground shadow-lg"
     >
       {/* Ícone + texto */}
       <div className="flex items-center gap-2 min-w-0">
         <Eye size={16} className="shrink-0 opacity-80" />
-        <p className="text-sm font-bold truncate">
+        <p className="text-sm font-bold">
           Visualizando como admin de{' '}
           <span className="font-black">{estudioAtivo?.nome ?? 'estúdio'}</span>
         </p>

@@ -107,10 +107,28 @@ async function criarEstudio({ nome, slug, adminEmail, adminNome, whatsapp, insta
   return data;
 }
 
+/**
+ * Verifica se um slug já está em uso por outro estúdio — usado para dar
+ * feedback em tempo real no formulário de criação, antes do submit (a
+ * Edge Function `criar-estudio` já valida unicidade no backend; isto é
+ * só uma checagem antecipada de UX, não substitui a validação server-side).
+ */
+async function verificarSlugDisponivel(slug) {
+  const { data, error } = await supabase
+    .from('estudios')
+    .select('id')
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (error) throw error;
+  return !data;
+}
+
 export const superAdminService = {
   listarEstudios,
   metricasGlobais,
   saudeSistema,
   alterarStatusEstudio,
   criarEstudio,
+  verificarSlugDisponivel,
 };

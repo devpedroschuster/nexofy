@@ -503,7 +503,7 @@ export default function Financeiro() {
   }, [alunosFiltrados]);
 
   return (
-    <div className="p-8 space-y-8 animate-in fade-in max-w-7xl mx-auto">
+    <div className="p-6 md:p-8 space-y-8 animate-in fade-in max-w-7xl mx-auto">
       {/* Header com Ações */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -512,7 +512,7 @@ export default function Financeiro() {
           </h1>
           <p className="text-muted-foreground mt-1">Gestão de mensalidades e repasses profissionais.</p>
         </div>
-        <div className="flex gap-2 w-full md:w-auto">
+        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
           <Button
             variant="secondary"
             onClick={handleAbrirGerarMensalidades}
