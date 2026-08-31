@@ -72,7 +72,7 @@ function MenuAcoes({ estudio, onSuspender, onReativar, onAcessar, acessando, ace
         onClick={() => setAberto((v) => !v)}
         disabled={acessando}
         className="p-2 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-40"
-        aria-label="Acoes"
+        aria-label="Ações"
       >
         {acessando
           ? <Loader2 size={18} className="animate-spin" />
@@ -198,6 +198,52 @@ function SkeletonLinha() {
   );
 }
 
+function CardEstudioMobile({ estudio, onSuspender, onReativar, onAcessar, acessando, acessarDesabilitado }) {
+  const ativo = estudio.status !== 'suspenso';
+
+  return (
+    <div className="rounded-2xl border border-border bg-card shadow-card p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-xl bg-primary-soft flex items-center justify-center shrink-0">
+            <span className="text-primary font-black text-sm">{inicial(estudio)}</span>
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-sm text-foreground truncate">{nomeExibicao(estudio)}</p>
+            <p className="text-xs text-muted-foreground font-mono truncate">{estudio.slug ?? '—'}</p>
+          </div>
+        </div>
+        <MenuAcoes
+          estudio={estudio}
+          onSuspender={onSuspender}
+          onReativar={onReativar}
+          onAcessar={onAcessar}
+          acessando={acessando}
+          acessarDesabilitado={acessarDesabilitado}
+        />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <Users size={13} /> {contagem(estudio.total_alunos)} alunos
+        </span>
+        <span className="flex items-center gap-1">
+          <GraduationCap size={13} /> {contagem(estudio.total_professores)} professores
+        </span>
+        <span className="flex items-center gap-1">
+          <Calendar size={13} /> {formatarData(estudio.criado_em)}
+        </span>
+      </div>
+
+      <div className="mt-3">
+        <Badge tone={ativo ? 'success' : 'warning'} variant="soft">
+          {ativo ? 'Ativo' : 'Suspenso'}
+        </Badge>
+      </div>
+    </div>
+  );
+}
+
 export default function TabelaEstudios({ busca }) {
   const qc       = useQueryClient();
   const navigate = useNavigate();
@@ -233,7 +279,7 @@ export default function TabelaEstudios({ busca }) {
   const { mutate: alterarStatus, isPending: isAlterando } = useMutation({
     mutationFn: ({ id, status }) => superAdminService.alterarStatusEstudio(id, status),
     onSuccess: (_, { status }) => {
-      showToast.success(status === 'suspenso' ? 'Estudio suspenso.' : 'Estudio reativado.');
+      showToast.success(status === 'suspenso' ? 'Estúdio suspenso.' : 'Estúdio reativado.');
       qc.invalidateQueries({ queryKey: ['super-admin'] });
     },
     onError:   (err) => showToast.error(err.message || 'Erro ao alterar status.'),
@@ -253,8 +299,8 @@ export default function TabelaEstudios({ busca }) {
     } catch (err) {
       showToast.error(
         isErroAcessoNegado(err)
-          ? 'Apenas super_admins podem usar esta funcao.'
-          : `Erro ao acessar estudio: ${err?.message || 'tente novamente.'}`
+          ? 'Apenas super_admins podem usar esta função.'
+          : `Erro ao acessar estúdio: ${err?.message || 'tente novamente.'}`
       );
     } finally {
       setAcessandoId(null);
@@ -266,17 +312,18 @@ export default function TabelaEstudios({ busca }) {
 
   return (
     <>
-      <div className="rounded-3xl border border-border bg-card shadow-card overflow-hidden">
+      {/* DESKTOP: tabela */}
+      <div className="hidden md:block rounded-3xl border border-border bg-card shadow-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px]">
             <thead>
               <tr className="border-b border-border bg-muted/40">
-                <TH className="pl-6 pr-4 text-left">Estudio</TH>
+                <TH className="pl-6 pr-4 text-left">Estúdio</TH>
                 <TH className="px-4 text-center">Alunos</TH>
                 <TH className="px-4 text-center">Professores</TH>
                 <TH className="px-4 text-left">Criado em</TH>
                 <TH className="px-4 text-left">Status</TH>
-                <TH className="pr-6 pl-4 text-right">Acoes</TH>
+                <TH className="pr-6 pl-4 text-right">Ações</TH>
               </tr>
             </thead>
 
@@ -289,11 +336,11 @@ export default function TabelaEstudios({ busca }) {
                     <td colSpan={6} className="py-12">
                       <EmptyState
                         icon={<Building2 size={28} />}
-                        title={buscaDebounced ? 'Nenhum estudio encontrado' : 'Nenhum estudio cadastrado'}
+                        title={buscaDebounced ? 'Nenhum estúdio encontrado' : 'Nenhum estúdio cadastrado'}
                         description={
                           buscaDebounced
                             ? `Nenhum resultado para "${buscaDebounced}".`
-                            : 'Crie o primeiro estudio usando o botao acima.'
+                            : 'Crie o primeiro estúdio usando o botão acima.'
                         }
                         className="border-0 bg-transparent"
                       />
@@ -322,7 +369,7 @@ export default function TabelaEstudios({ busca }) {
         {!isLoading && estudios.length > 0 && (
           <div className="px-6 py-3 border-t border-border bg-muted/20 flex items-center justify-between gap-4 flex-wrap">
             <p className="text-xs text-muted-foreground font-medium">
-              {totalCount} estudio{totalCount !== 1 ? 's' : ''}
+              {totalCount} estúdio{totalCount !== 1 ? 's' : ''}
               {buscaDebounced && ` encontrado${totalCount !== 1 ? 's' : ''} para "${buscaDebounced}"`}
             </p>
 
@@ -353,6 +400,72 @@ export default function TabelaEstudios({ busca }) {
         )}
       </div>
 
+      {/* MOBILE: cards */}
+      <div className="md:hidden space-y-3">
+        {isLoading
+          ? [...Array(3)].map((_, i) => (
+              <div key={i} className="rounded-2xl border border-border bg-card p-4 space-y-3">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-full" />
+              </div>
+            ))
+          : estudios.length === 0
+          ? (
+            <EmptyState
+              icon={<Building2 size={28} />}
+              title={buscaDebounced ? 'Nenhum estúdio encontrado' : 'Nenhum estúdio cadastrado'}
+              description={
+                buscaDebounced
+                  ? `Nenhum resultado para "${buscaDebounced}".`
+                  : 'Crie o primeiro estúdio usando o botão acima.'
+              }
+            />
+          )
+          : estudios.map((e) => (
+            <CardEstudioMobile
+              key={e.id}
+              estudio={e}
+              onSuspender={(est) => setConfirmacao({ estudio: est, acao: 'suspender' })}
+              onReativar={(est)  => setConfirmacao({ estudio: est, acao: 'reativar'  })}
+              onAcessar={handleAcessar}
+              acessando={acessandoId === e.id && impersonando}
+              acessarDesabilitado={impersonando}
+            />
+          ))
+        }
+
+        {!isLoading && estudios.length > 0 && (
+          <p className="text-xs text-muted-foreground font-medium px-1">
+            {totalCount} estúdio{totalCount !== 1 ? 's' : ''}
+            {buscaDebounced && ` encontrado${totalCount !== 1 ? 's' : ''} para "${buscaDebounced}"`}
+          </p>
+        )}
+
+        {!isLoading && totalPaginas > 1 && (
+          <div className="flex items-center justify-center gap-3 pt-1">
+            <button
+              className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+              disabled={pagina === 0 || isPlaceholderData}
+              onClick={() => setPagina((p) => Math.max(0, p - 1))}
+              aria-label="Pagina anterior"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-xs font-bold text-foreground tabular-nums">
+              {pagina + 1} / {totalPaginas}
+            </span>
+            <button
+              className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+              disabled={pagina + 1 >= totalPaginas || isPlaceholderData}
+              onClick={() => setPagina((p) => p + 1)}
+              aria-label="Proxima pagina"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        )}
+      </div>
+
       <ModalConfirmacao
         aberto={!!confirmacao}
         fechar={() => setConfirmacao(null)}
@@ -362,11 +475,11 @@ export default function TabelaEstudios({ busca }) {
         })}
         loading={isAlterando}
         tipo={confirmacao?.acao === 'suspender' ? 'warning' : 'success'}
-        titulo={confirmacao?.acao === 'suspender' ? 'Suspender estudio?' : 'Reativar estudio?'}
+        titulo={confirmacao?.acao === 'suspender' ? 'Suspender estúdio?' : 'Reativar estúdio?'}
         mensagem={
           confirmacao?.acao === 'suspender'
-            ? `O estudio "${confirmacao?.estudio?.nome}" perdera acesso ao sistema.`
-            : `O estudio "${confirmacao?.estudio?.nome}" voltara a ter acesso normalmente.`
+            ? `O estúdio "${confirmacao?.estudio?.nome}" perderá acesso ao sistema.`
+            : `O estúdio "${confirmacao?.estudio?.nome}" voltará a ter acesso normalmente.`
         }
         textoConfirmar={confirmacao?.acao === 'suspender' ? 'Suspender' : 'Reativar'}
       />
