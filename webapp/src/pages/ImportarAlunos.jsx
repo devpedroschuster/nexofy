@@ -57,7 +57,7 @@ export default function ImportarAlunos() {
     try {
       const XLSX = await import('xlsx');
       const buffer = await arquivo.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, dateNF: 'dd/mm/yyyy' });
       const primeiraAba = workbook.Sheets[workbook.SheetNames[0]];
       const linhas = XLSX.utils.sheet_to_json(primeiraAba, { header: 1, defval: '' });
 

@@ -71,24 +71,38 @@ export function sugerirCampoPorCabecalho(cabecalho) {
 // - vazio (após trim) vira null, não '' — consistente com o cadastro
 //   manual (NovoAluno.jsx usa `|| null` antes de chamar alunosService.criar)
 // - uma célula de data real do xlsx (Date, graças a cellDates: true no
-//   XLSX.read) vira uma string ISO (YYYY-MM-DD), sem depender de fuso
-//   horário do navegador (usa os componentes locais do Date, não
-//   toISOString(), que converteria pra UTC e poderia mudar o dia)
+//   XLSX.read) SÓ vira string ISO (YYYY-MM-DD) quando o campo mapeado é
+//   data_nascimento — sem depender de fuso horário do navegador (usa os
+//   componentes locais do Date, não toISOString(), que converteria pra
+//   UTC e poderia mudar o dia). Pra qualquer outro campo, um Date que
+//   "vazou" aqui (o parser fuzzy-date do SheetJS pode interpretar uma
+//   célula tipo "1/2" — ex.: número de apto — como data mesmo numa coluna
+//   que não é de data) volta como texto dd/mm/yyyy, não ISO — ISO seria
+//   ainda mais confuso num campo que não é uma data.
 // - pra data_nascimento especificamente, um texto no formato dd/mm/yyyy
 //   ou dd-mm-yyyy (comum em planilha brasileira / CSV exportado do Excel
 //   em pt-BR) é convertido pra ISO ANTES de qualquer validação — sem
 //   isso, o construtor Date do JS interpreta "01/05/1990" como
 //   MM/DD/YYYY (5 de janeiro), não DD/MM/YYYY (1º de maio) como a
 //   planilha realmente quer dizer. Essa é a única correção de formato
-//   feita aqui — datas em outros formatos ambíguos continuam como
-//   estavam, e o cadastro manual tem exatamente o mesmo comportamento
-//   pra qualquer formato que essa regex não reconheça.
+//   feita aqui pra texto puro — datas em outros formatos ambíguos
+//   continuam como estavam, e o cadastro manual tem exatamente o mesmo
+//   comportamento pra qualquer formato que essa regex não reconheça.
+//   (Pra células que o XLSX.read já converteu em Date, quem evita a
+//   ambiguidade MM/DD vs DD/MM é a opção dateNF: 'dd/mm/yyyy' passada no
+//   XLSX.read em ImportarAlunos.jsx, não este regex.)
 export function normalizarValorCampo(chave, valor) {
   if (valor instanceof Date) {
     const ano = valor.getFullYear();
     const mes = String(valor.getMonth() + 1).padStart(2, '0');
     const dia = String(valor.getDate()).padStart(2, '0');
-    return `${ano}-${mes}-${dia}`;
+    // Só converte pra ISO quando o campo É uma data de verdade — pra
+    // qualquer outro campo, o SheetJS pode ter "adivinhado" errado que uma
+    // célula tipo "1/2" (ex.: número de apto) era uma data; nesse caso
+    // devolve o texto no formato dd/mm/yyyy (mais parecido com o que
+    // provavelmente estava na planilha) em vez do ISO, que faria menos
+    // sentido ainda pra um campo que não é uma data.
+    return chave === 'data_nascimento' ? `${ano}-${mes}-${dia}` : `${dia}/${mes}/${ano}`;
   }
 
   const texto = String(valor ?? '').trim();

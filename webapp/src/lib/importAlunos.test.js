@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import * as XLSX from 'xlsx';
 import {
   normalizarTexto,
   sugerirCampoPorCabecalho,
@@ -84,6 +85,50 @@ describe('linhasParaObjetos', () => {
     const mapeamento = { 0: 'nome_completo', 1: 'email' };
     const resultado = linhasParaObjetos(linhasCruas, mapeamento);
     expect(resultado).toHaveLength(2);
+  });
+});
+
+// Regressão (2ª rodada do review de PED-106): o teste de normalizarValorCampo
+// isolado, alimentado com uma string construída à mão, nunca exercitava o
+// caminho real — com cellDates: true, o próprio SheetJS já converte uma
+// célula de CSV com data ambígua em um Date ANTES de normalizarValorCampo
+// rodar, usando a heurística fuzzy-date dele (que por padrão assume
+// MM/DD/YYYY, não o DD/MM/YYYY brasileiro). Esse teste roda o pipeline de
+// verdade — XLSX.read -> sheet_to_json -> linhasParaObjetos — igual ao que
+// ImportarAlunos.jsx faz de fato, pra garantir que a combinação
+// cellDates + dateNF realmente resolve a ambiguidade na origem.
+describe('pipeline real: CSV com data ambígua via XLSX.read', () => {
+  it('interpreta 01/05/1990 como 1º de maio (dd/mm/yyyy), não 5 de janeiro', () => {
+    const csv = 'Nome,Data de nascimento\nMaria,01/05/1990\n';
+    const buffer = new TextEncoder().encode(csv).buffer;
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, dateNF: 'dd/mm/yyyy' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const linhas = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    const objetos = linhasParaObjetos(linhas, { 0: 'nome_completo', 1: 'data_nascimento' });
+    expect(objetos[0].data_nascimento).toBe('1990-05-01');
+  });
+
+  it('interpreta 03/02/2000 como 3 de fevereiro (dd/mm/yyyy), não 2 de março', () => {
+    const csv = 'Nome,Data de nascimento\nJoão,03/02/2000\n';
+    const buffer = new TextEncoder().encode(csv).buffer;
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, dateNF: 'dd/mm/yyyy' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const linhas = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    const objetos = linhasParaObjetos(linhas, { 0: 'nome_completo', 1: 'data_nascimento' });
+    expect(objetos[0].data_nascimento).toBe('2000-02-03');
+  });
+
+  it('não transforma um número de casa tipo "1/2" num campo não-data em data ISO', () => {
+    // "1/2" numa coluna de número de casa pode ser lido pelo SheetJS como
+    // uma data fuzzy (ex.: 1º de fevereiro) mesmo não sendo uma coluna de
+    // data — o campo não deve virar um ISO enganoso nesse caso.
+    const csv = 'Nome,Numero\nMaria,1/2\n';
+    const buffer = new TextEncoder().encode(csv).buffer;
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, dateNF: 'dd/mm/yyyy' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const linhas = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    const objetos = linhasParaObjetos(linhas, { 0: 'nome_completo', 1: 'numero' });
+    expect(objetos[0].numero).not.toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });
 
