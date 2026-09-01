@@ -4,12 +4,24 @@ import { Building2, Link2, Phone, Instagram, CheckCircle, XCircle, Loader2 } fro
 
 import { cadastroService } from '../services/cadastroService';
 import { showToast } from '../components/shared/Toast';
+import { formatarTelefone } from '../lib/utils';
 import Input, { Label } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 
 const SLUG_RE = /^[a-z0-9-]{3,50}$/;
 const WHATSAPP_RE = /^\d{10,15}$/; // mesmo padrão de ConfiguracoesEstudio.jsx
 const DEBOUNCE_MS = 400;
+
+// O campo aceita tanto número local (10-11 dígitos, DDD+número) quanto com
+// DDI (12-13 dígitos, ex: 55 51 98286-0683) — WHATSAPP_RE já permitia os
+// dois formatos, só faltava a máscara visual. Reaproveita formatarTelefone
+// (mesma usada em SuperAdminNovoEstudio.jsx) pro miolo DDD+número; com DDI,
+// prefixa "+CC " antes dele.
+function formatarWhatsappEstudio(valor) {
+  const digitos = valor.replace(/\D/g, '').slice(0, 13);
+  if (digitos.length <= 11) return formatarTelefone(digitos);
+  return `+${digitos.slice(0, 2)} ${formatarTelefone(digitos.slice(2))}`;
+}
 
 function slugificar(texto) {
   return texto
@@ -232,7 +244,7 @@ export default function CadastroEstudio() {
                   leftIcon={<Phone size={16} />}
                   placeholder="51 9 9999-0000"
                   value={form.whatsapp}
-                  onChange={(e) => set('whatsapp', e.target.value)}
+                  onChange={(e) => set('whatsapp', formatarWhatsappEstudio(e.target.value))}
                   disabled={loading}
                   error={form.whatsapp.length > 0 && !whatsappValido}
                 />
