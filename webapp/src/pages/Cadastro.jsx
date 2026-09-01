@@ -17,8 +17,10 @@ import { Mail, Lock, User, ArrowRight, Sparkles, MailCheck, ShieldCheck } from '
 import { supabase } from '../lib/supabase';
 import { showToast } from '../components/shared/Toast';
 import { REGEX, LIMITES, LINKS } from '../lib/constants';
+import { senhaAtendeRequisitosMinimos } from '../lib/security';
 import Input, { ErrorMessage } from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import IndicadorForcaSenha from '../components/shared/IndicadorForcaSenha';
 
 // FIX: removido NOME_MAX local (=120) divergente de LIMITES.NOME_MAX (=100).
 // Antes: front permitia até 120 chars enquanto o backend/DB assume 100 como
@@ -60,6 +62,10 @@ export default function Cadastro() {
 
     if (senha.length < LIMITES.SENHA_MIN) {
       novosErros.senha = `A senha deve ter no mínimo ${LIMITES.SENHA_MIN} caracteres.`;
+    } else if (!senhaAtendeRequisitosMinimos(senha)) {
+      // Mesma exigência já usada em RedefinirSenha.jsx: comprimento mínimo
+      // sozinho não bastava — exige também maiúscula, número ou símbolo.
+      novosErros.senha = 'Senha fraca. Adicione uma letra maiúscula, um número ou um símbolo.';
     }
 
     if (!aceitaTermos) {
@@ -233,7 +239,9 @@ export default function Cadastro() {
                     errorId="erro-senha"
                     onChange={(e) => { setSenha(e.target.value); limparErro('senha'); }}
                   />
-                  <ErrorMessage id="erro-senha">{erros.senha}</ErrorMessage>
+                  {erros.senha
+                    ? <ErrorMessage id="erro-senha">{erros.senha}</ErrorMessage>
+                    : <IndicadorForcaSenha senha={senha} />}
                 </div>
               </div>
 
