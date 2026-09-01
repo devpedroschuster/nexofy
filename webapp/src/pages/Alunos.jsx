@@ -362,7 +362,7 @@ export default function Alunos() {
                     {colunasVisiveis.map((coluna) => (
                       <th
                         key={coluna.id}
-                        className="px-6 md:px-8 py-4 md:py-6 text-left"
+                        className="px-4 py-3 lg:px-8 lg:py-6 text-left"
                       >
                         {coluna.column_key === 'vencimento' ? (
                           <span className="flex items-center gap-1.5">
@@ -373,7 +373,7 @@ export default function Alunos() {
                         )}
                       </th>
                     ))}
-                    <th className="px-6 md:px-8 py-4 md:py-6 text-right">Ações</th>
+                    <th className="px-4 py-3 lg:px-8 lg:py-6 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -381,12 +381,12 @@ export default function Alunos() {
                     return (
                       <tr key={aluno.id} className="group hover:bg-subtle transition-colors">
                         {colunasVisiveis.map((coluna) => (
-                          <td key={coluna.id} className="px-6 md:px-8 py-4 md:py-6">
+                          <td key={coluna.id} className="px-4 py-3 lg:px-8 lg:py-6">
                             {renderCelulaAluno(coluna, aluno, navigate)}
                           </td>
                         ))}
 
-                        <td className="px-6 md:px-8 py-4 md:py-6 text-right">
+                        <td className="px-4 py-3 lg:px-8 lg:py-6 text-right">
                           <div className="flex items-center justify-end gap-2 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity">
                             <button onClick={() => navigate(`/alunos/${aluno.id}`)} className="p-2 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary-soft transition-colors" title="Ver Perfil">
                               <Eye size={16} />
