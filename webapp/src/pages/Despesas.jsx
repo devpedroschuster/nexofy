@@ -68,6 +68,17 @@ export default function Despesas() {
   const modalNova    = useModal();
   const modalExcluir = useModal();
 
+  const despesasFiltradas = despesas.filter(d => {
+    const matchCategoria = filtros.categoria === 'todas' || d.categoria === filtros.categoria;
+    let matchStatus = true;
+    if (filtros.status === 'pendente') {
+      matchStatus = d.status === 'pendente' || d.status === 'atrasado';
+    } else if (filtros.status !== 'todos') {
+      matchStatus = d.status === filtros.status;
+    }
+    return matchCategoria && matchStatus;
+  });
+
   // CR2 FIX: guarda contra corrida (respostas fora de ordem) + espera o tenant
   useEffect(() => {
     if (!idEfetivo) return;
@@ -264,17 +275,6 @@ export default function Despesas() {
       showToast.error("Erro ao gerar o relatório.");
     }
   }
-
-  const despesasFiltradas = despesas.filter(d => {
-    const matchCategoria = filtros.categoria === 'todas' || d.categoria === filtros.categoria;
-    let matchStatus = true;
-    if (filtros.status === 'pendente') {
-      matchStatus = d.status === 'pendente' || d.status === 'atrasado';
-    } else if (filtros.status !== 'todos') {
-      matchStatus = d.status === filtros.status;
-    }
-    return matchCategoria && matchStatus;
-  });
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in duration-500">

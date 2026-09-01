@@ -37,6 +37,7 @@ export default defineConfig([
       // ignoreRestSiblings: permite o idioma `const { a, b, ...rest } = obj`
       // quando `a`/`b` só existem para ficarem de fora de `rest`.
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', ignoreRestSiblings: true }],
+      'no-use-before-define': ['error', { functions: false, classes: true, variables: true }],
       // Sem isso, no-unused-vars não reconhece uma variável usada apenas
       // como tag JSX (ex.: const { Icon } = ...; <Icon />) como "usada".
       'react/jsx-uses-vars': 'error',
