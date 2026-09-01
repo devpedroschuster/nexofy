@@ -34,3 +34,6 @@ out/
 ANOTACOES.xlsx
 PLANOS/
 repomix-output.xml
+
+.agents
+.claude
