@@ -25,7 +25,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   Building2, Users, GraduationCap, MoreHorizontal,
-  Pause, Play, Eye, Calendar, Loader2, ChevronLeft, ChevronRight,
+  Pause, Play, Eye, Calendar, Clock, Loader2, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
@@ -36,6 +36,7 @@ import { superAdminService } from '../../../services/superAdminService';
 import { useImpersonation, isErroAcessoNegado } from '../../../context/ImpersonationContext';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { formatarData } from '../../../lib/utils';
+import { diasRestantesTrial } from '../../../lib/trial';
 
 const PAGE_SIZE = 50;
 
@@ -61,8 +62,16 @@ function contagem(valor) {
   return Number(valor ?? 0).toLocaleString('pt-BR');
 }
 
+// Rótulo + tom da badge de trial: sem trial (isento), expirado, ou dias restantes.
+function rotuloTrial(estudio) {
+  const dias = diasRestantesTrial(estudio.trial_ends_at);
+  if (dias === null) return { texto: 'Sem trial', tone: 'neutral' };
+  if (dias < 0) return { texto: 'Trial expirado', tone: 'destructive' };
+  return { texto: `${dias} dia${dias === 1 ? '' : 's'}`, tone: dias <= 3 ? 'warning' : 'info' };
+}
+
 // Menu de acoes por linha
-function MenuAcoes({ estudio, onSuspender, onReativar, onAcessar, acessando, acessarDesabilitado }) {
+function MenuAcoes({ estudio, onSuspender, onReativar, onRemoverTrial, onAcessar, acessando, acessarDesabilitado }) {
   const [aberto, setAberto] = useState(false);
   const ativo = estudio.status !== 'suspenso';
 
@@ -94,6 +103,15 @@ function MenuAcoes({ estudio, onSuspender, onReativar, onAcessar, acessando, ace
 
             <div className="my-1 border-t border-border" />
 
+            {estudio.trial_ends_at && (
+              <button
+                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-bold text-info hover:bg-info-soft transition-colors"
+                onClick={() => { setAberto(false); onRemoverTrial(estudio); }}
+              >
+                <Clock size={15} /> Remover trial
+              </button>
+            )}
+
             {ativo ? (
               <button
                 className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-bold text-warning hover:bg-warning-soft transition-colors"
@@ -116,7 +134,7 @@ function MenuAcoes({ estudio, onSuspender, onReativar, onAcessar, acessando, ace
   );
 }
 
-function LinhaEstudio({ estudio, onSuspender, onReativar, onAcessar, acessando, acessarDesabilitado }) {
+function LinhaEstudio({ estudio, onSuspender, onReativar, onRemoverTrial, onAcessar, acessando, acessarDesabilitado }) {
   const ativo = estudio.status !== 'suspenso';
 
   return (
@@ -162,11 +180,19 @@ function LinhaEstudio({ estudio, onSuspender, onReativar, onAcessar, acessando, 
         </Badge>
       </td>
 
+      <td className="py-4 px-4">
+        {(() => {
+          const { texto, tone } = rotuloTrial(estudio);
+          return <Badge tone={tone} variant="soft">{texto}</Badge>;
+        })()}
+      </td>
+
       <td className="py-4 pr-6 pl-4 text-right">
         <MenuAcoes
           estudio={estudio}
           onSuspender={onSuspender}
           onReativar={onReativar}
+          onRemoverTrial={onRemoverTrial}
           onAcessar={onAcessar}
           acessando={acessando}
           acessarDesabilitado={acessarDesabilitado}
@@ -188,7 +214,7 @@ function SkeletonLinha() {
           </div>
         </div>
       </td>
-      {[...Array(4)].map((_, i) => (
+      {[...Array(5)].map((_, i) => (
         <td key={i} className="py-4 px-4">
           <Skeleton className="h-3.5 w-12 mx-auto" />
         </td>
@@ -198,7 +224,7 @@ function SkeletonLinha() {
   );
 }
 
-function CardEstudioMobile({ estudio, onSuspender, onReativar, onAcessar, acessando, acessarDesabilitado }) {
+function CardEstudioMobile({ estudio, onSuspender, onReativar, onRemoverTrial, onAcessar, acessando, acessarDesabilitado }) {
   const ativo = estudio.status !== 'suspenso';
 
   return (
@@ -217,6 +243,7 @@ function CardEstudioMobile({ estudio, onSuspender, onReativar, onAcessar, acessa
           estudio={estudio}
           onSuspender={onSuspender}
           onReativar={onReativar}
+          onRemoverTrial={onRemoverTrial}
           onAcessar={onAcessar}
           acessando={acessando}
           acessarDesabilitado={acessarDesabilitado}
@@ -235,10 +262,14 @@ function CardEstudioMobile({ estudio, onSuspender, onReativar, onAcessar, acessa
         </span>
       </div>
 
-      <div className="mt-3">
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
         <Badge tone={ativo ? 'success' : 'warning'} variant="soft">
           {ativo ? 'Ativo' : 'Suspenso'}
         </Badge>
+        {(() => {
+          const { texto, tone } = rotuloTrial(estudio);
+          return <Badge tone={tone} variant="soft">{texto}</Badge>;
+        })()}
       </div>
     </div>
   );
@@ -286,6 +317,16 @@ export default function TabelaEstudios({ busca }) {
     onSettled: ()    => setConfirmacao(null),
   });
 
+  const { mutate: removerTrial, isPending: isRemovendoTrial } = useMutation({
+    mutationFn: ({ id }) => superAdminService.removerTrialEstudio(id),
+    onSuccess: () => {
+      showToast.success('Trial removido — estúdio sem prazo.');
+      qc.invalidateQueries({ queryKey: ['super-admin'] });
+    },
+    onError:   (err) => showToast.error(err.message || 'Erro ao remover trial.'),
+    onSettled: ()    => setConfirmacao(null),
+  });
+
   async function handleAcessar(estudio) {
     // Defesa em profundidade: mesmo com o botão desabilitado durante
     // `impersonando`, evita corrida se o clique já estava em processamento
@@ -323,6 +364,7 @@ export default function TabelaEstudios({ busca }) {
                 <TH className="px-4 text-center">Professores</TH>
                 <TH className="px-4 text-left">Criado em</TH>
                 <TH className="px-4 text-left">Status</TH>
+                <TH className="px-4 text-left">Trial</TH>
                 <TH className="pr-6 pl-4 text-right">Ações</TH>
               </tr>
             </thead>
@@ -333,7 +375,7 @@ export default function TabelaEstudios({ busca }) {
                 : estudios.length === 0
                 ? (
                   <tr>
-                    <td colSpan={6} className="py-12">
+                    <td colSpan={7} className="py-12">
                       <EmptyState
                         icon={<Building2 size={28} />}
                         title={buscaDebounced ? 'Nenhum estúdio encontrado' : 'Nenhum estúdio cadastrado'}
@@ -353,6 +395,7 @@ export default function TabelaEstudios({ busca }) {
                     estudio={e}
                     onSuspender={(est) => setConfirmacao({ estudio: est, acao: 'suspender' })}
                     onReativar={(est)  => setConfirmacao({ estudio: est, acao: 'reativar'  })}
+                    onRemoverTrial={(est) => setConfirmacao({ estudio: est, acao: 'removerTrial' })}
                     onAcessar={handleAcessar}
                     acessando={acessandoId === e.id && impersonando}
                     // FIX (CR-1): desabilita "Acessar" em TODAS as linhas
@@ -427,6 +470,7 @@ export default function TabelaEstudios({ busca }) {
               estudio={e}
               onSuspender={(est) => setConfirmacao({ estudio: est, acao: 'suspender' })}
               onReativar={(est)  => setConfirmacao({ estudio: est, acao: 'reativar'  })}
+              onRemoverTrial={(est) => setConfirmacao({ estudio: est, acao: 'removerTrial' })}
               onAcessar={handleAcessar}
               acessando={acessandoId === e.id && impersonando}
               acessarDesabilitado={impersonando}
@@ -469,19 +513,39 @@ export default function TabelaEstudios({ busca }) {
       <ModalConfirmacao
         aberto={!!confirmacao}
         fechar={() => setConfirmacao(null)}
-        onConfirm={() => alterarStatus({
-          id:     confirmacao.estudio.id,
-          status: confirmacao.acao === 'suspender' ? 'suspenso' : 'ativo',
-        })}
-        loading={isAlterando}
-        tipo={confirmacao?.acao === 'suspender' ? 'warning' : 'success'}
-        titulo={confirmacao?.acao === 'suspender' ? 'Suspender estúdio?' : 'Reativar estúdio?'}
+        onConfirm={() => {
+          if (confirmacao.acao === 'removerTrial') {
+            removerTrial({ id: confirmacao.estudio.id });
+          } else {
+            alterarStatus({
+              id:     confirmacao.estudio.id,
+              status: confirmacao.acao === 'suspender' ? 'suspenso' : 'ativo',
+            });
+          }
+        }}
+        loading={isAlterando || isRemovendoTrial}
+        tipo={
+          confirmacao?.acao === 'suspender'    ? 'warning' :
+          confirmacao?.acao === 'removerTrial' ? 'info'    :
+          'success'
+        }
+        titulo={
+          confirmacao?.acao === 'suspender'    ? 'Suspender estúdio?' :
+          confirmacao?.acao === 'removerTrial' ? 'Remover trial?'     :
+          'Reativar estúdio?'
+        }
         mensagem={
           confirmacao?.acao === 'suspender'
             ? `O estúdio "${confirmacao?.estudio?.nome}" perderá acesso ao sistema.`
+            : confirmacao?.acao === 'removerTrial'
+            ? `O estúdio "${confirmacao?.estudio?.nome}" deixa de ter prazo de trial — acesso liberado indefinidamente até você tomar outra ação.`
             : `O estúdio "${confirmacao?.estudio?.nome}" voltará a ter acesso normalmente.`
         }
-        textoConfirmar={confirmacao?.acao === 'suspender' ? 'Suspender' : 'Reativar'}
+        textoConfirmar={
+          confirmacao?.acao === 'suspender'    ? 'Suspender'     :
+          confirmacao?.acao === 'removerTrial' ? 'Remover trial' :
+          'Reativar'
+        }
       />
     </>
   );

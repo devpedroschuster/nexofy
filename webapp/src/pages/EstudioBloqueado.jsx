@@ -15,6 +15,7 @@ import { AlertTriangle, LogOut, Mail } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import Button from '../components/ui/Button';
+import { chaveMensagemBloqueio } from '../lib/trial';
 
 const MENSAGENS_POR_STATUS = {
   inativo: {
@@ -32,6 +33,11 @@ const MENSAGENS_POR_STATUS = {
     descricao:
       'Este estúdio foi encerrado e não está mais disponível. Entre em contato com o suporte se precisar de mais informações.',
   },
+  trial_expirado: {
+    titulo: 'Período de teste encerrado',
+    descricao:
+      'Seus 14 dias de teste grátis chegaram ao fim. Entre em contato com o suporte para continuar usando a Nexofy.',
+  },
 };
 
 const MENSAGEM_PADRAO = {
@@ -43,9 +49,9 @@ const MENSAGEM_PADRAO = {
 export default function EstudioBloqueado() {
   const { estudioStatusInfo, nomeUsuario } = useAuth();
 
-  const status = estudioStatusInfo?.status;
   const nomeEstudio = estudioStatusInfo?.nome ?? 'seu estúdio';
-  const { titulo, descricao } = MENSAGENS_POR_STATUS[status] ?? MENSAGEM_PADRAO;
+  const chave = chaveMensagemBloqueio(estudioStatusInfo);
+  const { titulo, descricao } = MENSAGENS_POR_STATUS[chave] ?? MENSAGEM_PADRAO;
 
   async function handleSair() {
     await supabase.auth.signOut();

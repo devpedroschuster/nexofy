@@ -168,11 +168,16 @@ async function handleRequest(req: Request): Promise<Response> {
   }
 }
 
-// PED-68: modo batch, exclusivo do cron — itera todos os estúdios com
-// status='ativo' (mesma definição usada por verificar_status_estudio() /
-// estudioBloqueado no frontend) e gera as mensalidades de cada um,
-// isoladamente. Uma chamada manual/admin nunca cai aqui: ela sempre exige
-// estudioId (ver handleRequest acima), então só processa o próprio estúdio.
+// PED-68: modo batch, exclusivo do cron — itera todos os estúdios
+// "operacionais" (status='ativo' e sem trial expirado — mesma definição
+// usada por verificar_status_estudio() / estudioBloqueado no frontend,
+// atualizada na PED-105 pra incluir trial_ends_at) e gera as mensalidades
+// de cada um, isoladamente. Sem o filtro de trial_ends_at, um estúdio com
+// trial expirado (que já bloqueia login e uso do produto) continuaria
+// recebendo mensalidades geradas indefinidamente e ninguém no estúdio
+// conseguiria logar pra ver. Uma chamada manual/admin nunca cai aqui: ela
+// sempre exige estudioId (ver handleRequest acima), então só processa o
+// próprio estúdio.
 async function handleBatchTodosEstudios(mesParam: number | null, anoParam: number | null): Promise<Response> {
   if ((mesParam !== null && (mesParam < 1 || mesParam > 12))) {
     return response({ erro: 'mes deve estar entre 1 e 12.' }, 400)
@@ -190,10 +195,13 @@ async function handleBatchTodosEstudios(mesParam: number | null, anoParam: numbe
   const ano = anoParam ?? hoje.getFullYear()
   const mes = mesParam ?? (hoje.getMonth() + 1)
 
+  const agora = new Date().toISOString()
+
   const { data: estudios, error: errEstudios } = await supabase
     .from('estudios')
     .select('id')
     .eq('status', 'ativo')
+    .or(`trial_ends_at.is.null,trial_ends_at.gt.${agora}`)
     .returns<{ id: string }[]>()
 
   // Falha ao sequer listar os estúdios ativos é catastrófica pro lote

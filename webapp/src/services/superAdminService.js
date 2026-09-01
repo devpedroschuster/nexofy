@@ -87,6 +87,21 @@ async function alterarStatusEstudio(estudioId, novoStatus) {
 }
 
 /**
+ * Remove o prazo de trial de um estúdio (trial_ends_at = NULL) — alavanca
+ * manual do super_admin enquanto não existe cobrança automática (PED-115).
+ * Mesmo padrão de alterarStatusEstudio: update direto via RLS, que já
+ * libera super_admin pra alterar qualquer estúdio.
+ */
+async function removerTrialEstudio(estudioId) {
+  const { error } = await supabase
+    .from('estudios')
+    .update({ trial_ends_at: null })
+    .eq('id', estudioId);
+
+  if (error) throw error;
+}
+
+/**
  * Chama a Edge Function `criar-estudio`.
  * Retorna { estudio: { id, nome, slug }, admin: { auth_id, email, reutilizado } }
  */
@@ -129,6 +144,7 @@ export const superAdminService = {
   metricasGlobais,
   saudeSistema,
   alterarStatusEstudio,
+  removerTrialEstudio,
   criarEstudio,
   verificarSlugDisponivel,
 };
