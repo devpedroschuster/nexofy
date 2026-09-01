@@ -2,11 +2,16 @@ import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { presencaService } from '../../../services/presencaService';
 import { useAuth } from '../../../hooks/useAuth';
+import { useImpersonation } from '../../../context/ImpersonationContext';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { showToast } from '../../../components/shared/Toast';
 
 export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) {
   const { estudioId, sessao } = useAuth();
+  // FIX (PED-101): mesmo padrão de idEfetivo do restante do app — sem isso,
+  // a chamada/lista de presença nunca disparava durante impersonation.
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
   const [listaPresenca, setListaPresenca] = useState([]);
   const queryClient = useQueryClient();
   const [loadingLista, setLoadingLista] = useState(false);
@@ -24,14 +29,14 @@ export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) 
     let cancelado = false; // Bug #3: proteção contra unmount (memory leak)
 
     async function buscarLista() {
-      if (isOpen && aulaParaLista && dataListaDebounced && estudioId) {
+      if (isOpen && aulaParaLista && dataListaDebounced && idEfetivo) {
         setLoadingLista(true);
         setErroLista(null);
         try {
           const presencas = await presencaService.listarChamadaCompleta(
             aulaParaLista.id,
             dataListaDebounced,
-            estudioId
+            idEfetivo
           );
           if (!cancelado) {
             setListaPresenca(presencas || []);
@@ -51,7 +56,7 @@ export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) 
     return () => { cancelado = true; }; // cleanup: evita setState após desmonte
   // BUG #13 fix: sessao adicionada ao array de dependências — se a sessão
   // expirar/renovar com o modal aberto, o effect reexecuta com o userId atualizado.
-  }, [isOpen, aulaParaLista, dataListaDebounced, estudioId, refreshKey, sessao]);
+  }, [isOpen, aulaParaLista, dataListaDebounced, idEfetivo, refreshKey, sessao]);
 
   const invalidarTudo = () => {
     // BUG #6 fix: prefixo ['agenda'] cobre toda a árvore de cache da agenda,
@@ -76,7 +81,7 @@ export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) 
     if (alunoParaRemover === null) return;
     setRemovendoId(alunoParaRemover);
     try {
-      await presencaService.cancelarAgendamento(alunoParaRemover, estudioId);
+      await presencaService.cancelarAgendamento(alunoParaRemover, idEfetivo);
       showToast.success("Aluno removido da lista!");
       invalidarTudo();
     } catch (err) {
@@ -107,7 +112,7 @@ export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) 
           origem: aluno.tipo === 'fixo' ? 'fixo' : 'avulso',
         },
         tipoFalta,
-        estudioId,
+        idEfetivo,
         sessao?.user?.id
       );
       showToast.success("Falta informada.");
@@ -124,7 +129,7 @@ export function useListaPresenca(aulaParaLista, dataLista, isOpen, onAtualizar) 
     if (processandoFaltaId === aluno.id_relacao) return; // guard duplo-clique
     setProcessandoFaltaId(aluno.id_relacao);
     try {
-      await presencaService.removerFalta(aluno.id_relacao, estudioId);
+      await presencaService.removerFalta(aluno.id_relacao, idEfetivo);
       showToast.success("Falta removida.");
       invalidarTudo();
     } catch (err) {

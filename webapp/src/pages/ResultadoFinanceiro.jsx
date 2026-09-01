@@ -78,6 +78,17 @@ function CardKPI({ titulo, valor, subtitulo, icone, cor = 'neutral', tendencia =
 }
 
 function LinhaResultado({ label, valor, destaque = false, negativo = false, nivel = 0 }) {
+  // FIX (PED-102): `valor` normalmente é numérico (formatado aqui como
+  // moeda), mas a linha "Margem líquida" passa um percentual já formatado
+  // como string (ex.: "85.3%") — Math.abs()/formatarMoeda() coagiam essa
+  // string pra Number, davam NaN e a linha sempre mostrava "R$ 0,00" em vez
+  // do percentual. Quando `valor` já vem como string, ele é exibido como
+  // está, sem passar pela formatação/comparação numérica de moeda.
+  const valorEhTexto = typeof valor === 'string';
+  const textoValor = valorEhTexto
+    ? valor
+    : negativo && valor > 0 ? `(${formatarMoeda(valor)})` : formatarMoeda(Math.abs(valor));
+
   return (
     <div className={`flex justify-between items-center py-2.5 ${
       nivel > 0 ? `pl-${nivel * 4}` : ''
@@ -90,10 +101,10 @@ function LinhaResultado({ label, valor, destaque = false, negativo = false, nive
       </span>
       <span className={`text-sm font-black ${
         destaque
-          ? negativo ? 'text-destructive' : valor < 0 ? 'text-destructive' : 'text-success'
+          ? negativo ? 'text-destructive' : (!valorEhTexto && valor < 0) ? 'text-destructive' : 'text-success'
           : negativo ? 'text-destructive' : 'text-foreground'
       }`}>
-        {negativo && valor > 0 ? `(${formatarMoeda(valor)})` : formatarMoeda(Math.abs(valor))}
+        {textoValor}
       </span>
     </div>
   );

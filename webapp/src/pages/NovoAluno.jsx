@@ -203,6 +203,23 @@ export default function NovoAluno() {
   const planoSelecionadoObj = planos.find(p => String(p.id) === String(planoSelecionado));
   const regrasPlano         = planoSelecionadoObj?.regras_acesso || [];
 
+  // FIX (PED-97): useBuscaCep precisa vir antes deste useEffect — ele usa
+  // limparCepErro, que só existe depois da chamada do hook. Com a ordem
+  // antiga (useBuscaCep declarado ~150 linhas abaixo), o array de
+  // dependências deste efeito referenciava limparCepErro antes da
+  // inicialização do const, um TDZ real (não específico de build de
+  // produção): "ReferenceError: Cannot access 'limparCepErro' before
+  // initialization", ofuscado para "Cannot access 'Xe' before
+  // initialization" no bundle minificado. Reproduzido de forma
+  // determinística renderizando <NovoAluno /> sozinho (sem auth/dados),
+  // então a causa é puramente de ordem de execução, não de dados.
+  const { buscarCep, buscandoCep, cepErro, limparCepErro } = useBuscaCep((data) => {
+    setValue('rua',    data.logradouro, { shouldValidate: true });
+    setValue('bairro', data.bairro,     { shouldValidate: true });
+    setValue('cidade', data.localidade, { shouldValidate: true });
+    document.getElementById('input-numero')?.focus();
+  });
+
   useEffect(() => {
     if (!alunoParaEditar && !leadParaConversao) {
       reset({ nome_completo: '', email: '', role: 'aluno' });
@@ -354,13 +371,6 @@ export default function NovoAluno() {
       setLoadingAgenda(false);
     }
   }
-
-  const { buscarCep, buscandoCep, cepErro, limparCepErro } = useBuscaCep((data) => {
-    setValue('rua',    data.logradouro, { shouldValidate: true });
-    setValue('bairro', data.bairro,     { shouldValidate: true });
-    setValue('cidade', data.localidade, { shouldValidate: true });
-    document.getElementById('input-numero')?.focus();
-  });
 
   // ─────────────────────────────────────────────────────────
   const handleCpfChange = (e) => {
