@@ -111,7 +111,9 @@ export const REGEX = {
 };
 
 export const LINKS = {
-  SUPORTE:      import.meta.env.VITE_SUPORTE_URL || 'mailto:suporte@nexofy.app',
+  SUPORTE:            import.meta.env.VITE_SUPORTE_URL || 'mailto:suporte@nexofy.app',
+  CONTATO_COMERCIAL:  import.meta.env.VITE_CONTATO_COMERCIAL_URL || 'mailto:contato@nexofy.com.br',
+  WHATSAPP_COMERCIAL: import.meta.env.VITE_WHATSAPP_COMERCIAL_DIGITS || '5551982860683',
   DOCUMENTACAO: '/docs',
   TERMOS:       '/termos-de-uso',
   PRIVACIDADE:  '/politica-privacidade',
