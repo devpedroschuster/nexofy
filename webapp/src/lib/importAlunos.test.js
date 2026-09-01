@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizarTexto,
   sugerirCampoPorCabecalho,
+  normalizarValorCampo,
   linhasParaObjetos,
   mapearNomesPlano,
   validarLinhaAluno,
@@ -33,6 +34,32 @@ describe('sugerirCampoPorCabecalho', () => {
   it('retorna null pra cabeçalho sem correspondência conhecida', () => {
     expect(sugerirCampoPorCabecalho('Observações internas')).toBeNull();
     expect(sugerirCampoPorCabecalho('')).toBeNull();
+  });
+});
+
+describe('normalizarValorCampo', () => {
+  it('converte string vazia em null', () => {
+    expect(normalizarValorCampo('nome_completo', '')).toBeNull();
+  });
+
+  it('converte string só com espaços em null', () => {
+    expect(normalizarValorCampo('data_nascimento', '   ')).toBeNull();
+  });
+
+  it('converte um objeto Date real em string ISO (YYYY-MM-DD)', () => {
+    // Maio é o índice de mês 4 (0-based) no construtor Date.
+    expect(normalizarValorCampo('data_nascimento', new Date(1990, 4, 1))).toBe('1990-05-01');
+  });
+
+  it('converte data_nascimento em dd/mm/yyyy pra ISO, sem confundir com MM/DD/YYYY', () => {
+    // Regressão: "01/05/1990" é 1º de maio (dd/mm/yyyy, formato brasileiro),
+    // NÃO 5 de janeiro (o que o construtor Date do JS assumiria como MM/DD/YYYY).
+    expect(normalizarValorCampo('data_nascimento', '01/05/1990')).toBe('1990-05-01');
+    expect(normalizarValorCampo('data_nascimento', '01/05/1990')).not.toBe('1990-01-05');
+  });
+
+  it('passa um valor normal de campo não-data adiante, só com trim', () => {
+    expect(normalizarValorCampo('nome_completo', '  Maria Silva  ')).toBe('Maria Silva');
   });
 });
 

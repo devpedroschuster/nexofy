@@ -67,6 +67,44 @@ export function sugerirCampoPorCabecalho(cabecalho) {
   return null;
 }
 
+// Normaliza um valor de célula já mapeado pra um campo específico:
+// - vazio (após trim) vira null, não '' — consistente com o cadastro
+//   manual (NovoAluno.jsx usa `|| null` antes de chamar alunosService.criar)
+// - uma célula de data real do xlsx (Date, graças a cellDates: true no
+//   XLSX.read) vira uma string ISO (YYYY-MM-DD), sem depender de fuso
+//   horário do navegador (usa os componentes locais do Date, não
+//   toISOString(), que converteria pra UTC e poderia mudar o dia)
+// - pra data_nascimento especificamente, um texto no formato dd/mm/yyyy
+//   ou dd-mm-yyyy (comum em planilha brasileira / CSV exportado do Excel
+//   em pt-BR) é convertido pra ISO ANTES de qualquer validação — sem
+//   isso, o construtor Date do JS interpreta "01/05/1990" como
+//   MM/DD/YYYY (5 de janeiro), não DD/MM/YYYY (1º de maio) como a
+//   planilha realmente quer dizer. Essa é a única correção de formato
+//   feita aqui — datas em outros formatos ambíguos continuam como
+//   estavam, e o cadastro manual tem exatamente o mesmo comportamento
+//   pra qualquer formato que essa regex não reconheça.
+export function normalizarValorCampo(chave, valor) {
+  if (valor instanceof Date) {
+    const ano = valor.getFullYear();
+    const mes = String(valor.getMonth() + 1).padStart(2, '0');
+    const dia = String(valor.getDate()).padStart(2, '0');
+    return `${ano}-${mes}-${dia}`;
+  }
+
+  const texto = String(valor ?? '').trim();
+  if (!texto) return null;
+
+  if (chave === 'data_nascimento') {
+    const match = texto.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (match) {
+      const [, dia, mes, ano] = match;
+      return `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
+    }
+  }
+
+  return texto;
+}
+
 // Converte linhas cruas (array de arrays, primeira linha = cabeçalho —
 // já removida antes de chegar aqui pelo caller) em objetos
 // { nome_completo, email, ... } de acordo com o mapeamento coluna->campo
@@ -82,8 +120,7 @@ export function linhasParaObjetos(linhasCruas, mapeamentoColunas) {
       const objeto = {};
       for (const [indice, chave] of Object.entries(mapeamentoColunas)) {
         if (!chave) continue;
-        const valor = linha[Number(indice)];
-        objeto[chave] = valor == null ? '' : String(valor).trim();
+        objeto[chave] = normalizarValorCampo(chave, linha[Number(indice)]);
       }
       return objeto;
     });

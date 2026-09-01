@@ -8,6 +8,7 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, FileSpreadsheet, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 import { alunosService } from '../services/alunosService';
@@ -21,6 +22,7 @@ import {
   mapearNomesPlano,
   validarLinhaAluno,
 } from '../lib/importAlunos';
+import { alunosKeys } from '../lib/alunosQueryKeys';
 import { useAuth } from '../hooks/useAuth';
 import { useImpersonation } from '../context/ImpersonationContext';
 import { showToast } from '../components/shared/Toast';
@@ -33,6 +35,7 @@ const ETAPAS = ['Upload', 'Mapear colunas', 'Mapear planos', 'Pré-visualizaçã
 
 export default function ImportarAlunos() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { estudioId } = useAuth();
   const { estudioAtivo } = useImpersonation();
   const idEfetivo = estudioAtivo?.id ?? estudioId;
@@ -43,6 +46,7 @@ export default function ImportarAlunos() {
   const [mapeamentoColunas, setMapeamentoColunas] = useState({});
   const [planosEstudio, setPlanosEstudio] = useState([]);
   const [mapeamentoPlanos, setMapeamentoPlanos] = useState({});
+  const [nomesParaResolver, setNomesParaResolver] = useState([]);
   const [linhasValidadas, setLinhasValidadas] = useState([]);
   const [importando, setImportando] = useState(false);
   const [progresso, setProgresso] = useState({ atual: 0, total: 0 });
@@ -53,7 +57,7 @@ export default function ImportarAlunos() {
     try {
       const XLSX = await import('xlsx');
       const buffer = await arquivo.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array' });
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
       const primeiraAba = workbook.Sheets[workbook.SheetNames[0]];
       const linhas = XLSX.utils.sheet_to_json(primeiraAba, { header: 1, defval: '' });
 
@@ -118,6 +122,20 @@ export default function ImportarAlunos() {
     .filter((c) => c.obrigatorio)
     .every((c) => Object.values(mapeamentoColunas).includes(c.chave));
 
+  // Detecta duas (ou mais) colunas mapeadas pro mesmo campo — ex.: planilha
+  // com coluna de nome/e-mail do aluno E do responsável, ambas sugeridas
+  // automaticamente pra nome_completo. Sem essa checagem, a coluna de
+  // índice mais alto vence silenciosamente em linhasParaObjetos (iteração
+  // de Object.entries), podendo sobrescrever o dado certo do aluno.
+  const contagemPorCampo = Object.values(mapeamentoColunas).reduce((acc, chave) => {
+    if (chave) acc[chave] = (acc[chave] ?? 0) + 1;
+    return acc;
+  }, {});
+  const camposDuplicados = Object.entries(contagemPorCampo)
+    .filter(([, contagem]) => contagem > 1)
+    .map(([chave]) => CAMPOS_IMPORTAVEIS.find((c) => c.chave === chave)?.label ?? chave);
+  const mapeamentoValido = camposObrigatoriosMapeados && camposDuplicados.length === 0;
+
   function avancarParaMapearPlanos() {
     const indiceColunaPlano = Object.entries(mapeamentoColunas).find(([, chave]) => chave === 'plano')?.[0];
 
@@ -155,6 +173,12 @@ export default function ImportarAlunos() {
     }
 
     setMapeamentoPlanos(mapeamentoMesclado);
+    // Snapshot da lista de nomes ainda sem resposta NO MOMENTO em que a
+    // etapa é aberta — a tela renderiza esse snapshot, não uma lista
+    // re-derivada a cada render, senão cada escolha do admin (inclusive
+    // "Sem plano") faz aquele nome sumir de mapeamentoPlanos e some da
+    // tela no instante seguinte (ver Finding 3 do review de PED-106).
+    setNomesParaResolver(naoEncontradosRestantes);
     setEtapa(2);
   }
 
@@ -193,13 +217,19 @@ export default function ImportarAlunos() {
           ))}
         </div>
 
+        {camposDuplicados.length > 0 && (
+          <p className="text-sm font-bold text-destructive">
+            Mais de uma coluna está mapeada para: {camposDuplicados.join(', ')}. Ajuste antes de continuar — cada campo só pode vir de uma coluna.
+          </p>
+        )}
+
         <div className="flex justify-between pt-2">
           <Button variant="ghost" onClick={() => setEtapa(0)} leftIcon={<ArrowLeft size={16} />}>
             Voltar
           </Button>
           <Button
             variant="brand"
-            disabled={!camposObrigatoriosMapeados}
+            disabled={!mapeamentoValido}
             onClick={avancarParaMapearPlanos}
             rightIcon={<ArrowRight size={16} />}
           >
@@ -211,12 +241,6 @@ export default function ImportarAlunos() {
   }
 
   const indiceColunaPlano = Object.entries(mapeamentoColunas).find(([, chave]) => chave === 'plano')?.[0];
-  const nomesDistintosPlano = indiceColunaPlano == null ? [] : [...new Set(
-    (linhasCruas ?? []).slice(1)
-      .map((linha) => String(linha[Number(indiceColunaPlano)] ?? '').trim())
-      .filter(Boolean)
-  )];
-  const nomesNaoMapeados = nomesDistintosPlano.filter((nome) => !(nome in mapeamentoPlanos));
 
   async function prepararPreVisualizacao(mapeamentoPlanosFinal) {
     const objetos = linhasParaObjetos(linhasCruas, mapeamentoColunas);
@@ -263,7 +287,7 @@ export default function ImportarAlunos() {
         </div>
 
         <div className="space-y-3">
-          {nomesNaoMapeados.map((nome) => (
+          {nomesParaResolver.map((nome) => (
             <div key={nome} className="flex items-center gap-3 flex-wrap">
               <span className="text-sm font-bold text-foreground w-48 truncate" title={nome}>
                 "{nome}"
@@ -391,6 +415,15 @@ export default function ImportarAlunos() {
     const pulacoesJaConhecidas = linhasValidadas
       .filter((item) => !item.valida)
       .map((item) => ({ linha: item.linha, motivo: item.erros.join(' ') }));
+
+    // FIX (PED-106 review): sem invalidar a cache do react-query aqui, o
+    // admin volta pra /alunos (useAlunos, staleTime de 5min) e não vê os
+    // alunos recém-importados — parece que o import falhou silenciosamente,
+    // mesmo tendo funcionado. Mesma chave usada em NovoAluno.jsx após criar
+    // um aluno manualmente.
+    if (criados > 0) {
+      await queryClient.invalidateQueries({ queryKey: alunosKeys.listaTodas(idEfetivo) });
+    }
 
     setResumo({ criados, matriculados, pulados: [...pulacoesJaConhecidas, ...pulados] });
     setImportando(false);
