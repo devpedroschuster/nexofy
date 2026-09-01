@@ -155,10 +155,20 @@ export default function Login() {
       // pra (e não faz sentido) filtrar alunos/professores por estudio_id
       // aqui. Quem resolve o perfil real neste caso é useAuth()/App.jsx via
       // estudio_membros (super_admin, admin ou professor, sem exigir
-      // subdomínio) — só navegamos pra raiz e deixamos o roteador decidir.
+      // subdomínio).
+      // FIX (PED-104): não navega mais explicitamente pra raiz aqui — a
+      // própria rota /login já é reativa a `sessao` (ver App.jsx), então
+      // assim que o listener onAuthStateChange de useAuth() processar este
+      // SIGNED_IN ela troca sozinha pra <Navigate to={destinoPosAuth(...)}>.
+      // O navigate('/') explícito que existia antes rodava em paralelo com
+      // a resolução de perfil independente de useAuth() — como as duas
+      // terminam em momentos imprevisíveis uma da outra, o navigate() podia
+      // disparar DEPOIS do guard reativo já ter levado o usuário pro
+      // destino certo, jogando-o de volta pra "/" e reabrindo uma nova
+      // rodada de redirect. Esse era o padrão de corrida por trás do E2E
+      // login-tenant-isolation flaky (3ª recorrência).
       if (!estudioPublico?.id) {
         showToast.success('Login realizado!');
-        navigate('/');
         return;
       }
 
@@ -249,11 +259,11 @@ export default function Login() {
 
       if (membro) {
         // Sem primeiro_acesso nem nome prontos nesta tabela — mesmo padrão
-        // já usado acima para "sem estúdio de tenant resolvido": navega pra
-        // raiz e deixa o guard reativo de useAuth()/App.jsx (que já resolve
-        // estudio_membros) decidir o destino final por perfil.
+        // já usado acima para "sem estúdio de tenant resolvido" (FIX
+        // PED-104): não navega explicitamente, deixa o guard reativo de
+        // useAuth()/App.jsx (que já resolve estudio_membros de qualquer
+        // forma, de forma independente) decidir o destino final por perfil.
         showToast.success('Login realizado!');
-        navigate('/');
         return;
       }
 

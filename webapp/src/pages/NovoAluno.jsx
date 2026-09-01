@@ -397,29 +397,6 @@ export default function NovoAluno() {
     if (valido) setStepAtual(s => Math.min(s + 1, 4));
   };
 
-  // ── modalidades helpers (unchanged) ───────────────────────
-  const getCountModEspecifca = (modId) =>
-    modalidadesFinais.filter(id => id === modId).length;
-  const getUsoPorArea = (areaNome) =>
-    modalidadesFinais.filter(id =>
-      modalidades.find(m => m.id === id)?.area === areaNome
-    ).length;
-  const getRegraDaArea    = (areaNome) => regrasPlano.find(r => r.modalidade === areaNome);
-  const podeAdicionarMod  = (modArea) => {
-    const regra = getRegraDaArea(modArea);
-    if (!regra) return false;
-    if (regra.limite === 999) return true;
-    return getUsoPorArea(modArea) < regra.limite;
-  };
-  const addModalidade    = (modId) => setModalidadesSelecionadas([...modalidadesSelecionadas, modId]);
-  const removeModalidade = (modId) => {
-    const index = modalidadesSelecionadas.lastIndexOf(modId);
-    if (index > -1) {
-      const nova = [...modalidadesSelecionadas];
-      nova.splice(index, 1);
-      setModalidadesSelecionadas(nova);
-    }
-  };
   // Memoizado: precisa ter referência estável para poder ser usado como
   // dependência dos efeitos de auto-seleção/slots abaixo, sem causar loop.
   const modalidadesAgrupadas = useMemo(() => modalidades.reduce((acc, mod) => {
@@ -509,6 +486,30 @@ export default function NovoAluno() {
     });
     return [...modalidadesAuto, ...slots, ...livres];
   }, [modalidadesAuto, slotsPorArea, modalidadesSelecionadas, areasComSlotOuAuto, modalidades]);
+
+  // ── modalidades helpers (unchanged) ───────────────────────
+  const getCountModEspecifca = (modId) =>
+    modalidadesFinais.filter(id => id === modId).length;
+  const getUsoPorArea = (areaNome) =>
+    modalidadesFinais.filter(id =>
+      modalidades.find(m => m.id === id)?.area === areaNome
+    ).length;
+  const getRegraDaArea    = (areaNome) => regrasPlano.find(r => r.modalidade === areaNome);
+  const podeAdicionarMod  = (modArea) => {
+    const regra = getRegraDaArea(modArea);
+    if (!regra) return false;
+    if (regra.limite === 999) return true;
+    return getUsoPorArea(modArea) < regra.limite;
+  };
+  const addModalidade    = (modId) => setModalidadesSelecionadas([...modalidadesSelecionadas, modId]);
+  const removeModalidade = (modId) => {
+    const index = modalidadesSelecionadas.lastIndexOf(modId);
+    if (index > -1) {
+      const nova = [...modalidadesSelecionadas];
+      nova.splice(index, 1);
+      setModalidadesSelecionadas(nova);
+    }
+  };
 
   async function executarMatricula(aula) {
     try {

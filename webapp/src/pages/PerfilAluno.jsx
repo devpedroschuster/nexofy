@@ -680,34 +680,6 @@ function AbaModalidades({ aluno, alunoId, estudioId, queryClient }) {
     setModalidadesSelecionadas(aluno?.modalidades_selecionadas || []);
   }, [aluno?.modalidades_selecionadas]);
 
-  // Helpers de contagem — usam modalidadesFinais (fonte única de verdade,
-  // já combinando auto-seleção + slots nomeados + seleção livre).
-  const getCountModEspecifica = (modId) =>
-    modalidadesFinais.filter(id => id === modId).length;
-  const getUsoPorArea = (areaNome) =>
-    modalidadesFinais.filter(id =>
-      modalidades.find(m => m.id === id)?.area === areaNome
-    ).length;
-  const getRegraDaArea   = (areaNome) => regrasPlano.find(r => r.modalidade === areaNome);
-  const podeAdicionarMod = (modArea) => {
-    const regra = getRegraDaArea(modArea);
-    if (!regra) return false;
-    if (regra.limite === 999) return true;
-    return getUsoPorArea(modArea) < regra.limite;
-  };
-  const addModalidade    = (modId) => setModalidadesSelecionadas(prev => [...prev, modId]);
-  const removeModalidade = (modId) => {
-    setModalidadesSelecionadas(prev => {
-      const index = prev.lastIndexOf(modId);
-      if (index > -1) {
-        const nova = [...prev];
-        nova.splice(index, 1);
-        return nova;
-      }
-      return prev;
-    });
-  };
-
   const modalidadesAgrupadas = React.useMemo(() => modalidades.reduce((acc, mod) => {
     const area = mod.area || 'Outros';
     if (!acc[area]) acc[area] = [];
@@ -797,6 +769,34 @@ function AbaModalidades({ aluno, alunoId, estudioId, queryClient }) {
     });
     return [...modalidadesAuto, ...slots, ...livres];
   }, [modalidadesAuto, slotsPorArea, modalidadesSelecionadas, areasComSlotOuAuto, modalidades, semPlano]);
+
+  // Helpers de contagem — usam modalidadesFinais (fonte única de verdade,
+  // já combinando auto-seleção + slots nomeados + seleção livre).
+  const getCountModEspecifica = (modId) =>
+    modalidadesFinais.filter(id => id === modId).length;
+  const getUsoPorArea = (areaNome) =>
+    modalidadesFinais.filter(id =>
+      modalidades.find(m => m.id === id)?.area === areaNome
+    ).length;
+  const getRegraDaArea   = (areaNome) => regrasPlano.find(r => r.modalidade === areaNome);
+  const podeAdicionarMod = (modArea) => {
+    const regra = getRegraDaArea(modArea);
+    if (!regra) return false;
+    if (regra.limite === 999) return true;
+    return getUsoPorArea(modArea) < regra.limite;
+  };
+  const addModalidade    = (modId) => setModalidadesSelecionadas(prev => [...prev, modId]);
+  const removeModalidade = (modId) => {
+    setModalidadesSelecionadas(prev => {
+      const index = prev.lastIndexOf(modId);
+      if (index > -1) {
+        const nova = [...prev];
+        nova.splice(index, 1);
+        return nova;
+      }
+      return prev;
+    });
+  };
 
   const handleSalvar = async () => {
     setSalvando(true);
