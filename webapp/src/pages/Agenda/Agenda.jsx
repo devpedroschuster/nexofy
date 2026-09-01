@@ -8,6 +8,7 @@ import { gradeService } from '../../services/gradeService';
 import { alunosService } from '../../services/alunosService';
 import { useAgenda } from '../../hooks/useAgenda';
 import { useAuth } from '../../hooks/useAuth';
+import { useImpersonation } from '../../context/ImpersonationContext';
 import Modal, { useModal, ModalConfirmacao } from '../../components/ui/Modal';
 import { TableSkeleton } from '../../components/shared/Loading';
 import { showToast } from '../../components/shared/Toast';
@@ -57,7 +58,17 @@ export default function Agenda() {
   // context, nunca consumido aqui).
   const { ...pageState } = useAgendaPage();
   const { perfil, estudioId } = useAuth();
-  const isAdmin = perfil === 'admin';
+  // FIX (PED-101): super_admin impersonando um estúdio continua com
+  // perfil === 'super_admin' (o papel no banco não muda) — sem o OR, a
+  // tela tratava o super_admin como não-admin durante "Acessar como
+  // admin" (escondia os botões de gerenciar e caía no ramo de professor
+  // nas queries), mesma convenção já usada em Planos.jsx/Professores.jsx.
+  const isAdmin = perfil === 'admin' || perfil === 'super_admin';
+  // FIX (PED-101): estudioId de useAuth() é null durante impersonation —
+  // o estúdio efetivo vem do ImpersonationContext (mesmo padrão de
+  // Alunos.jsx/Dashboard.jsx/Planos.jsx).
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
 
 const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
   const [eventoSelecionado, setEventoSelecionado] = useState(null);
@@ -69,12 +80,12 @@ const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
   data: espacos = [],
   isLoading: _espacosLoading,
   isError: espacosError,
-} = useEspacos(estudioId);
+} = useEspacos(idEfetivo);
 
   const { data: listaAlunos = [] } = useQuery({
-    queryKey: ['alunos', estudioId, 'ativos-agendamento'],
-    queryFn: () => alunosService.listarAtivos(estudioId),
-    enabled: !!estudioId,
+    queryKey: ['alunos', idEfetivo, 'ativos-agendamento'],
+    queryFn: () => alunosService.listarAtivos(idEfetivo),
+    enabled: !!idEfetivo,
     staleTime: 1000 * 60 * 5,
   });
 
@@ -82,20 +93,20 @@ const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
     data: professores = [],
     isError: errorProfessores,
   } = useQuery({
-    queryKey: ['professores', estudioId],
-    queryFn: () => gradeService.listarProfessores(estudioId),
+    queryKey: ['professores', idEfetivo],
+    queryFn: () => gradeService.listarProfessores(idEfetivo),
     staleTime: 1000 * 60 * 5,
-    enabled: isAdmin && !!estudioId,
+    enabled: isAdmin && !!idEfetivo,
   });
 
   const {
     data: modalidades = [],
     isError: errorModalidades,
   } = useQuery({
-    queryKey: ['modalidades', estudioId],
-    queryFn: () => gradeService.listarModalidades(estudioId),
+    queryKey: ['modalidades', idEfetivo],
+    queryFn: () => gradeService.listarModalidades(idEfetivo),
     staleTime: 1000 * 60 * 5,
-    enabled: isAdmin && !!estudioId,
+    enabled: isAdmin && !!idEfetivo,
   });
 
   React.useEffect(() => {
@@ -107,7 +118,7 @@ const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
   const idsAulas = useMemo(() => (aulas || []).map(a => a.id), [aulas]);
 
    const { data: matriculasFixas = [] } = useQuery({
-    queryKey: ['matriculas-fixas', estudioId, idsAulas],
+    queryKey: ['matriculas-fixas', idEfetivo, idsAulas],
     queryFn: () => {
       if (idsAulas.length === 0) return [];
       return gradeService.listarMatriculasFixas(idsAulas);
@@ -147,7 +158,7 @@ const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
     acoesEvento: useModal(), feriados: useModal(), excluir: useModal(), encerrar: useModal(),
   };
 
-  const hookAgendamento = useAgendamento(() => modais.agendamento.fechar(), feriados, estudioId);
+  const hookAgendamento = useAgendamento(() => modais.agendamento.fechar(), feriados, idEfetivo);
   const hookLista = useListaPresenca(aulaParaLista, dataLista, modais.lista.isOpen);
   const hookFeriados = useFeriados(refetch);
   const eventosCalendario = useEventosCalendario({ aulas, feriados, ...dadosMes, matriculasFixas: dadosIniciais.matriculasFixas, ...pageState });

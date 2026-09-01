@@ -3,9 +3,14 @@ import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { presencaService } from '../../../services/presencaService';
 import { useAuth } from '../../../hooks/useAuth';
+import { useImpersonation } from '../../../context/ImpersonationContext';
 
 export function useAgendaDadosMes(currentDate) {
   const { perfil, estudioId } = useAuth();
+  // FIX (PED-101): mesmo padrão de idEfetivo do restante do app — sem isso,
+  // esta query ficava desabilitada durante impersonation de super_admin.
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
 
   // Avisa em dev quando um valor inválido é recebido, em vez de
   // silenciosamente usar a data atual sem nenhum sinal para o chamador.
@@ -37,14 +42,14 @@ export function useAgendaDadosMes(currentDate) {
   );
 
   const { data, isLoading } = useQuery({
-    queryKey: ['agenda', estudioId, 'dadosMes', inicio, fim],
+    queryKey: ['agenda', idEfetivo, 'dadosMes', inicio, fim],
     // A6: aguarda o perfil estar resolvido antes de disparar queries
-    enabled: perfil !== null && !!estudioId,
+    enabled: perfil !== null && !!idEfetivo,
     queryFn: async () => {
       // Sprint 03 (split presenca/leads): agenda_excecoes não existe mais —
       // falta de fixo agora é só uma linha em `presenca` (origem='fixo',
       // status='falta_*'), já incluída no retorno de listarPeriodo.
-      const presencas = await presencaService.listarPeriodo(inicio, fim, estudioId);
+      const presencas = await presencaService.listarPeriodo(inicio, fim, idEfetivo);
       return { presencas: presencas || [] };
     },
     staleTime: 1000 * 60 * 5,

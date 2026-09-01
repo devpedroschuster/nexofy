@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { gradeService } from '../../../services/gradeService';
 import { showToast } from '../../../components/shared/Toast';
 import { useAuth } from '../../../hooks/useAuth';
+import { useImpersonation } from '../../../context/ImpersonationContext';
 
 const HORARIO_REGEX = /^\d{2}:\d{2}/;
 
@@ -12,6 +13,10 @@ export function useGradeMutations({ onSuccess }) {
   const [savingAula, setSavingAula] = useState(false);
   const queryClient = useQueryClient();
   const { estudioId } = useAuth();
+  // FIX (PED-101): mesmo padrão de idEfetivo do restante do app — sem isso,
+  // salvar/excluir/encerrar aula falhava silenciosamente durante impersonation.
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
 
   // Guards internos de duplo-clique para excluir/encerrar — não mudam a
   // interface pública do hook (Agenda.jsx chama essas funções diretamente
@@ -29,7 +34,7 @@ export function useGradeMutations({ onSuccess }) {
   const salvarAula = async (novaAula) => {
     if (savingAula) return; // guard contra duplo-submit
 
-    if (!estudioId) {
+    if (!idEfetivo) {
       showToast.error("Sessão ainda carregando, tente novamente em instantes.");
       return;
     }
@@ -82,7 +87,7 @@ export function useGradeMutations({ onSuccess }) {
 
       setSavingAula(true);
       try {
-        await gradeService.salvarAula(payload, estudioId);
+        await gradeService.salvarAula(payload, idEfetivo);
         invalidarCacheAgenda();
         showToast.success('Grade atualizada com sucesso!');
         onSuccess?.();
@@ -101,14 +106,14 @@ export function useGradeMutations({ onSuccess }) {
   };
 
   const excluirAula = async (eventoId) => {
-    if (!estudioId) {
+    if (!idEfetivo) {
       showToast.error("Sessão ainda carregando, tente novamente em instantes.");
       return;
     }
     if (processandoRef.current.excluir === eventoId) return; // guard duplo-clique
     processandoRef.current.excluir = eventoId;
     try {
-      await gradeService.excluirAula(eventoId, estudioId);
+      await gradeService.excluirAula(eventoId, idEfetivo);
       invalidarCacheAgenda();
       showToast.success('Grade removida com sucesso.');
       onSuccess?.();
@@ -127,7 +132,7 @@ export function useGradeMutations({ onSuccess }) {
   };
 
   const encerrarAula = async (eventoId, dataStart) => {
-    if (!estudioId) {
+    if (!idEfetivo) {
       showToast.error("Sessão ainda carregando, tente novamente em instantes.");
       return;
     }
@@ -135,7 +140,7 @@ export function useGradeMutations({ onSuccess }) {
     processandoRef.current.encerrar = eventoId;
     try {
       const { dataClicada } = prepararEncerramento(dataStart);
-      await gradeService.encerrarAula(eventoId, dataClicada, estudioId);
+      await gradeService.encerrarAula(eventoId, dataClicada, idEfetivo);
       invalidarCacheAgenda();
       showToast.success('Turma encerrada a partir desta data.');
       onSuccess?.();

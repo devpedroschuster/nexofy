@@ -41,7 +41,12 @@ async listarGrade(perfil, professorId, estudioId, janela) {
   // ao expandir a recorrência, então não filtramos por data aqui.
   void janela; // mantido no parâmetro por compatibilidade de assinatura com o caller
 
-  if (perfil === 'admin') {
+  // FIX (PED-101): super_admin impersonando um estúdio ainda chega aqui com
+  // perfil === 'super_admin' (o papel no banco não muda, só o tenant via
+  // RLS override) — sem este OR, caía direto no ramo de professor abaixo
+  // (sem professorId) e retornava [] silenciosamente. Mesma convenção de
+  // "tem direitos de admin" já usada em Planos.jsx/Professores.jsx/etc.
+  if (perfil === 'admin' || perfil === 'super_admin') {
     const { data, error } = await supabase
       .from('agenda')
       .select('*, professores(nome), modalidades(id, nome)')

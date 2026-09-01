@@ -2,9 +2,13 @@ import { useState } from 'react';
 import { gradeService } from '../../../services/gradeService';
 import { showToast } from '../../../components/shared/Toast';
 import { useAuth } from '../../../hooks/useAuth';
+import { useImpersonation } from '../../../context/ImpersonationContext';
 
 export function useFeriados(refetch) {
   const { estudioId } = useAuth();
+  // FIX (PED-101): mesmo padrão de idEfetivo do restante do app.
+  const { estudioAtivo } = useImpersonation();
+  const idEfetivo = estudioAtivo?.id ?? estudioId;
   const [novoFeriado, setNovoFeriado] = useState({ data: '', descricao: '', bloqueia_agenda: true });
   const [savingFeriado, setSavingFeriado] = useState(false);
   const [feriadoParaExcluir, setFeriadoParaExcluir] = useState(null);
@@ -15,7 +19,7 @@ export function useFeriados(refetch) {
 
     // Guard defensivo: sem estudioId (ex: sessão ainda resolvendo no primeiro
     // render), não tenta gravar — evita insert com estudio_id undefined.
-    if (!estudioId) {
+    if (!idEfetivo) {
       showToast.error("Sessão ainda carregando, tente novamente em instantes.");
       return;
     }
@@ -34,7 +38,7 @@ export function useFeriados(refetch) {
     try {
       await gradeService.cadastrarFeriado(
         { ...novoFeriado, data: dataLimpa, descricao: descricaoLimpa, bloqueia_agenda: true },
-        estudioId
+        idEfetivo
       );
       // Aviso honesto: cadastrarFeriado(bloqueia_agenda=true) também apaga
       // presenca/leads existentes nessa data — o usuário precisa saber disso,
@@ -55,12 +59,12 @@ export function useFeriados(refetch) {
 
   async function confirmarExclusao() {
     if (feriadoParaExcluir === null) return;
-    if (!estudioId) {
+    if (!idEfetivo) {
       showToast.error("Sessão ainda carregando, tente novamente em instantes.");
       return;
     }
     try {
-      await gradeService.excluirFeriado(feriadoParaExcluir, estudioId);
+      await gradeService.excluirFeriado(feriadoParaExcluir, idEfetivo);
       showToast.success("Bloqueio removido.");
       refetch();
     } catch (err) {
