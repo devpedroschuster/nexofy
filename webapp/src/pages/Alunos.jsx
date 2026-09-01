@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Search, UserPlus, Edit2, ShieldAlert, Trash2,
+  Search, UserPlus, Upload, Edit2, ShieldAlert, Trash2,
   Calendar, Eye, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { alunosService } from '../services/alunosService';
@@ -291,14 +291,24 @@ export default function Alunos() {
             Gerencie os alunos matriculados no {nomeEstudio}.
           </p>
         </div>
-        <Button
-          variant="brand" size="lg"
-          leftIcon={<UserPlus size={20} />}
-          onClick={() => navigate('/alunos/novo')}
-          className="w-full md:w-auto rounded-[22px] hover:scale-[1.02]"
-        >
-          Novo Aluno
-        </Button>
+        <div className="flex gap-3 w-full md:w-auto">
+          <Button
+            variant="outline" size="lg"
+            leftIcon={<Upload size={20} />}
+            onClick={() => navigate('/alunos/importar')}
+            className="flex-1 md:flex-none rounded-[22px]"
+          >
+            Importar planilha
+          </Button>
+          <Button
+            variant="brand" size="lg"
+            leftIcon={<UserPlus size={20} />}
+            onClick={() => navigate('/alunos/novo')}
+            className="flex-1 md:flex-none rounded-[22px] hover:scale-[1.02]"
+          >
+            Novo Aluno
+          </Button>
+        </div>
       </div>
 
       <Surface variant="card" padding="md" className="flex flex-col gap-4 w-full">
