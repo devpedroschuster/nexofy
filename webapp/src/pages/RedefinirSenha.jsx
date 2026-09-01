@@ -21,7 +21,7 @@
 // amigável em vez de expor err.message cru ao usuário.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Lock, ShieldCheck, Eye, EyeOff } from 'lucide-react';
@@ -29,90 +29,13 @@ import { Lock, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 import { rotaPorPerfil } from '../lib/navigation';
 import { showToast } from '../components/shared/Toast';
 import { LIMITES } from '../lib/constants';
+import { calcularForcaSenha } from '../lib/security';
 import Input, { Label } from '../components/ui/Input';
 import Button from '../components/ui/Button';
-import { cn } from '../lib/cn';
+import IndicadorForcaSenha from '../components/shared/IndicadorForcaSenha';
 
 const SENHA_MIN = LIMITES.SENHA_MIN;
 const TIMEOUT_SESSAO_MS = 6000;
-
-/* ── Lógica de força de senha ───────────────────────────────────────────────── */
-function calcularForca(senha) {
-  if (!senha) return 0;
-  let pontos = 0;
-  if (senha.length >= SENHA_MIN)   pontos++;
-  if (/[A-Z]/.test(senha))        pontos++;
-  if (/[0-9]/.test(senha))        pontos++;
-  if (/[^A-Za-z0-9]/.test(senha)) pontos++;
-  if (pontos <= 1) return 1;
-  if (pontos <= 3) return 2;
-  return 3;
-}
-
-/* Tokens Midnight Indigo — sem hardcode de cor */
-const FORCA_CONFIG = [
-  null,
-  {
-    label:      'Fraca',
-    segmentos:  1,
-    barClass:   'bg-destructive',
-    textoClass: 'text-destructive',
-    dica:       'Adicione letras maiúsculas, números e símbolos.',
-  },
-  {
-    label:      'Média',
-    segmentos:  2,
-    barClass:   'bg-warning',
-    textoClass: 'text-warning',
-    dica:       'Adicione um símbolo especial para fortalecer.',
-  },
-  {
-    label:      'Forte',
-    segmentos:  3,
-    barClass:   'bg-success',
-    textoClass: 'text-success',
-    dica:       null,
-  },
-];
-
-/* ── Indicador de força ─────────────────────────────────────────────────────── */
-function IndicadorForca({ senha }) {
-  const nivel  = useMemo(() => (senha ? calcularForca(senha) : 0), [senha]);
-  const config = FORCA_CONFIG[nivel];
-
-  if (!senha) return null;
-
-  return (
-    <div className="mt-2 space-y-1.5" aria-live="polite" aria-atomic="true">
-      {/* Barras */}
-      <div className="flex gap-1.5" role="progressbar" aria-valuemin={0} aria-valuemax={3} aria-valuenow={nivel}>
-        {[1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className={cn(
-              'h-1 flex-1 rounded-full transition-all duration-300',
-              nivel > 0 && i <= (config?.segmentos ?? 0)
-                ? config.barClass
-                : 'bg-muted'
-            )}
-          />
-        ))}
-      </div>
-
-      {/* Label + dica */}
-      {config && (
-        <p className={cn('text-xs font-medium leading-snug', config.textoClass)}>
-          Senha {config.label}
-          {config.dica && (
-            <span className="ml-1 font-normal text-muted-foreground">
-              — {config.dica}
-            </span>
-          )}
-        </p>
-      )}
-    </div>
-  );
-}
 
 /* ── Mapeamento de erros do Supabase Auth para texto amigável ────────────────── */
 function mensagemErroAmigavel(err) {
@@ -322,7 +245,7 @@ export default function RedefinirSenha() {
   /* Aguarda validação de sessão sem flash de conteúdo */
   if (!sessaoValida) return null;
 
-  const senhaForca = novaSenha ? calcularForca(novaSenha) : 0;
+  const senhaForca = novaSenha ? calcularForcaSenha(novaSenha) : 0;
   const podeSalvar = novaSenha.length >= SENHA_MIN && senhasCoincidem && senhaForca >= 2;
 
   return (
@@ -389,7 +312,7 @@ export default function RedefinirSenha() {
                 value={novaSenha}
                 onChange={(e) => setNovaSenha(e.target.value)}
               />
-              <IndicadorForca senha={novaSenha} />
+              <IndicadorForcaSenha senha={novaSenha} />
             </div>
 
             {/* Confirmar senha */}
