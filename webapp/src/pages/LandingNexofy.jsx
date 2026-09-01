@@ -5,8 +5,18 @@ import { useNavigate } from 'react-router-dom';
 import {
   Menu, X, ArrowRight, Calendar, Users, Wallet, CheckCircle2, Star,
   ChevronRight, BarChart3, Clock, Bell, ShieldCheck, Sparkles,
-  ArrowUpRight, Instagram, Linkedin, Twitter, TrendingUp,
+  ArrowUpRight, Instagram, Linkedin, Twitter, TrendingUp, MessageCircle,
 } from 'lucide-react';
+import { LINKS } from '../lib/constants';
+
+// CTAs de contato comercial da landing — mesmo padrão wa.me usado nas
+// páginas de estúdio (Aniversariantes, AreaAluno, Leads, PerfilAluno).
+const WHATSAPP_DEMO_URL = `https://wa.me/${LINKS.WHATSAPP_COMERCIAL}?text=${encodeURIComponent(
+  'Olá! Vi o site do Nexofy e quero agendar uma demonstração.'
+)}`;
+const CONTATO_ESPECIALISTA_URL = `${LINKS.CONTATO_COMERCIAL}?subject=${encodeURIComponent(
+  'Quero falar com um especialista sobre o Nexofy'
+)}`;
 
 function useScrollReveal() {
   useEffect(() => {
@@ -189,11 +199,6 @@ export default function LandingNexofy() {
   const [menuOpen, setMenuOpen] = useState(false);
   useScrollReveal();
 
-  const scrollTo = (id) => {
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-  };
-
   return (
     <div className="min-h-screen bg-background text-foreground antialiased">
       <style>{`
@@ -280,15 +285,16 @@ export default function LandingNexofy() {
                 Testar gratuitamente <ArrowRight size={17} />
               </button>
               <a
-                href="#como-funciona"
-                onClick={(e) => { e.preventDefault(); scrollTo('como-funciona'); }}
+                href={WHATSAPP_DEMO_URL}
+                target="_blank"
+                rel="noreferrer"
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-border font-semibold px-6 py-3.5 hover:bg-muted transition-all"
               >
-                Agendar demonstração
+                <MessageCircle size={17} /> Agendar demonstração
               </a>
             </div>
             <div className="mt-10 flex items-center gap-6 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1.5"><ShieldCheck size={16} className="text-success" /> Sem cartão para testar</span>
+              <span className="flex items-center gap-1.5"><ShieldCheck size={16} className="text-success" /> 14 dias grátis, sem cartão</span>
               <span className="flex items-center gap-1.5"><Clock size={16} className="text-success" /> Onboarding em 1 dia</span>
             </div>
           </div>
@@ -388,7 +394,9 @@ export default function LandingNexofy() {
             <h2 className="font-display mt-4 text-3xl sm:text-4xl font-bold tracking-tight">
               Um plano para cada fase do seu estúdio.
             </h2>
-            <p className="mt-3 text-muted-foreground">Cancele quando quiser. Sem taxa de setup.</p>
+            <p className="mt-3 text-muted-foreground">
+              14 dias grátis para testar, sem cartão. Cancele quando quiser. Sem taxa de setup.
+            </p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-6 items-stretch">
@@ -446,7 +454,7 @@ export default function LandingNexofy() {
                 Pronto para ver o seu estúdio com clareza total?
               </h2>
               <p className="mt-4 text-background/60 max-w-lg mx-auto">
-                Comece hoje, sem cartão de crédito, e traga os seus alunos e turmas em poucos minutos.
+                Comece hoje com 14 dias grátis, sem cartão de crédito, e traga os seus alunos e turmas em poucos minutos.
               </p>
               <div className="mt-9 flex flex-col sm:flex-row gap-3 justify-center">
                 <button
@@ -455,7 +463,10 @@ export default function LandingNexofy() {
                 >
                   Testar gratuitamente <ArrowRight size={17} />
                 </button>
-                <a href="#" className="inline-flex items-center justify-center gap-2 rounded-xl border border-background/20 text-background font-semibold px-6 py-3.5 hover:bg-background/10 transition-all">
+                <a
+                  href={CONTATO_ESPECIALISTA_URL}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-background/20 text-background font-semibold px-6 py-3.5 hover:bg-background/10 transition-all"
+                >
                   Falar com um especialista
                 </a>
               </div>
