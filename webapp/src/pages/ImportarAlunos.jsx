@@ -137,12 +137,24 @@ export default function ImportarAlunos() {
 
     const { correspondencias, naoEncontrados } = mapearNomesPlano(nomesDistintos, planosEstudio);
 
-    if (naoEncontrados.length === 0) {
-      prepararPreVisualizacao(correspondencias);
+    // Mescla com escolhas manuais já feitas antes (ex.: admin voltou pra
+    // ajustar outra coluna e chegou aqui de novo) — nunca perde uma escolha
+    // manual já feita pra um nome que ainda está presente nas linhas atuais.
+    const mapeamentoMesclado = { ...correspondencias };
+    for (const nome of nomesDistintos) {
+      if (nome in mapeamentoPlanos && !(nome in correspondencias)) {
+        mapeamentoMesclado[nome] = mapeamentoPlanos[nome];
+      }
+    }
+
+    const naoEncontradosRestantes = naoEncontrados.filter((nome) => !(nome in mapeamentoMesclado));
+
+    if (naoEncontradosRestantes.length === 0) {
+      prepararPreVisualizacao(mapeamentoMesclado);
       return;
     }
 
-    setMapeamentoPlanos(correspondencias);
+    setMapeamentoPlanos(mapeamentoMesclado);
     setEtapa(2);
   }
 
