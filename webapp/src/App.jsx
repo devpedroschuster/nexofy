@@ -46,6 +46,8 @@ import Presenca from './pages/Presenca';
 import Comissoes from './pages/Comissoes';
 import Aniversariantes from './pages/Aniversariantes';
 import Landing from './pages/Landing';
+import TermosDeUso from './pages/TermosDeUso';
+import PoliticaPrivacidade from './pages/PoliticaPrivacidade';
 import AreaAluno from './pages/AreaAluno';
 import ConfiguracoesFeriados from './pages/ConfiguracoesFeriados';
 import Notificacoes from './pages/Notificacoes';
@@ -222,6 +224,9 @@ function AppRoutes() {
           !sessao ? <Cadastro /> : <Navigate to={destinoPosAuth(sessao, perfil, estudioBloqueado)} replace />
         } />
         <Route path="/redefinir-senha" element={<RedefinirSenha />} />
+        {/* Páginas legais — públicas, sem guard de sessão, usadas pelo checkbox de consentimento do cadastro */}
+        <Route path="/termos-de-uso" element={<TermosDeUso />} />
+        <Route path="/politica-privacidade" element={<PoliticaPrivacidade />} />
 
         {/*
           Tela de bloqueio por status do estúdio (inativo/suspenso/cancelado).

@@ -431,7 +431,7 @@ export default function LandingNexofy() {
                 </ul>
 
                 <button
-                  onClick={() => navigate('/cadastro')}
+                  onClick={() => navigate(`/cadastro?plano=${encodeURIComponent(p.name)}`)}
                   className={`mt-8 inline-flex items-center justify-center gap-1.5 rounded-xl font-semibold px-5 py-3 hover-lift ${
                     p.highlight ? 'bg-background text-foreground' : 'bg-primary text-primary-foreground shadow-brand'
                   }`}

@@ -11,13 +11,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, User, ArrowRight, Sparkles, MailCheck } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Mail, Lock, User, ArrowRight, Sparkles, MailCheck, ShieldCheck } from 'lucide-react';
 
 import { supabase } from '../lib/supabase';
 import { showToast } from '../components/shared/Toast';
-import { REGEX, LIMITES } from '../lib/constants';
-import Input from '../components/ui/Input';
+import { REGEX, LIMITES, LINKS } from '../lib/constants';
+import Input, { ErrorMessage } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 
 // FIX: removido NOME_MAX local (=120) divergente de LIMITES.NOME_MAX (=100).
@@ -29,34 +29,55 @@ export default function Cadastro() {
   const [nome, setNome]     = useState('');
   const [email, setEmail]   = useState('');
   const [senha, setSenha]   = useState('');
+  const [aceitaTermos, setAceitaTermos] = useState(false);
   const [loading, setLoading] = useState(false);
   const [enviado, setEnviado] = useState(false);
+  // Erros inline por campo — antes cada clique em "Continuar" só revelava um
+  // erro por vez via toast. Agora valida tudo de uma vez e mostra cada erro
+  // junto do campo que o causou (FormField/ErrorMessage já suportavam isso,
+  // este formulário só não usava).
+  const [erros, setErros] = useState({});
 
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const planoEscolhido = searchParams.get('plano');
   const montadoRef = useRef(true);
   useEffect(() => () => { montadoRef.current = false; }, []);
 
   function validar() {
+    const novosErros = {};
     const nomeLimpo = nome.trim();
 
     if (!nomeLimpo) {
-      showToast.error('Digite seu nome completo.');
-      return false;
+      novosErros.nome = 'Digite seu nome completo.';
+    } else if (nomeLimpo.length < LIMITES.NOME_MIN) {
+      novosErros.nome = `O nome deve ter no mínimo ${LIMITES.NOME_MIN} caracteres.`;
     }
-    // FIX: LIMITES.NOME_MIN nunca era checado — nome de 1 caractere passava.
-    if (nomeLimpo.length < LIMITES.NOME_MIN) {
-      showToast.error(`O nome deve ter no mínimo ${LIMITES.NOME_MIN} caracteres.`);
-      return false;
-    }
+
     if (!REGEX.EMAIL.test(email.trim())) {
-      showToast.error('Digite um e-mail válido.');
-      return false;
+      novosErros.email = 'Digite um e-mail válido.';
     }
+
     if (senha.length < LIMITES.SENHA_MIN) {
-      showToast.error(`A senha deve ter no mínimo ${LIMITES.SENHA_MIN} caracteres.`);
-      return false;
+      novosErros.senha = `A senha deve ter no mínimo ${LIMITES.SENHA_MIN} caracteres.`;
     }
-    return true;
+
+    if (!aceitaTermos) {
+      novosErros.termos = 'Você precisa aceitar os Termos de Uso e a Política de Privacidade.';
+    }
+
+    setErros(novosErros);
+    return Object.keys(novosErros).length === 0;
+  }
+
+  // Limpa o erro do campo assim que a pessoa começa a corrigi-lo, em vez de
+  // deixar a borda vermelha até o próximo submit.
+  function limparErro(campo) {
+    setErros((atual) => {
+      if (!atual[campo]) return atual;
+      const { [campo]: _removido, ...resto } = atual;
+      return resto;
+    });
   }
 
   async function handleSubmit(e) {
@@ -142,6 +163,11 @@ export default function Cadastro() {
                 O primeiro passo para colocar seu estúdio no Nexofy.
               </p>
             </div>
+            {planoEscolhido && !enviado && (
+              <p className="text-xs font-semibold text-primary bg-primary/soft inline-flex rounded-full px-3 py-1">
+                Você está criando sua conta no plano {planoEscolhido}
+              </p>
+            )}
           </div>
 
           {enviado ? (
@@ -160,40 +186,80 @@ export default function Cadastro() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               <div className="space-y-3">
-                <Input
-                  type="text"
-                  required
-                  autoFocus
-                  autoComplete="name"
-                  placeholder="Seu nome completo"
-                  aria-label="Nome completo"
-                  leftIcon={<User size={16} />}
-                  value={nome}
-                  maxLength={LIMITES.NOME_MAX}
-                  onChange={(e) => setNome(e.target.value)}
-                />
+                <div>
+                  <Input
+                    type="text"
+                    required
+                    autoFocus
+                    autoComplete="name"
+                    placeholder="Seu nome completo"
+                    aria-label="Nome completo"
+                    leftIcon={<User size={16} />}
+                    value={nome}
+                    maxLength={LIMITES.NOME_MAX}
+                    error={Boolean(erros.nome)}
+                    errorId="erro-nome"
+                    onChange={(e) => { setNome(e.target.value); limparErro('nome'); }}
+                  />
+                  <ErrorMessage id="erro-nome">{erros.nome}</ErrorMessage>
+                </div>
 
-                <Input
-                  type="email"
-                  required
-                  autoComplete="email"
-                  placeholder="seu@email.com"
-                  aria-label="E-mail"
-                  leftIcon={<Mail size={16} />}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
+                <div>
+                  <Input
+                    type="email"
+                    required
+                    autoComplete="email"
+                    placeholder="seu@email.com"
+                    aria-label="E-mail"
+                    leftIcon={<Mail size={16} />}
+                    value={email}
+                    error={Boolean(erros.email)}
+                    errorId="erro-email"
+                    onChange={(e) => { setEmail(e.target.value); limparErro('email'); }}
+                  />
+                  <ErrorMessage id="erro-email">{erros.email}</ErrorMessage>
+                </div>
 
-                <Input
-                  type="password"
-                  required
-                  autoComplete="new-password"
-                  placeholder={`Crie uma senha (mín. ${LIMITES.SENHA_MIN} caracteres)`}
-                  aria-label="Senha"
-                  leftIcon={<Lock size={16} />}
-                  value={senha}
-                  onChange={(e) => setSenha(e.target.value)}
-                />
+                <div>
+                  <Input
+                    type="password"
+                    required
+                    autoComplete="new-password"
+                    placeholder={`Crie uma senha (mín. ${LIMITES.SENHA_MIN} caracteres)`}
+                    aria-label="Senha"
+                    leftIcon={<Lock size={16} />}
+                    value={senha}
+                    error={Boolean(erros.senha)}
+                    errorId="erro-senha"
+                    onChange={(e) => { setSenha(e.target.value); limparErro('senha'); }}
+                  />
+                  <ErrorMessage id="erro-senha">{erros.senha}</ErrorMessage>
+                </div>
+              </div>
+
+              <div>
+                <label className="flex items-start gap-2.5 text-xs text-muted-foreground leading-relaxed">
+                  <input
+                    type="checkbox"
+                    checked={aceitaTermos}
+                    onChange={(e) => { setAceitaTermos(e.target.checked); limparErro('termos'); }}
+                    aria-invalid={Boolean(erros.termos)}
+                    aria-describedby={erros.termos ? 'erro-termos' : undefined}
+                    className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
+                  />
+                  <span>
+                    Li e aceito os{' '}
+                    <a href={LINKS.TERMOS} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">
+                      Termos de Uso
+                    </a>{' '}
+                    e a{' '}
+                    <a href={LINKS.PRIVACIDADE} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">
+                      Política de Privacidade
+                    </a>{' '}
+                    do Nexofy.
+                  </span>
+                </label>
+                <ErrorMessage id="erro-termos">{erros.termos}</ErrorMessage>
               </div>
 
               <Button
@@ -206,6 +272,10 @@ export default function Cadastro() {
               >
                 Continuar
               </Button>
+
+              <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                <ShieldCheck size={13} className="text-success" /> 14 dias grátis, sem cartão
+              </p>
             </form>
           )}
 
