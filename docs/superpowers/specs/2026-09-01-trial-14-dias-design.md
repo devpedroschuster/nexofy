@@ -101,9 +101,13 @@ para isso.
 - Testes de banco/SQL: estúdio com trial expirado fica bloqueado;
   estúdio isento (`trial_ends_at IS NULL`) nunca bloqueia; impersonação
   contorna o bloqueio.
-- Testes de frontend (vitest): banner mostra dias corretos e some fora do
-  papel admin; `EstudioBloqueado.jsx` renderiza a mensagem certa para
-  `trial_expirado`.
+- Testes automatizados de frontend: a lógica pura de `webapp/src/lib/trial.js`
+  (`diasRestantesTrial`, `chaveMensagemBloqueio`) é coberta por
+  `webapp/src/lib/trial.test.js`. Os componentes que consomem essa lógica
+  (`TrialBanner.jsx`, `EstudioBloqueado.jsx`) não têm teste automatizado —
+  mesma convenção do resto do codebase, que não tem `@testing-library/react`
+  nem testes de render de componente em nenhum outro lugar. Cobertura desses
+  componentes é manual (ver passagem manual abaixo).
 - Passagem manual: cadastro self-service → banner aparece → forçar expiração
   no banco → tela de bloqueio aparece → ação "Remover trial" no super_admin
   desbloqueia.
