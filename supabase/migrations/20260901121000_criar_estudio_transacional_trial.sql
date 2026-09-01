@@ -3,10 +3,16 @@
 -- 14 dias. Onboarding manual do super_admin (criar-estudio) passa
 -- p_iniciar_trial => false — nasce sem prazo (acordo comercial à parte).
 --
--- CREATE OR REPLACE adicionando parâmetro novo com DEFAULT no final
--- preserva o OID da function e, com ele, o GRANT/REVOKE existentes — mas
--- reaplicamos explicitamente por segurança (mesmo espírito do
--- RLS_MIGRATION_CHECKLIST sobre não confiar cegamente no ACL implícito).
+-- Adicionando parâmetro novo com DEFAULT no final: DROP a 7-arg signature,
+-- então CREATE a 8-arg signature. Embora CREATE OR REPLACE FUNCTION
+-- geralmente preserve o OID quando apenas muda o corpo, adicionar um
+-- novo parâmetro (mesmo com DEFAULT) muda a arity e criaria um segundo
+-- overload. Fazemos DROP explícito para substituir completamente a
+-- função e garantir que 7-arg calls usem o new 8-arg overload via default.
+-- Reaplicamos GRANT/REVOKE explicitamente por segurança (mesmo espírito
+-- do RLS_MIGRATION_CHECKLIST).
+DROP FUNCTION IF EXISTS public.criar_estudio_transacional(p_nome text, p_slug text, p_whatsapp text, p_instagram text, p_admin_id uuid, p_admin_nome text, p_admin_email text);
+
 CREATE OR REPLACE FUNCTION public.criar_estudio_transacional(p_nome text, p_slug text, p_whatsapp text, p_instagram text, p_admin_id uuid, p_admin_nome text, p_admin_email text, p_iniciar_trial boolean DEFAULT true)
  RETURNS json
  LANGUAGE plpgsql
