@@ -12,7 +12,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { alunosService } from '../services/alunosService';
 import { alunoSchema } from '../lib/validation';
-import { formatarCPF, validarCPF } from '../lib/utils';
+import { formatarCPF, validarCPF, formatarTelefone } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
@@ -44,15 +44,15 @@ function StepIndicator({ stepAtual }) {
               <div className={`
                 w-10 h-10 rounded-full flex items-center justify-center font-black text-sm
                 transition-all duration-300
-                ${completo ? 'bg-green-500 text-white shadow-sm'
-                  : ativo   ? 'bg-primary text-white shadow-lg shadow-primary/30 scale-110'
-                  :           'bg-gray-100 text-gray-400'}
+                ${completo ? 'bg-success text-success-foreground shadow-sm'
+                  : ativo   ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/30 scale-110'
+                  :           'bg-muted text-muted-foreground'}
               `}>
                 {completo ? <Check size={16} /> : <s.icon size={16} />}
               </div>
               <span className={`
                 text-[10px] font-black uppercase tracking-wider whitespace-nowrap transition-colors
-                ${ativo ? 'text-primary' : completo ? 'text-green-600' : 'text-gray-300'}
+                ${ativo ? 'text-primary' : completo ? 'text-success' : 'text-muted-foreground'}
               `}>
                 {s.label}
               </span>
@@ -60,7 +60,7 @@ function StepIndicator({ stepAtual }) {
             {i < STEPS.length - 1 && (
               <div className={`
                 flex-1 h-0.5 mx-2 mb-4 rounded-full transition-all duration-500
-                ${s.id < stepAtual ? 'bg-green-400' : 'bg-gray-100'}
+                ${s.id < stepAtual ? 'bg-success' : 'bg-muted'}
               `} />
             )}
           </React.Fragment>
@@ -74,19 +74,19 @@ function CpfField({ cpfDisplay, cpfErro, onChange }) {
   return (
     <div>
       <div className="relative">
-        <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+        <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
         <input
           value={cpfDisplay}
           onChange={onChange}
           placeholder="CPF (Opcional)"
           maxLength={14}
-          className={`w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border outline-none font-medium
-            text-gray-700 transition-colors focus:border-orange-200
-            ${cpfErro ? 'border-red-300 bg-red-50/30' : 'border-transparent'}`}
+          className={`w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border outline-none font-medium
+            text-foreground transition-colors focus:border-primary
+            ${cpfErro ? 'border-destructive/40 bg-destructive-soft' : 'border-transparent'}`}
         />
       </div>
       {cpfErro && (
-        <p className="text-xs text-red-500 mt-1.5 ml-1 font-medium flex items-center gap-1">
+        <p className="text-xs text-destructive mt-1.5 ml-1 font-medium flex items-center gap-1">
           <AlertCircle size={12} /> {cpfErro}
         </p>
       )}
@@ -98,25 +98,25 @@ function CepField({ register, buscandoCep, cepErro, onBlur, className = '' }) {
   return (
     <div className={className}>
       <div className="relative">
-        <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+        <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
         <input
           {...register('cep')}
           onBlur={onBlur}
           placeholder="CEP"
           maxLength={9}
-          className={`w-full pl-12 pr-10 py-4 bg-gray-50 rounded-2xl border outline-none font-medium
-            text-gray-700 transition-colors focus:border-orange-200
-            ${cepErro ? 'border-orange-300' : 'border-transparent'}`}
+          className={`w-full pl-12 pr-10 py-4 bg-muted rounded-2xl border outline-none font-medium
+            text-foreground transition-colors focus:border-primary
+            ${cepErro ? 'border-primary/40' : 'border-transparent'}`}
         />
         {buscandoCep && (
           <RefreshCw
-            className="absolute right-4 top-1/2 -translate-y-1/2 animate-spin text-gray-300"
+            className="absolute right-4 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
             size={16}
           />
         )}
       </div>
       {cepErro && (
-        <p className="text-xs text-orange-600 mt-1.5 ml-1 font-medium flex items-center gap-1">
+        <p className="text-xs text-primary mt-1.5 ml-1 font-medium flex items-center gap-1">
           <AlertCircle size={12} /> {cepErro}
         </p>
       )}
@@ -796,8 +796,8 @@ export default function NovoAluno() {
     return (
       <>
         {planoSelecionado && (
-          <div className="md:col-span-2 bg-blue-50 p-4 rounded-xl border border-blue-100">
-            <label className="block text-sm font-bold text-blue-800 mb-2">
+          <div className="md:col-span-2 bg-info-soft p-4 rounded-xl border border-info/20">
+            <label className="block text-sm font-bold text-info mb-2">
               Data do 1º Pagamento
             </label>
             <input
@@ -805,10 +805,10 @@ export default function NovoAluno() {
               value={dataVencimento}
               min={new Date().toISOString().split('T')[0]}
               onChange={e => setDataVencimento(e.target.value)}
-              className="w-full bg-white border-none rounded-xl px-4 py-3 font-bold text-gray-700
-                focus:ring-2 focus:ring-blue-500/20 outline-none"
+              className="w-full bg-card border-none rounded-xl px-4 py-3 font-bold text-foreground
+                focus:ring-2 focus:ring-info/20 outline-none"
             />
-            <p className="text-[11px] text-blue-600 mt-2 font-medium">
+            <p className="text-[11px] text-info mt-2 font-medium">
               O plano terá validade contando a partir desta data de pagamento.
             </p>
           </div>
@@ -817,34 +817,34 @@ export default function NovoAluno() {
         {planoSelecionado && roleAtual === 'aluno' && (
           <>
             <div className="relative animate-in fade-in">
-              <label className="text-[10px] font-black text-gray-400 uppercase absolute -top-2
-                left-4 bg-white px-1">
+              <label className="text-[10px] font-black text-muted-foreground uppercase absolute -top-2
+                left-4 bg-card px-1">
                 Início do Contrato
               </label>
               <input
                 {...register('data_inicio_plano')}
                 type="date"
-                className="w-full px-4 py-4 bg-gray-50 rounded-2xl outline-none font-bold text-gray-600"
+                className="w-full px-4 py-4 bg-muted rounded-2xl outline-none font-bold text-muted-foreground"
               />
             </div>
             <div className="relative animate-in fade-in">
-              <label className="text-[10px] font-black text-orange-400 uppercase absolute -top-2
-                left-4 bg-white px-1 flex items-center gap-1">
+              <label className="text-[10px] font-black text-primary uppercase absolute -top-2
+                left-4 bg-card px-1 flex items-center gap-1">
                 Fim (Calculado) <RefreshCw size={10} />
               </label>
               <input
                 {...register('data_fim_plano')}
                 type="date"
-                className="w-full px-4 py-4 bg-orange-50 rounded-2xl outline-none font-bold text-orange-800"
+                className="w-full px-4 py-4 bg-primary/soft rounded-2xl outline-none font-bold text-primary"
               />
             </div>
 
             {/* Slot selection */}
             <div className="md:col-span-2 mt-4 animate-in slide-in-from-top-4">
-              <div className="bg-blue-50 border border-blue-100 p-6 rounded-3xl mb-6">
+              <div className="bg-info-soft border border-info/20 p-6 rounded-3xl mb-6">
                 <div className="flex items-center gap-2 mb-3">
-                  <Info className="text-blue-500" size={20} />
-                  <h4 className="font-black text-blue-900 text-lg">
+                  <Info className="text-info" size={20} />
+                  <h4 className="font-black text-info text-lg">
                     Regras do Plano: {planoSelecionadoObj?.nome}
                   </h4>
                 </div>
@@ -858,8 +858,8 @@ export default function NovoAluno() {
                         <span key={i} className={`border px-4 py-2 rounded-xl font-bold text-sm
                           transition-colors
                           ${isFull
-                            ? 'bg-blue-600 text-white border-blue-700'
-                            : 'bg-white text-blue-700 border-blue-200'}`}>
+                            ? 'bg-info text-info-foreground border-info'
+                            : 'bg-card text-info border-info/30'}`}>
                           {limiteText} na Área: {r.modalidade}
                           {isFull && <Check size={14} className="inline ml-1" />}
                         </span>
@@ -867,7 +867,7 @@ export default function NovoAluno() {
                     })}
                   </div>
                 ) : (
-                  <p className="text-sm text-blue-800 font-medium">
+                  <p className="text-sm text-info font-medium">
                     Este plano não possui regras cadastradas. O aluno não poderá agendar aulas.
                   </p>
                 )}
@@ -883,16 +883,16 @@ export default function NovoAluno() {
                   return (
                     <div key={areaNome} className={`p-5 rounded-3xl border-2
                       ${isAreaBloqueada
-                        ? 'bg-gray-50 border-dashed border-gray-200 opacity-60'
-                        : 'bg-white border-gray-100'}`}>
+                        ? 'bg-muted border-dashed border-border opacity-60'
+                        : 'bg-card border-border'}`}>
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="font-black text-gray-700 uppercase tracking-widest text-xs
+                        <h4 className="font-black text-foreground uppercase tracking-widest text-xs
                           flex items-center gap-2">
                           Área: {areaNome}
-                          {isAreaBloqueada && <Lock size={14} className="text-gray-400" />}
+                          {isAreaBloqueada && <Lock size={14} className="text-muted-foreground" />}
                         </h4>
                         {!isAreaBloqueada && regra.limite !== 999 && !unicaModalidade && (
-                          <span className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded-md">
+                          <span className="text-xs font-bold text-info bg-info-soft px-2 py-1 rounded-md">
                             Usado: {getUsoPorArea(areaNome)} / {regra.limite}
                           </span>
                         )}
@@ -902,11 +902,11 @@ export default function NovoAluno() {
                           o sistema já inclui automaticamente (ver modalidadesAuto). */}
                       {!isAreaBloqueada && unicaModalidade && (
                         <div className="flex items-center justify-between p-3 rounded-xl
-                          bg-green-50 border border-green-100">
-                          <span className="text-sm font-bold text-green-900">
+                          bg-success-soft border border-success/20">
+                          <span className="text-sm font-bold text-success">
                             {modsArea[0].nome}
                           </span>
-                          <span className="text-xs font-bold text-green-600 bg-white
+                          <span className="text-xs font-bold text-success bg-card
                             px-3 py-1 rounded-lg flex items-center gap-1">
                             <Check size={12} /> Incluído automaticamente
                           </span>
@@ -919,16 +919,16 @@ export default function NovoAluno() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           {(slotsPorArea[areaNome] || []).map((valorSlot, index) => (
                             <div key={index} className="relative">
-                              <label className="text-[10px] font-black text-gray-400
+                              <label className="text-[10px] font-black text-muted-foreground
                                 uppercase block mb-1 ml-1">
                                 {index + 1}ª aula de {areaNome}
                               </label>
                               <select
                                 value={valorSlot || ''}
                                 onChange={e => atualizarSlot(areaNome, index, e.target.value)}
-                                className="w-full px-4 py-3 bg-gray-50 rounded-xl outline-none
-                                  font-bold text-gray-700 cursor-pointer border border-transparent
-                                  focus:border-orange-200"
+                                className="w-full px-4 py-3 bg-muted rounded-xl outline-none
+                                  font-bold text-foreground cursor-pointer border border-transparent
+                                  focus:border-primary"
                               >
                                 <option value="">Selecionar estilo...</option>
                                 {modsArea.map(mod => (
@@ -951,10 +951,10 @@ export default function NovoAluno() {
                             return (
                               <div key={mod.id} className={`flex items-center justify-between p-3
                                 rounded-xl transition-all
-                                ${isAtivo ? 'bg-orange-50/50 border border-orange-100'
-                                  :         'bg-gray-50 border border-transparent'}`}>
+                                ${isAtivo ? 'bg-primary/10 border border-primary/20'
+                                  :         'bg-muted border border-transparent'}`}>
                                 <span className={`text-sm font-bold
-                                  ${isAtivo ? 'text-orange-900' : 'text-gray-500'}`}>
+                                  ${isAtivo ? 'text-primary' : 'text-muted-foreground'}`}>
                                   {mod.nome}
                                 </span>
                                 <div className="flex items-center gap-2">
@@ -963,14 +963,14 @@ export default function NovoAluno() {
                                     onClick={() => removeModalidade(mod.id)}
                                     disabled={!isAtivo}
                                     className="w-7 h-7 flex flex-col items-center justify-center
-                                      rounded-lg bg-white shadow-sm text-gray-500 font-black
-                                      hover:bg-red-50 hover:text-red-500
+                                      rounded-lg bg-card shadow-sm text-muted-foreground font-black
+                                      hover:bg-destructive-soft hover:text-destructive
                                       disabled:opacity-30 disabled:shadow-none transition-colors"
                                   >
                                     -
                                   </button>
                                   <span className={`font-black w-4 text-center
-                                    ${isAtivo ? 'text-primary' : 'text-gray-300'}`}>
+                                    ${isAtivo ? 'text-primary' : 'text-muted-foreground'}`}>
                                     {count}x
                                   </span>
                                   <button
@@ -978,10 +978,10 @@ export default function NovoAluno() {
                                     onClick={() => addModalidade(mod.id)}
                                     disabled={!allowAdd}
                                     className={`w-7 h-7 flex flex-col items-center justify-center
-                                      rounded-lg bg-white shadow-sm font-black transition-colors
+                                      rounded-lg bg-card shadow-sm font-black transition-colors
                                       ${!allowAdd
-                                        ? 'opacity-30 shadow-none text-gray-400 cursor-not-allowed'
-                                        : 'text-blue-600 hover:bg-blue-50 hover:text-blue-700'}`}
+                                        ? 'opacity-30 shadow-none text-muted-foreground cursor-not-allowed'
+                                        : 'text-info hover:bg-info-soft hover:text-info'}`}
                                   >
                                     +
                                   </button>
@@ -1006,40 +1006,40 @@ export default function NovoAluno() {
   function renderStep1() {
     return (
       <div className="space-y-4 animate-in fade-in">
-        <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4
+        <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-4
           flex items-center gap-2">
           <User size={16} /> Dados Pessoais
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="relative md:col-span-2">
-            <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+            <User className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
             <input
               {...register('nome_completo')}
               placeholder="Nome Completo *"
-              className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-700"
+              className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-foreground"
             />
             {errors.nome_completo && (
-              <p className="text-xs text-red-500 mt-1.5 ml-1 font-medium">
+              <p className="text-xs text-destructive mt-1.5 ml-1 font-medium">
                 {errors.nome_completo.message}
               </p>
             )}
           </div>
           <CpfField cpfDisplay={cpfDisplay} cpfErro={cpfErro} onChange={handleCpfChange} />
           <div className="relative">
-            <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+            <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
             <input
               {...register('data_nascimento')}
               type="date"
-              className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-500"
+              className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-muted-foreground"
             />
           </div>
         </div>
 
         {camposDinamicos.length > 0 && (
           <div className="pt-2">
-            <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4">
+            <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-4">
               Campos Adicionais
             </h3>
             <CamposDinamicosGrid
@@ -1057,33 +1057,33 @@ export default function NovoAluno() {
   function renderStep2() {
     return (
       <div className="space-y-4 animate-in fade-in">
-        <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4
+        <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-4
           flex items-center gap-2">
           <Phone size={16} /> Contato
         </h3>
         <div className="grid grid-cols-1 gap-4">
           <div className="relative">
-            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
             <input
               {...register('email')}
               type="email"
               placeholder="E-mail de acesso *"
-              className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-700"
+              className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-foreground"
             />
             {errors.email && (
-              <p className="text-xs text-red-500 mt-1.5 ml-1 font-medium">
+              <p className="text-xs text-destructive mt-1.5 ml-1 font-medium">
                 {errors.email.message}
               </p>
             )}
           </div>
           <div className="relative">
-            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
             <input
-              {...register('telefone')}
+              {...register('telefone', { onChange: (e) => { e.target.value = formatarTelefone(e.target.value); } })}
               placeholder="Telefone / WhatsApp"
-              className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-700"
+              className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-foreground"
             />
           </div>
         </div>
@@ -1094,19 +1094,19 @@ export default function NovoAluno() {
   function renderStep3() {
     return (
       <div className="space-y-4 animate-in fade-in">
-        <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4
+        <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-4
           flex items-center gap-2">
           <MapPin size={16} /> Endereço Residencial
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <CepField register={register} buscandoCep={buscandoCep} cepErro={cepErro} onBlur={e => buscarCep(e.target.value)} />
           <div className="relative md:col-span-2">
-            <Home className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+            <Home className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
             <input
               {...register('rua')}
               placeholder="Rua / Logradouro"
-              className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-700"
+              className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-foreground"
             />
           </div>
           <div className="relative">
@@ -1114,47 +1114,47 @@ export default function NovoAluno() {
               id="input-numero"
               {...register('numero')}
               placeholder="Número"
-              className="w-full px-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-700"
+              className="w-full px-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-foreground"
             />
           </div>
           <div className="relative md:col-span-2">
             <input
               {...register('complemento')}
               placeholder="Complemento (Apto, Bloco...)"
-              className="w-full px-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-700"
+              className="w-full px-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-foreground"
             />
           </div>
           <div className="relative">
             <input
               {...register('bairro')}
               placeholder="Bairro"
-              className="w-full px-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-700"
+              className="w-full px-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-foreground"
             />
           </div>
           <div className="relative md:col-span-2">
             <input
               {...register('cidade')}
               placeholder="Cidade"
-              className="w-full px-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-700"
+              className="w-full px-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-foreground"
             />
           </div>
         </div>
         <div className="pt-2">
-          <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4
+          <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-4
             flex items-center gap-2">
             <Phone size={16} /> Contato de Emergência
           </h3>
           <div className="relative">
-            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
             <input
               {...register('contato_emergencia')}
               placeholder="Nome — (51) 9 0000-0000"
-              className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-700"
+              className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-foreground"
             />
           </div>
         </div>
@@ -1165,32 +1165,40 @@ export default function NovoAluno() {
   function renderStep4() {
     return (
       <div className="space-y-4 animate-in fade-in">
-        <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4
+        <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-4
           flex items-center gap-2">
           <ShieldCheck size={16} /> Acesso e Plano
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="relative">
-            <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+            <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
             <select
               {...register('role')}
-              className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl outline-none font-bold
-                text-gray-600 appearance-none cursor-pointer"
+              className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl outline-none font-bold
+                text-muted-foreground appearance-none cursor-pointer"
             >
               <option value="aluno">Aluno</option>
             </select>
           </div>
           <div className="relative">
-            <Package className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+            <Package className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
             <select
               {...register('plano_id')}
               disabled={roleAtual !== 'aluno'}
-              className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl outline-none font-bold
-                text-gray-600 appearance-none cursor-pointer"
+              className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl outline-none font-bold
+                text-muted-foreground appearance-none cursor-pointer"
             >
               <option value="">Vincular Plano...</option>
               {planos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
             </select>
+            {planos.length === 0 && (
+              <p className="mt-1.5 ml-1 text-[11px] text-muted-foreground">
+                Nenhum plano cadastrado ainda.{' '}
+                <a href="/planos" target="_blank" rel="noreferrer" className="font-bold text-primary hover:underline">
+                  Criar um plano →
+                </a>
+              </p>
+            )}
           </div>
           {PlanoSlots()}
         </div>
@@ -1203,44 +1211,44 @@ export default function NovoAluno() {
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 animate-in fade-in">
         {/* Informações Pessoais */}
         <div className="space-y-4">
-          <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4
+          <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-4
             flex items-center gap-2">
             <User size={16} /> Informações Pessoais
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="relative md:col-span-2">
-              <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+              <User className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
               <input
                 {...register('nome_completo')}
                 placeholder="Nome Completo *"
-                className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                  focus:border-orange-200 outline-none font-medium text-gray-700"
+                className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                  focus:border-primary outline-none font-medium text-foreground"
               />
             </div>
             <CpfField cpfDisplay={cpfDisplay} cpfErro={cpfErro} onChange={handleCpfChange} />
             <div className="relative">
-              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
               <input
                 {...register('data_nascimento')}
                 type="date"
-                className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                  focus:border-orange-200 outline-none font-medium text-gray-500"
+                className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                  focus:border-primary outline-none font-medium text-muted-foreground"
               />
             </div>
             <div className="relative md:col-span-2">
-              <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+              <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
               <input
-                {...register('telefone')}
+                {...register('telefone', { onChange: (e) => { e.target.value = formatarTelefone(e.target.value); } })}
                 placeholder="Telefone / WhatsApp"
-                className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                  focus:border-orange-200 outline-none font-medium text-gray-700"
+                className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                  focus:border-primary outline-none font-medium text-foreground"
               />
             </div>
           </div>
 
           {camposDinamicos.length > 0 && (
             <div className="pt-2">
-              <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">
+              <h4 className="text-xs font-black text-muted-foreground uppercase tracking-widest mb-3">
                 Campos Adicionais
               </h4>
               <CamposDinamicosGrid
@@ -1254,20 +1262,20 @@ export default function NovoAluno() {
         </div>
 
         {/* Endereço */}
-        <div className="space-y-4 pt-4 border-t border-gray-50">
-          <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4
+        <div className="space-y-4 pt-4 border-t border-border">
+          <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-4
             flex items-center gap-2">
             <MapPin size={16} /> Endereço Residencial
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <CepField register={register} buscandoCep={buscandoCep} cepErro={cepErro} onBlur={e => buscarCep(e.target.value)} />
             <div className="relative md:col-span-2">
-              <Home className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+              <Home className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
               <input
                 {...register('rua')}
                 placeholder="Rua / Logradouro"
-                className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                  focus:border-orange-200 outline-none font-medium text-gray-700"
+                className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                  focus:border-primary outline-none font-medium text-foreground"
               />
             </div>
             <div className="relative">
@@ -1275,86 +1283,94 @@ export default function NovoAluno() {
                 id="input-numero"
                 {...register('numero')}
                 placeholder="Número"
-                className="w-full px-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                  focus:border-orange-200 outline-none font-medium text-gray-700"
+                className="w-full px-4 py-4 bg-muted rounded-2xl border border-transparent
+                  focus:border-primary outline-none font-medium text-foreground"
               />
             </div>
             <div className="relative md:col-span-2">
               <input
                 {...register('complemento')}
                 placeholder="Complemento (Apto, Bloco...)"
-                className="w-full px-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                  focus:border-orange-200 outline-none font-medium text-gray-700"
+                className="w-full px-4 py-4 bg-muted rounded-2xl border border-transparent
+                  focus:border-primary outline-none font-medium text-foreground"
               />
             </div>
             <div className="relative">
               <input
                 {...register('bairro')}
                 placeholder="Bairro"
-                className="w-full px-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                  focus:border-orange-200 outline-none font-medium text-gray-700"
+                className="w-full px-4 py-4 bg-muted rounded-2xl border border-transparent
+                  focus:border-primary outline-none font-medium text-foreground"
               />
             </div>
             <div className="relative md:col-span-2">
               <input
                 {...register('cidade')}
                 placeholder="Cidade"
-                className="w-full px-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                  focus:border-orange-200 outline-none font-medium text-gray-700"
+                className="w-full px-4 py-4 bg-muted rounded-2xl border border-transparent
+                  focus:border-primary outline-none font-medium text-foreground"
               />
             </div>
           </div>
           <div className="relative mt-4">
-            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
             <input
               {...register('contato_emergencia')}
               placeholder="Contato de Emergência — Nome (51) 9 0000-0000"
-              className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                focus:border-orange-200 outline-none font-medium text-gray-700"
+              className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                focus:border-primary outline-none font-medium text-foreground"
             />
           </div>
         </div>
 
         {/* Plano e Regras */}
-        <div className="space-y-4 pt-4 border-t border-gray-50">
-          <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4
+        <div className="space-y-4 pt-4 border-t border-border">
+          <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-4
             flex items-center gap-2">
             <ShieldCheck size={16} /> Acesso e Plano
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="relative md:col-span-2">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
               <input
                 {...register('email')}
                 type="email"
                 placeholder="E-mail de acesso *"
                 disabled
-                className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl border border-transparent
-                  focus:border-orange-200 outline-none font-medium text-gray-700
+                className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl border border-transparent
+                  focus:border-primary outline-none font-medium text-foreground
                   disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
             <div className="relative">
-              <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+              <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
               <select
                 {...register('role')}
-                className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl outline-none font-bold
-                  text-gray-600 appearance-none cursor-pointer"
+                className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl outline-none font-bold
+                  text-muted-foreground appearance-none cursor-pointer"
               >
                 <option value="aluno">Aluno</option>
               </select>
             </div>
             <div className="relative">
-              <Package className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
+              <Package className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
               <select
                 {...register('plano_id')}
                 disabled={roleAtual !== 'aluno'}
-                className="w-full pl-12 pr-4 py-4 bg-gray-50 rounded-2xl outline-none font-bold
-                  text-gray-600 appearance-none cursor-pointer"
+                className="w-full pl-12 pr-4 py-4 bg-muted rounded-2xl outline-none font-bold
+                  text-muted-foreground appearance-none cursor-pointer"
               >
                 <option value="">Vincular Plano...</option>
                 {planos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
               </select>
+              {planos.length === 0 && (
+                <p className="mt-1.5 ml-1 text-[11px] text-muted-foreground">
+                  Nenhum plano cadastrado ainda.{' '}
+                  <a href="/planos" target="_blank" rel="noreferrer" className="font-bold text-primary hover:underline">
+                    Criar um plano →
+                  </a>
+                </p>
+              )}
             </div>
             {PlanoSlots()}
           </div>
@@ -1363,7 +1379,7 @@ export default function NovoAluno() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full bg-primary text-white py-5 rounded-[22px] font-black text-lg shadow-lg
+          className="w-full bg-primary text-primary-foreground py-5 rounded-[22px] font-black text-lg shadow-lg
             shadow-primary/20 hover:scale-[1.01] flex items-center justify-center gap-3 mt-8
             transition-all"
         >
@@ -1378,25 +1394,25 @@ export default function NovoAluno() {
   function renderAgenda() {
     return (
       <div className="space-y-6 animate-in fade-in">
-        <div className="bg-orange-50 p-5 rounded-2xl border border-orange-100
+        <div className="bg-primary/soft p-5 rounded-2xl border border-primary/20
           flex flex-col md:flex-row items-start gap-4">
-          <AlertTriangle className="text-orange-500 shrink-0 mt-1 hidden md:block" size={24} />
+          <AlertTriangle className="text-primary shrink-0 mt-1 hidden md:block" size={24} />
           <div>
-            <h4 className="font-black text-orange-900">Gerenciamento de Turmas Regulares</h4>
-            <p className="text-sm text-orange-800 font-medium mt-1">
+            <h4 className="font-black text-primary">Gerenciamento de Turmas Regulares</h4>
+            <p className="text-sm text-primary font-medium mt-1">
               Matricule o aluno nas turmas fixas que ele selecionou.
             </p>
           </div>
         </div>
         {loadingAgenda ? (
           <div className="flex justify-center p-12">
-            <RefreshCw className="animate-spin text-gray-300" size={32} />
+            <RefreshCw className="animate-spin text-muted-foreground" size={32} />
           </div>
         ) : (
           <div className="space-y-8">
             {listaModalidadesAgenda.length === 0 ? (
-              <p className="text-gray-400 text-center py-8 bg-gray-50 rounded-2xl
-                border border-dashed border-gray-200">
+              <p className="text-muted-foreground text-center py-8 bg-muted rounded-2xl
+                border border-dashed border-border">
                 Nenhuma modalidade configurada no perfil deste aluno ainda.
               </p>
             ) : (
@@ -1408,13 +1424,13 @@ export default function NovoAluno() {
                 if (turmas.length === 0) return null;
                 return (
                   <div key={modObj.id}
-                    className="bg-white border border-gray-100 rounded-3xl overflow-hidden shadow-sm">
-                    <div className="bg-gray-50 border-b border-gray-100 p-4 flex flex-col
+                    className="bg-card border border-border rounded-3xl overflow-hidden shadow-sm">
+                    <div className="bg-muted border-b border-border p-4 flex flex-col
                       md:flex-row justify-between items-start md:items-center gap-2">
-                      <h3 className="font-black text-gray-800 text-lg">{modObj.nome}</h3>
+                      <h3 className="font-black text-foreground text-lg">{modObj.nome}</h3>
                       <div className={`px-3 py-1 rounded-lg font-black text-xs uppercase
                         tracking-wider
-                        ${isFull ? 'bg-orange-100 text-primary' : 'bg-green-100 text-green-700'}`}>
+                        ${isFull ? 'bg-primary/soft text-primary' : 'bg-success-soft text-success'}`}>
                         Vagas: {usado} de {limite}
                       </div>
                     </div>
@@ -1426,11 +1442,11 @@ export default function NovoAluno() {
                             <div key={aula.id} className={`p-4 rounded-2xl border-2 flex
                               justify-between items-center transition-all
                               ${isMatriculado
-                                ? 'border-green-200 bg-green-50/30'
-                                : 'border-gray-100 bg-white hover:border-gray-200'}`}>
+                                ? 'border-success/30 bg-success-soft'
+                                : 'border-border bg-card hover:border-border'}`}>
                               <div>
-                                <p className="font-black text-gray-800">{aula.dia_semana}</p>
-                                <p className="text-sm font-medium text-gray-500">
+                                <p className="font-black text-foreground">{aula.dia_semana}</p>
+                                <p className="text-sm font-medium text-muted-foreground">
                                   {aula.horario.slice(0, 5)} - {aula.atividade}
                                 </p>
                               </div>
@@ -1439,8 +1455,8 @@ export default function NovoAluno() {
                                 className={`w-10 h-10 shrink-0 rounded-xl flex flex-col items-center
                                   justify-center transition-colors
                                   ${isMatriculado
-                                    ? 'bg-red-50 text-red-500 hover:bg-red-100'
-                                    : 'bg-gray-100 text-gray-500 hover:bg-green-500 hover:text-white'}`}
+                                    ? 'bg-destructive-soft text-destructive hover:bg-destructive-soft'
+                                    : 'bg-muted text-muted-foreground hover:bg-success hover:text-success-foreground'}`}
                               >
                                 {isMatriculado ? <Trash2 size={18} /> : <Plus size={18} />}
                               </button>
@@ -1463,30 +1479,30 @@ export default function NovoAluno() {
     <div className="p-4 md:p-8 w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
       <button
         onClick={() => navigate('/alunos')}
-        className="flex items-center gap-2 text-gray-400 hover:text-primary font-bold mb-6
+        className="flex items-center gap-2 text-muted-foreground hover:text-primary font-bold mb-6
           transition-colors"
       >
         <ArrowLeft size={20} /> Voltar para lista
       </button>
 
-      <div className="bg-white rounded-[24px] md:rounded-[40px] shadow-sm border border-gray-100
+      <div className="bg-card rounded-[24px] md:rounded-[40px] shadow-sm border border-border
         p-6 md:p-10 w-full">
-        <h1 className="text-2xl md:text-3xl font-black text-gray-800 mb-6">
+        <h1 className="text-2xl md:text-3xl font-black text-foreground mb-6">
           {alunoParaEditar ? 'Perfil do Membro' : 'Novo Cadastro'}
         </h1>
 
         {/* EDIT MODE */}
         {alunoParaEditar && (
           <>
-            <div className="flex gap-6 border-b border-gray-100 mb-8 overflow-x-auto
+            <div className="flex gap-6 border-b border-border mb-8 overflow-x-auto
               custom-scrollbar">
               <button
                 onClick={() => setAbaAtiva('dados')}
                 className={`pb-4 font-black uppercase tracking-wider text-sm transition-all
                   border-b-2 whitespace-nowrap
                   ${abaAtiva === 'dados'
-                    ? 'border-iluminus-terracota text-primary'
-                    : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-muted-foreground hover:text-muted-foreground'}`}
               >
                 Dados Cadastrais
               </button>
@@ -1495,8 +1511,8 @@ export default function NovoAluno() {
                 className={`pb-4 font-black uppercase tracking-wider text-sm transition-all
                   border-b-2 flex items-center gap-2 whitespace-nowrap
                   ${abaAtiva === 'agenda'
-                    ? 'border-iluminus-terracota text-primary'
-                    : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-muted-foreground hover:text-muted-foreground'}`}
               >
                 <CalendarDays size={18} /> Agenda Fixa (Turmas)
               </button>
@@ -1520,8 +1536,8 @@ export default function NovoAluno() {
                   <button
                     type="button"
                     onClick={() => setStepAtual(s => s - 1)}
-                    className="flex-1 py-4 rounded-[22px] font-black text-gray-500 bg-gray-50
-                      hover:bg-gray-100 flex items-center justify-center gap-2 transition-all"
+                    className="flex-1 py-4 rounded-[22px] font-black text-muted-foreground bg-muted
+                      hover:bg-muted flex items-center justify-center gap-2 transition-all"
                   >
                     <ArrowLeft size={20} /> Voltar
                   </button>
@@ -1530,7 +1546,7 @@ export default function NovoAluno() {
                   <button
                     type="button"
                     onClick={avancarStep}
-                    className="flex-1 bg-primary text-white py-4 rounded-[22px] font-black
+                    className="flex-1 bg-primary text-primary-foreground py-4 rounded-[22px] font-black
                       flex items-center justify-center gap-2 hover:scale-[1.01] transition-all
                       shadow-lg shadow-primary/20"
                   >
@@ -1541,7 +1557,7 @@ export default function NovoAluno() {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="flex-1 bg-primary text-white py-5 rounded-[22px] font-black text-lg
+                    className="flex-1 bg-primary text-primary-foreground py-5 rounded-[22px] font-black text-lg
                       shadow-lg shadow-primary/20 hover:scale-[1.01] flex items-center
                       justify-center gap-3 transition-all"
                   >
@@ -1558,14 +1574,14 @@ export default function NovoAluno() {
         {!alunoParaEditar && cadastroSalvo && (
           <div className="animate-in fade-in space-y-6">
             {/* Success banner */}
-            <div className="bg-green-50 border border-green-200 rounded-3xl p-6
+            <div className="bg-success-soft border border-success/30 rounded-3xl p-6
               flex items-start gap-4">
-              <CheckCircle2 className="text-green-500 shrink-0 mt-0.5" size={24} />
+              <CheckCircle2 className="text-success shrink-0 mt-0.5" size={24} />
               <div>
-                <h3 className="font-black text-green-900 text-lg">
+                <h3 className="font-black text-success text-lg">
                   Cadastro salvo com sucesso!
                 </h3>
-                <p className="text-sm text-green-700 mt-1">
+                <p className="text-sm text-success mt-1">
                   Os dados de <strong>{alunoSalvoNome}</strong> foram salvos.
                   Agora você pode criar o acesso ao app, ou fazer isso depois.
                 </p>
@@ -1573,24 +1589,24 @@ export default function NovoAluno() {
             </div>
 
             {!acessoCriado ? (
-              <div className="bg-white border-2 border-dashed border-gray-200 rounded-3xl
+              <div className="bg-card border-2 border-dashed border-border rounded-3xl
                 p-8 space-y-4">
                 <div className="flex items-center gap-3 mb-2">
-                  <KeyRound className="text-gray-400" size={24} />
-                  <h3 className="font-black text-gray-800 text-lg">Criar Acesso ao App</h3>
+                  <KeyRound className="text-muted-foreground" size={24} />
+                  <h3 className="font-black text-foreground text-lg">Criar Acesso ao App</h3>
                 </div>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-muted-foreground">
                   Isso cria um login para <strong>{alunoSalvoEmail}</strong> com senha
                   provisória. O aluno será solicitado a trocar no primeiro acesso.
                 </p>
 
                 {erroAcesso && (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-4
+                  <div className="bg-destructive-soft border border-destructive/30 rounded-xl p-4
                     flex items-start gap-3">
-                    <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={18} />
+                    <AlertCircle className="text-destructive shrink-0 mt-0.5" size={18} />
                     <div>
-                      <p className="text-sm font-bold text-red-700">{erroAcesso}</p>
-                      <p className="text-xs text-red-500 mt-1">
+                      <p className="text-sm font-bold text-destructive">{erroAcesso}</p>
+                      <p className="text-xs text-destructive mt-1">
                         Você pode tentar novamente ou pular e fazer isso depois.
                       </p>
                     </div>
@@ -1601,8 +1617,8 @@ export default function NovoAluno() {
                   <button
                     onClick={criarAcesso}
                     disabled={criandoAcesso}
-                    className="flex-1 bg-gray-800 text-white py-4 rounded-2xl font-black
-                      flex items-center justify-center gap-2 hover:bg-gray-700
+                    className="flex-1 bg-foreground text-background py-4 rounded-2xl font-black
+                      flex items-center justify-center gap-2 hover:bg-foreground
                       transition-all disabled:opacity-60"
                   >
                     {criandoAcesso
@@ -1611,23 +1627,23 @@ export default function NovoAluno() {
                   </button>
                   <button
                     onClick={() => navigate('/alunos')}
-                    className="flex-1 py-4 rounded-2xl font-black text-gray-400 bg-gray-50
-                      hover:bg-gray-100 transition-all"
+                    className="flex-1 py-4 rounded-2xl font-black text-muted-foreground bg-muted
+                      hover:bg-muted transition-all"
                   >
                     Fazer depois
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="bg-blue-50 border border-blue-200 rounded-3xl p-6 text-center">
-                <CheckCircle2 className="text-blue-500 mx-auto mb-3" size={32} />
-                <h3 className="font-black text-blue-900">Acesso criado!</h3>
-                <p className="text-sm text-blue-700 mt-1">
+              <div className="bg-info-soft border border-info/30 rounded-3xl p-6 text-center">
+                <CheckCircle2 className="text-info mx-auto mb-3" size={32} />
+                <h3 className="font-black text-info">Acesso criado!</h3>
+                <p className="text-sm text-info mt-1">
                   As instruções de acesso foram geradas.
                 </p>
                 <button
                   onClick={() => navigate('/alunos')}
-                  className="mt-4 bg-primary text-white px-8 py-3 rounded-xl font-black
+                  className="mt-4 bg-primary text-primary-foreground px-8 py-3 rounded-xl font-black
                     hover:scale-105 transition-all"
                 >
                   Voltar para lista
@@ -1644,13 +1660,13 @@ export default function NovoAluno() {
         onClose={() => setConfirmModal(null)}
         titulo="Confirmação"
       >
-        <p className="text-gray-700 font-medium mb-6 whitespace-pre-line leading-relaxed">
+        <p className="text-foreground font-medium mb-6 whitespace-pre-line leading-relaxed">
           {confirmModal?.mensagem}
         </p>
         <div className="flex gap-3">
           <button
             onClick={() => setConfirmModal(null)}
-            className="flex-1 py-3 rounded-2xl font-black text-gray-500 bg-gray-50 hover:bg-gray-100 transition-all"
+            className="flex-1 py-3 rounded-2xl font-black text-muted-foreground bg-muted hover:bg-muted transition-all"
           >
             Cancelar
           </button>
@@ -1659,7 +1675,7 @@ export default function NovoAluno() {
               confirmModal?.onConfirmar();
               setConfirmModal(null);
             }}
-            className="flex-1 py-3 rounded-2xl font-black text-white bg-primary hover:opacity-90 transition-all shadow-lg shadow-primary/20"
+            className="flex-1 py-3 rounded-2xl font-black text-primary-foreground bg-primary hover:opacity-90 transition-all shadow-lg shadow-primary/20"
           >
             Confirmar
           </button>
@@ -1673,8 +1689,8 @@ export default function NovoAluno() {
       >
         <button
           onClick={copiarInstrucoes}
-          className="w-full bg-gray-800 text-white py-4 rounded-2xl font-bold
-            flex items-center justify-center gap-2 hover:bg-gray-700"
+          className="w-full bg-foreground text-background py-4 rounded-2xl font-bold
+            flex items-center justify-center gap-2 hover:bg-foreground"
         >
           {copiado ? <Check size={20} /> : <Copy size={20} />} Copiar Instruções
         </button>

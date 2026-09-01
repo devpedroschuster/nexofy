@@ -286,6 +286,35 @@ const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
               }
             />
           </div>
+        ) : aulas.length === 0 ? (
+          // Nenhuma aula cadastrada em nenhum período (janela de 24 meses,
+          // ver useAgenda.js) — diferente do caso acima (filtro de espaço
+          // sem eventos): aqui o estúdio genuinamente nunca criou uma aula.
+          // Antes disso a grade ficava em branco, sem nenhuma explicação.
+          <div className="h-full flex items-center justify-center">
+            <EmptyState
+              icon={<CalendarX size={28} />}
+              title="Nenhuma aula cadastrada ainda"
+              description={
+                isAdmin
+                  ? 'Crie a primeira turma para começar a preencher sua agenda.'
+                  : 'Ainda não há aulas cadastradas neste estúdio.'
+              }
+              action={
+                isAdmin && (
+                  <button
+                    onClick={() => {
+                      setNovaAula(INITIAL_FORM_STATE);
+                      modais.novaAula.abrir();
+                    }}
+                    className="text-sm font-bold text-primary hover:underline"
+                  >
+                    Criar primeira aula
+                  </button>
+                )
+              }
+            />
+          </div>
         ) : (
           <CalendarioGrade
             eventos={eventosCalendario}
