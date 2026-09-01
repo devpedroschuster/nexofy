@@ -21,6 +21,7 @@ import ErrorBoundary from './components/shared/ErrorBoundary';
 import Sidebar from './components/Sidebar';
 import { PWABanners } from './components/PWABanners';
 import PaginaNaoEncontrada from './components/PaginaNaoEncontrada';
+import TrialBanner from './components/shared/TrialBanner';
 
 // Impersonation
 import { ImpersonationProvider } from './context/ImpersonationContext';
@@ -121,6 +122,8 @@ const LayoutComSidebar = ({ perfil, nomeUsuario, estudioId }) => {
       />
 
       <div className="flex-1 flex flex-col h-screen overflow-hidden w-full max-w-full">
+        <TrialBanner />
+
         <div className="md:hidden flex items-center justify-between bg-card border-b border-border p-4 shrink-0 z-10 shadow-sm transition-colors duration-300">
           <div>
             <h2 className="text-xl font-black text-primary tracking-tight leading-none">{nomeEstudio}</h2>

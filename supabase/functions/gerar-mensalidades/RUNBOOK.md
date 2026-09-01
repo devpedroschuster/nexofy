@@ -13,10 +13,12 @@
    `x-cron-secret`.
 2. **Todos os estúdios ativos** (sem `estudioId` no payload) — **exclusivo do
    cron** (`x-cron-secret` válido). Sem isso, uma chamada sem `estudioId`
-   continua rejeitada com 400. Itera `estudios` com `status='ativo'` e chama
-   o núcleo de geração (`gerarMensalidadesDoEstudio`) pra cada um,
-   isoladamente — um estúdio falhar não aborta os demais (fica registrado em
-   `resultados[]` na resposta e reportado ao Sentry individualmente).
+   continua rejeitada com 400. Itera `estudios` com `status='ativo'` **e**
+   sem trial expirado (`trial_ends_at is null or trial_ends_at > now()` —
+   PED-105) e chama o núcleo de geração (`gerarMensalidadesDoEstudio`) pra
+   cada um, isoladamente — um estúdio falhar não aborta os demais (fica
+   registrado em `resultados[]` na resposta e reportado ao Sentry
+   individualmente).
 
 Um admin nunca consegue disparar o modo "todos" pelo frontend: o painel
 sempre manda `estudioId` (ver abaixo), e mesmo que alguém chamasse a function
@@ -189,3 +191,9 @@ aparece mais como "missed".
 - [ ] Novo estúdio criado com `status` diferente de `'ativo'` não entra no
       lote automático — é a mesma definição de "ativo" usada em
       `verificar_status_estudio()`/`estudioBloqueado` no frontend.
+- [ ] Estúdio com `status='ativo'` mas trial expirado (`trial_ends_at` no
+      passado) também não entra no lote automático desde a PED-105 — ver o
+      `.or('trial_ends_at.is.null,trial_ends_at.gt.<agora>')` em
+      `handleBatchTodosEstudios` (`index.ts`). Sem esse filtro o cron
+      continuaria gerando mensalidade indefinidamente pra um estúdio cujos
+      usuários já estão bloqueados de logar.
