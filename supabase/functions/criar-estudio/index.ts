@@ -152,13 +152,16 @@ if (authExistente) {
   // única transação Postgres. Se qualquer INSERT falhar, o Postgres desfaz
   // tudo automaticamente — sem rollback manual.
   const { data: rpcData, error: rpcErr } = await admin.rpc('criar_estudio_transacional', {
-    p_nome:        nome.trim(),
-    p_slug:        slugNorm,
-    p_whatsapp:    whatsapp?.trim() ?? null,
-    p_instagram:   instagram?.trim() ?? null,
-    p_admin_id:    adminAuthId,
-    p_admin_nome:  adminNome.trim(),
-    p_admin_email: emailNorm,
+    p_nome:          nome.trim(),
+    p_slug:          slugNorm,
+    p_whatsapp:      whatsapp?.trim() ?? null,
+    p_instagram:     instagram?.trim() ?? null,
+    p_admin_id:      adminAuthId,
+    p_admin_nome:    adminNome.trim(),
+    p_admin_email:   emailNorm,
+    // PED-105: onboarding manual do super_admin não inicia o trial de
+    // 14 dias — presume-se acordo comercial fora do fluxo self-service.
+    p_iniciar_trial: false,
   });
 
   if (rpcErr) {
