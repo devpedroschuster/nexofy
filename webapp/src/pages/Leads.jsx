@@ -26,6 +26,20 @@ const MEDIA_HISTORICA = 0.55;
 // Valor especial usado no seletor de período para representar "todos os meses"
 const TODOS_PERIODOS = 'todos';
 
+// FIX (PED-100): "Realizou em" só faz sentido pra uma data já passada — uma
+// aula experimental ainda agendada (data futura) mostrando "Realizou em"
+// sugere, de forma enganosa, que ela já aconteceu. Comparação por dia (não
+// por instante) e em UTC, mesmo padrão de calcularStatusVencimento em
+// Alunos.jsx, pra não depender do fuso horário do navegador.
+function dataEhFutura(dataStr) {
+  if (!dataStr) return false;
+  const hoje = new Date();
+  const hojeUTC = Date.UTC(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  const [ano, mes, dia] = dataStr.split('T')[0].split('-').map(Number);
+  const dataUTC = Date.UTC(ano, mes - 1, dia);
+  return dataUTC > hojeUTC;
+}
+
 // ── Dropdown de Status Inline ───────────────────────────────────────────────
 function StatusDropdown({ lead, onAlterarStatus, isProcessando }) {
   const [aberto, setAberto] = useState(false);
@@ -495,7 +509,7 @@ const {
                     </Badge>
                     <h3 className="font-black text-foreground text-xl leading-tight">{lead.nome_visitante}</h3>
 <p className="text-xs font-bold text-muted-foreground mt-1">
-  Realizou em: {formatarData(lead.data_visita)} {/* FIX: era lead.data_checkin */}
+  {dataEhFutura(lead.data_visita) ? 'Agendado para' : 'Realizou em'}: {formatarData(lead.data_visita)} {/* FIX: era lead.data_checkin */}
 </p>
                   </div>
                   <Surface variant="muted" padding="sm" className="mb-6 flex items-center gap-3 rounded-xl border border-border">
