@@ -340,6 +340,7 @@ export const alunosService = {
         p_modalidades: modalidades,
         p_valor_pago:  plano.preco ?? 0,
         p_descricao:   descricao,
+        p_estudio_id:  estudioId,
       });
 
       if (error) throw error;
