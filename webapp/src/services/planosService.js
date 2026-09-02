@@ -60,6 +60,15 @@ export const planosService = {
     return data;
   },
 
+  async contar(estudioId) {
+    const { count, error } = await supabase
+      .from('planos')
+      .select('id', { count: 'exact', head: true })
+      .eq('estudio_id', estudioId);
+    if (error) throw error;
+    return count || 0;
+  },
+
   // Sprint 02: estudioId obrigatório no INSERT de planos.
   // FIX: validação defensiva no service — não confia apenas no formulário do client.
   // FIX: inclui comissao_* e is_plano_livre, antes ausentes do payload (campos
