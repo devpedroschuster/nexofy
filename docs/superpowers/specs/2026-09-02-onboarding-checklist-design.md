@@ -96,6 +96,14 @@ existente — nada novo ali.
   `totalObrigatorias` (3 — ignora a etapa opcional), `percentual =
   round(concluidasObrigatorias / totalObrigatorias * 100)`, `completo =
   concluidasObrigatorias === totalObrigatorias`.
+- `calcularEstadoChecklist({ completo, dismissed, seenIncomplete, completedAck })`
+  (achado durante o planejamento da implementação): decide entre
+  `'expandido' | 'colapsado' | 'comemorando' | 'oculto'`. Existe pra evitar
+  que um estúdio **já configurado antes deste deploy** veja a comemoração
+  com confete do nada na primeira vez que abrir o painel — `seenIncomplete`
+  (gravada só quando o checklist já foi mostrado incompleto ao menos uma vez
+  pra esse estúdio/navegador) distingue "acabou de completar agora" de "já
+  estava completo desde sempre".
 
 ### 3. Componente — `src/components/shared/OnboardingChecklist.jsx`
 
