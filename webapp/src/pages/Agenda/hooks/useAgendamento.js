@@ -93,16 +93,39 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
     let cancelado = false;
     let timeoutId;
 
+    // Fix (PED-113): lê os campos via `agendamentoForm.<campo>` (member
+    // expression), em vez de `const { aula_id, ... } = agendamentoForm`.
+    // O array de dependências abaixo já era o correto — só os 4 campos
+    // primitivos que este efeito realmente usa, não o objeto inteiro —
+    // mas a desestruturação escondia isso do ESLint: ele não consegue
+    // provar, a partir de um `const {...} = agendamentoForm`, que só
+    // esses 4 campos importam, e por isso acusava "missing dependency:
+    // 'agendamentoForm'". Adicionar `agendamentoForm` inteiro às deps
+    // (o "fix" ingênuo sugerido pelo warning) seria pior: o objeto é
+    // recriado a cada `setAgendamentoForm({ ...agendamentoForm, ... })`
+    // disparado por qualquer campo do formulário (ver
+    // ModalAgendamento.jsx, ex.: digitar o nome do visitante) — o efeito
+    // (e a RPC de disponibilidade dentro dele) passaria a disparar a
+    // cada tecla digitada, não só quando aula/data/aluno/tipo realmente
+    // mudam. Esse é exatamente o padrão (setState em useEffect cuja
+    // dependência muda a cada render) que gera o loop infinito de
+    // "Maximum update depth exceeded" relatado no PED-113. Usando member
+    // expressions diretamente, o ESLint reconhece que as dependências
+    // primitivas e estáveis já listadas cobrem tudo que o efeito usa.
+    const aulaId = agendamentoForm.aula_id;
+    const dataAula = agendamentoForm.data_aula;
+    const tipo = agendamentoForm.tipo;
+    const alunoId = agendamentoForm.aluno_id;
+
     async function checarDisponibilidadeLive() {
-      const { aula_id, data_aula, tipo, aluno_id } = agendamentoForm;
-      if (!aula_id || !data_aula) {
+      if (!aulaId || !dataAula) {
         setInfoVaga(null);
         setVerificandoVaga(false);
         return;
       }
 
       const prontoParaVerificar =
-        tipo === 'visitante' || (tipo === 'cadastrado' && !!aluno_id);
+        tipo === 'visitante' || (tipo === 'cadastrado' && !!alunoId);
       if (!prontoParaVerificar) {
         setInfoVaga(null);
         setVerificandoVaga(false);
@@ -110,13 +133,13 @@ export function useAgendamento(onSucesso, feriados = [], estudioId) {
       }
 
       setVerificandoVaga(true);
-      const alunoIdParaChecar = tipo === 'cadastrado' ? aluno_id : null;
+      const alunoIdParaChecar = tipo === 'cadastrado' ? alunoId : null;
       // Fix: propaga estudioId para a RPC de disponibilidade — as demais
       // chamadas do módulo (agendar_avulso, criar_lead_com_presenca) sempre
       // escopam por estudio_id; esta era a única exceção, o que permitia
       // consultar disponibilidade de uma aula de outro estúdio só com o UUID.
       const info = await agendamentoService.verificarDisponibilidade(
-        aula_id, data_aula, alunoIdParaChecar, estudioId
+        aulaId, dataAula, alunoIdParaChecar, estudioId
       );
       if (!cancelado) {
         if (info?.isErroTecnico) {
