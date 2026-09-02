@@ -13,6 +13,7 @@ import Surface from '../components/ui/Surface';
 import Skeleton from '../components/ui/Skeleton';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
+import OnboardingChecklist from '../components/shared/OnboardingChecklist';
 import Modal, { useModal } from '../components/ui/Modal';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -229,6 +230,8 @@ export default function Dashboard() {
           </Button>
         </Link>
       </div>
+
+      <OnboardingChecklist estudioId={idEfetivo} key={idEfetivo} />
 
       {/* Métricas rápidas do mês */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">

@@ -141,11 +141,16 @@ export default {
           '0%':   { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(0)' },
         },
+        'confetti-fall': {
+          '0%':   { transform: 'translateY(-10px) rotate(0deg)', opacity: '1' },
+          '100%': { transform: 'translateY(120px) rotate(360deg)', opacity: '0' },
+        },
       },
       animation: {
         'fade-in':       'fade-in 0.4s ease-out',
         'scale-in':      'scale-in 0.2s ease-out',
         'slide-in-left': 'slide-in-left 0.3s ease-out',
+        'confetti-fall': 'confetti-fall 900ms ease-in forwards',
       },
     },
   },

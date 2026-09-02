@@ -24,6 +24,15 @@ export const professoresService = {
     return data;
   },
 
+  async contar(estudioId) {
+    const { count, error } = await supabase
+      .from('professores')
+      .select('id', { count: 'exact', head: true })
+      .eq('estudio_id', estudioId);
+    if (error) throw error;
+    return count || 0;
+  },
+
   // Sprint 02: estudioId obrigatório no INSERT de professores.
   // CR1 FIX: o UPDATE agora também filtra por estudio_id — antes, qualquer
   // edição de professor era feita apenas por `id`, permitindo sobrescrever

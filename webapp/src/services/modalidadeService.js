@@ -16,6 +16,15 @@ export const modalidadeService = {
     return data;
   },
 
+  async contar(estudioId) {
+    const { count, error } = await supabase
+      .from('modalidades')
+      .select('id', { count: 'exact', head: true })
+      .eq('estudio_id', estudioId);
+    if (error) throw error;
+    return count || 0;
+  },
+
   async buscarPerfil(id, estudioId) {
     const [{ data: horarios, error: errHorarios }, { data: alunos, error: errAlunos }] = await Promise.all([
       supabase
