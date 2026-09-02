@@ -46,6 +46,13 @@ describe('calcularProgressoChecklist', () => {
     expect(progresso.etapas.find(e => e.id === 'professor').concluida).toBe(true);
     expect(progresso.percentual).toBe(100);
   });
+
+  it('2 de 3 obrigatórias arredonda o percentual pra 67%', () => {
+    const progresso = calcularProgressoChecklist({ modalidade: 1, professor: 0, plano: 1, aluno: 0 });
+    expect(progresso.concluidasObrigatorias).toBe(2);
+    expect(progresso.percentual).toBe(67);
+    expect(progresso.completo).toBe(false);
+  });
 });
 
 describe('calcularEstadoChecklist', () => {
@@ -72,5 +79,10 @@ describe('calcularEstadoChecklist', () => {
   it('mostra expandido quando incompleto e não dispensado', () => {
     expect(calcularEstadoChecklist({ completo: false, dismissed: false, seenIncomplete: false, completedAck: false }))
       .toEqual({ estado: 'expandido', marcarConcluido: false });
+  });
+
+  it('completo vence um dismissed "esquecido" de antes de terminar o checklist — ainda comemora', () => {
+    expect(calcularEstadoChecklist({ completo: true, dismissed: true, seenIncomplete: true, completedAck: false }))
+      .toEqual({ estado: 'comemorando', marcarConcluido: false });
   });
 });

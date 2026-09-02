@@ -71,7 +71,7 @@ export default function OnboardingChecklist({ estudioId }) {
   const [completedAck, setCompletedAck] = useState(() => lerFlag(chaveCompleted(estudioId)));
   const [seenIncomplete, setSeenIncomplete] = useState(() => lerFlag(chaveSeenIncomplete(estudioId)));
 
-  const { data: contagens, isLoading } = useQuery({
+  const { data: contagens } = useQuery({
     queryKey: ['onboarding-checklist', estudioId],
     queryFn: async () => {
       const [modalidade, professor, plano, aluno] = await Promise.all([
@@ -82,8 +82,18 @@ export default function OnboardingChecklist({ estudioId }) {
       ]);
       return { modalidade, professor, plano, aluno };
     },
-    enabled: !!estudioId,
-    staleTime: 1000 * 60 * 5,
+    // completedAck === true é estado terminal (calcularEstadoChecklist já
+    // retorna 'oculto' incondicionalmente nesse caso) — não há motivo pra
+    // continuar disparando as 4 queries de contagem em todo carregamento do
+    // dashboard de um estúdio que já reconheceu o checklist concluído.
+    enabled: !!estudioId && !completedAck,
+    // staleTime baixo de propósito: é assim que o checklist reage a "criei
+    // uma modalidade e voltei pro dashboard" (navegação SPA, sem reload)
+    // dentro da mesma sessão — refetchOnMount (default do React Query)
+    // recarrega as contagens sempre que o componente remonta. São 4 queries
+    // `count: exact, head: true`, bem leves; live-feedback correto importa
+    // mais aqui do que economizar essas requisições.
+    staleTime: 0,
   });
 
   const progresso = useMemo(() => calcularProgressoChecklist(contagens || {}), [contagens]);
@@ -108,14 +118,24 @@ export default function OnboardingChecklist({ estudioId }) {
   // sistema externo assíncrono, então não precisa de efeito. Cada `set`
   // aqui converge em uma única re-renderização extra (a guarda fica falsa
   // assim que o estado é atualizado), sem loop.
+  //
+  // A guarda é `contagens` (dado real carregado), não `isLoading`:
+  // isLoading fica false tanto quando a query teve sucesso quanto quando ela
+  // falhou (retries esgotados) ou está offline/pausada sem cache — nos dois
+  // últimos casos `contagens` continua undefined. Se a guarda fosse só
+  // `!isLoading`, uma falha transitória de rede no dashboard de um estúdio
+  // já totalmente configurado calcularia progresso sobre `{}` (0 de 3),
+  // gravaria "seen-incomplete = true" permanentemente no localStorage, e na
+  // próxima vez que a query desse certo o combo `completo && seenIncomplete`
+  // dispararia a comemoração com confete pra um estúdio configurado há
+  // meses — exatamente o efeito colateral que `seenIncomplete` existe pra
+  // evitar. `contagens` truthy distingue "carreguei dados de verdade" de
+  // "ainda carregando OU falhou OU está offline", nos três casos undefined.
   // A checagem extra `&& estudioId` é necessária porque o useQuery é
-  // desabilitado (`enabled: !!estudioId`) quando estudioId é falsy — e uma
-  // query desabilitada nunca reporta isLoading=true (isLoading = isPending
-  // && isFetching, e isFetching é sempre false sem fetch em andamento).
-  // Sem essa guarda, este bloco rodaria com contagens=undefined enquanto
-  // estudioId ainda não chegou, gravando um flag de "seen-incomplete" numa
-  // chave de localStorage inválida (chave com "undefined").
-  if (!isLoading && estudioId) {
+  // desabilitado (`enabled: !!estudioId && !completedAck`) quando estudioId
+  // é falsy — sem essa guarda, este bloco poderia gravar um flag numa chave
+  // de localStorage inválida (chave com "undefined").
+  if (contagens && estudioId) {
     if (marcarConcluido && !completedAck) {
       setCompletedAck(true);
     } else if (!marcarConcluido && (estado === 'expandido' || estado === 'colapsado') && !seenIncomplete) {
@@ -128,15 +148,28 @@ export default function OnboardingChecklist({ estudioId }) {
   // o render) com o sistema externo. Este efeito só grava, nunca chama
   // setState — por isso não cai na regra react-hooks/set-state-in-effect.
   useEffect(() => {
+    if (!estudioId) return;
     if (completedAck) gravarFlag(chaveCompleted(estudioId));
     if (seenIncomplete) gravarFlag(chaveSeenIncomplete(estudioId));
   }, [completedAck, seenIncomplete, estudioId]);
 
-  if (isLoading || !estudioId || estado === 'oculto') return null;
+  // `!contagens` cobre tanto "ainda carregando" quanto "erro/offline sem
+  // cache" — nos dois casos não há dado real pra mostrar, e renderizar o
+  // checklist calculado sobre `{}` fabricaria um "0 de 3" enganoso pra um
+  // estúdio que pode já estar com tudo configurado. `estado === 'oculto'`
+  // continua checado antes, já que completedAck oculta o card mesmo sem
+  // `contagens` (a query fica desabilitada nesse estado terminal).
+  if (!estudioId || estado === 'oculto' || !contagens) return null;
 
   if (estado === 'comemorando') {
     return (
-      <Surface variant="elevated" padding="lg" className="relative overflow-hidden border-success/40">
+      <Surface
+        variant="elevated"
+        padding="lg"
+        className="relative overflow-hidden border-success/40"
+        role="status"
+        aria-live="polite"
+      >
         <Confetti />
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
@@ -151,10 +184,7 @@ export default function OnboardingChecklist({ estudioId }) {
           <Button
             variant="success"
             size="sm"
-            onClick={() => {
-              gravarFlag(chaveCompleted(estudioId));
-              setCompletedAck(true);
-            }}
+            onClick={() => setCompletedAck(true)}
           >
             Show, obrigado!
           </Button>
@@ -199,7 +229,13 @@ export default function OnboardingChecklist({ estudioId }) {
         </button>
       </div>
 
-      <div className="h-2 rounded-full bg-muted overflow-hidden">
+      <div
+        className="h-2 rounded-full bg-muted overflow-hidden"
+        role="progressbar"
+        aria-valuenow={progresso.percentual}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
         <div
           className="h-full bg-primary rounded-full transition-all duration-500"
           style={{ width: `${progresso.percentual}%` }}
