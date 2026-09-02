@@ -6,8 +6,16 @@ import { SEGMENTOS } from '../lib/terminologia';
 // Sem isso, a UI nova de ConfiguracoesEstudio.jsx salvaria e o payload
 // seria silenciosamente descartado no filter abaixo — mesma allowlist
 // server-adjacent que já protege os campos existentes.
+//
+// PED-120: `instagram_url` não existe na tabela `estudios` — a coluna
+// real chama-se `instagram` (ver supabase/migrations/00000000000000_
+// baseline_current_schema.sql). Com o nome errado, todo `.update()` que
+// incluísse esse campo estourava 42703 no PostgREST. `logo_url` existe
+// de verdade mas estava fora da allowlist: uploadLogo() chama
+// atualizarEstudio(estudioId, { logo_url }), e o filter abaixo reduzia o
+// payload a `{}` — upload "funcionava" mas a URL nunca era persistida.
 const CAMPOS_PERMITIDOS = [
-  'nome', 'whatsapp', 'instagram_url', 'maps_url',
+  'nome', 'whatsapp', 'instagram', 'maps_url', 'logo_url',
   'email_suporte', 'cor_primaria', 'cor_secundaria', 'timezone',
   'segmento', 'terminologia', 'modulos_ativos',
 ];
