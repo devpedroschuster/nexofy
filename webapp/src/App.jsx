@@ -35,6 +35,7 @@ import RedefinirSenha from './pages/RedefinirSenha';
 import Dashboard from './pages/Dashboard';
 import Alunos from './pages/Alunos';
 import NovoAluno from './pages/NovoAluno';
+import ImportarAlunos from './pages/ImportarAlunos';
 import PerfilAluno from './pages/PerfilAluno';
 import Leads from './pages/Leads';
 import Professores from './pages/Professores';
@@ -285,6 +286,7 @@ function AppRoutes() {
             <Route path="/leads"                 element={<Leads />} />
             <Route path="/alunos"                element={<Alunos />} />
             <Route path="/alunos/novo"           element={<NovoAluno />} />
+            <Route path="/alunos/importar"       element={<ImportarAlunos />} />
             <Route path="/alunos/:id"            element={<PerfilAluno />} />
             <Route path="/professores"           element={<Professores />} />
             <Route path="/financeiro"            element={<Financeiro />} />

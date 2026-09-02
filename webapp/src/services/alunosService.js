@@ -350,6 +350,46 @@ export const alunosService = {
     }
   },
 
+  /**
+   * Matricula um aluno importado num plano SEM gerar mensalidade — usado
+   * pelo import de planilha (PED-106). Ao contrário de `matricular`, não
+   * recebe vencimento/descrição/modalidades: o import não cobra
+   * automaticamente nem seleciona modalidade.
+   * Função SQL correspondente: importar_matricula_aluno()
+   */
+  async matricularSemMensalidade(alunoId, planoId, estudioId) {
+    try {
+      const { data: plano, error: errPlano } = await supabase
+        .from('planos')
+        .select('id, duracao_meses')
+        .eq('estudio_id', estudioId)
+        .eq('id', planoId)
+        .single();
+
+      if (errPlano) throw errPlano;
+
+      const dataInicio = new Date().toISOString().split('T')[0];
+      const dataFimObj = new Date(`${dataInicio}T12:00:00`);
+      dataFimObj.setMonth(dataFimObj.getMonth() + (plano.duracao_meses || 1));
+      dataFimObj.setDate(dataFimObj.getDate() - 1);
+      const dataFim = dataFimObj.toISOString().split('T')[0];
+
+      const { error } = await supabase.rpc('importar_matricula_aluno', {
+        p_aluno_id:    alunoId,
+        p_plano_id:    planoId,
+        p_data_inicio: dataInicio,
+        p_data_fim:    dataFim,
+        p_estudio_id:  estudioId,
+      });
+
+      if (error) throw error;
+      return { dataInicio, dataFim };
+    } catch (error) {
+      console.error('[alunosService.matricularSemMensalidade]', error);
+      throw error;
+    }
+  },
+
   async normalizarHistoricoPlanos(estudioId) {
     try {
       const { data: alunos, error: errAlunos } = await supabase
