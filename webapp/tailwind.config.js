@@ -150,7 +150,7 @@ export default {
         'fade-in':       'fade-in 0.4s ease-out',
         'scale-in':      'scale-in 0.2s ease-out',
         'slide-in-left': 'slide-in-left 0.3s ease-out',
-        'confetti-fall':   'confetti-fall 900ms ease-in forwards',
+        'confetti-fall': 'confetti-fall 900ms ease-in forwards',
       },
     },
   },

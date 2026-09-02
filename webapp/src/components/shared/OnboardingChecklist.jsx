@@ -108,7 +108,14 @@ export default function OnboardingChecklist({ estudioId }) {
   // sistema externo assíncrono, então não precisa de efeito. Cada `set`
   // aqui converge em uma única re-renderização extra (a guarda fica falsa
   // assim que o estado é atualizado), sem loop.
-  if (!isLoading) {
+  // A checagem extra `&& estudioId` é necessária porque o useQuery é
+  // desabilitado (`enabled: !!estudioId`) quando estudioId é falsy — e uma
+  // query desabilitada nunca reporta isLoading=true (isLoading = isPending
+  // && isFetching, e isFetching é sempre false sem fetch em andamento).
+  // Sem essa guarda, este bloco rodaria com contagens=undefined enquanto
+  // estudioId ainda não chegou, gravando um flag de "seen-incomplete" numa
+  // chave de localStorage inválida (chave com "undefined").
+  if (!isLoading && estudioId) {
     if (marcarConcluido && !completedAck) {
       setCompletedAck(true);
     } else if (!marcarConcluido && (estado === 'expandido' || estado === 'colapsado') && !seenIncomplete) {
