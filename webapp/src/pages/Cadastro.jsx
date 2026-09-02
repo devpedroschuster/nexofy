@@ -44,7 +44,20 @@ export default function Cadastro() {
   const [searchParams] = useSearchParams();
   const planoEscolhido = searchParams.get('plano');
   const montadoRef = useRef(true);
-  useEffect(() => () => { montadoRef.current = false; }, []);
+  // FIX (PED-118): faltava resetar para `true` no corpo do efeito. Como só a
+  // limpeza setava `false`, o React.StrictMode (main.jsx) — que monta,
+  // desmonta e remonta cada componente uma vez em dev — deixava a ref presa
+  // em `false` para sempre depois do primeiro ciclo, mesmo com o componente
+  // genuinamente montado. Resultado: os `if (montadoRef.current) setX(...)`
+  // do handleSubmit (setEnviado/setLoading) nunca mais executavam depois
+  // disso — o signUp() completava com sucesso no servidor, mas a UI ficava
+  // travada em loading para sempre, sem toast e sem transicionar pra tela de
+  // "verifique seu e-mail". Mesmo padrão já usado em ConfiguracoesEstudio.jsx,
+  // ConfiguracoesPagamentos.jsx e ConfiguracoesFeriados.jsx.
+  useEffect(() => {
+    montadoRef.current = true;
+    return () => { montadoRef.current = false; };
+  }, []);
 
   function validar() {
     const novosErros = {};
