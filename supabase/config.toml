@@ -207,3 +207,11 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/gerar-mensalidades/deno.json"
 entrypoint = "./functions/gerar-mensalidades/index.ts"
+
+[functions.webhook-assinatura-nexofy]
+enabled = true
+# Asaas não envia JWT do Supabase — autenticação é via header
+# asaas-access-token (ver comentário de segurança no index.ts).
+verify_jwt = false
+import_map = "./functions/webhook-assinatura-nexofy/deno.json"
+entrypoint = "./functions/webhook-assinatura-nexofy/index.ts"
