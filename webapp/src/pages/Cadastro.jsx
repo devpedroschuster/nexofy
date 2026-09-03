@@ -21,6 +21,7 @@ import { senhaAtendeRequisitosMinimos } from '../lib/security';
 import Input, { ErrorMessage } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import IndicadorForcaSenha from '../components/shared/IndicadorForcaSenha';
+import EntrarComGoogle from '../components/shared/EntrarComGoogle';
 
 // FIX: removido NOME_MAX local (=120) divergente de LIMITES.NOME_MAX (=100).
 // Antes: front permitia até 120 chars enquanto o backend/DB assume 100 como
@@ -203,101 +204,105 @@ export default function Cadastro() {
               </p>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-              <div className="space-y-3">
-                <div>
-                  <Input
-                    type="text"
-                    required
-                    autoFocus
-                    autoComplete="name"
-                    placeholder="Seu nome completo"
-                    aria-label="Nome completo"
-                    leftIcon={<User size={16} />}
-                    value={nome}
-                    maxLength={LIMITES.NOME_MAX}
-                    error={Boolean(erros.nome)}
-                    errorId="erro-nome"
-                    onChange={(e) => { setNome(e.target.value); limparErro('nome'); }}
-                  />
-                  <ErrorMessage id="erro-nome">{erros.nome}</ErrorMessage>
+            <>
+              <EntrarComGoogle />
+
+              <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+                <div className="space-y-3">
+                  <div>
+                    <Input
+                      type="text"
+                      required
+                      autoFocus
+                      autoComplete="name"
+                      placeholder="Seu nome completo"
+                      aria-label="Nome completo"
+                      leftIcon={<User size={16} />}
+                      value={nome}
+                      maxLength={LIMITES.NOME_MAX}
+                      error={Boolean(erros.nome)}
+                      errorId="erro-nome"
+                      onChange={(e) => { setNome(e.target.value); limparErro('nome'); }}
+                    />
+                    <ErrorMessage id="erro-nome">{erros.nome}</ErrorMessage>
+                  </div>
+
+                  <div>
+                    <Input
+                      type="email"
+                      required
+                      autoComplete="email"
+                      placeholder="seu@email.com"
+                      aria-label="E-mail"
+                      leftIcon={<Mail size={16} />}
+                      value={email}
+                      error={Boolean(erros.email)}
+                      errorId="erro-email"
+                      onChange={(e) => { setEmail(e.target.value); limparErro('email'); }}
+                    />
+                    <ErrorMessage id="erro-email">{erros.email}</ErrorMessage>
+                  </div>
+
+                  <div>
+                    <Input
+                      type="password"
+                      required
+                      autoComplete="new-password"
+                      placeholder={`Crie uma senha (mín. ${LIMITES.SENHA_MIN} caracteres)`}
+                      aria-label="Senha"
+                      leftIcon={<Lock size={16} />}
+                      value={senha}
+                      error={Boolean(erros.senha)}
+                      errorId="erro-senha"
+                      onChange={(e) => { setSenha(e.target.value); limparErro('senha'); }}
+                    />
+                    {erros.senha
+                      ? <ErrorMessage id="erro-senha">{erros.senha}</ErrorMessage>
+                      : <IndicadorForcaSenha senha={senha} />}
+                  </div>
                 </div>
 
                 <div>
-                  <Input
-                    type="email"
-                    required
-                    autoComplete="email"
-                    placeholder="seu@email.com"
-                    aria-label="E-mail"
-                    leftIcon={<Mail size={16} />}
-                    value={email}
-                    error={Boolean(erros.email)}
-                    errorId="erro-email"
-                    onChange={(e) => { setEmail(e.target.value); limparErro('email'); }}
-                  />
-                  <ErrorMessage id="erro-email">{erros.email}</ErrorMessage>
+                  <label className="flex items-start gap-2.5 text-xs text-muted-foreground leading-relaxed">
+                    <input
+                      type="checkbox"
+                      checked={aceitaTermos}
+                      onChange={(e) => { setAceitaTermos(e.target.checked); limparErro('termos'); }}
+                      aria-invalid={Boolean(erros.termos)}
+                      aria-describedby={erros.termos ? 'erro-termos' : undefined}
+                      className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
+                    />
+                    <span>
+                      Li e aceito os{' '}
+                      <a href={LINKS.TERMOS} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">
+                        Termos de Uso
+                      </a>{' '}
+                      e a{' '}
+                      <a href={LINKS.PRIVACIDADE} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">
+                        Política de Privacidade
+                      </a>{' '}
+                      do Nexofy.
+                    </span>
+                  </label>
+                  <ErrorMessage id="erro-termos">{erros.termos}</ErrorMessage>
                 </div>
 
-                <div>
-                  <Input
-                    type="password"
-                    required
-                    autoComplete="new-password"
-                    placeholder={`Crie uma senha (mín. ${LIMITES.SENHA_MIN} caracteres)`}
-                    aria-label="Senha"
-                    leftIcon={<Lock size={16} />}
-                    value={senha}
-                    error={Boolean(erros.senha)}
-                    errorId="erro-senha"
-                    onChange={(e) => { setSenha(e.target.value); limparErro('senha'); }}
-                  />
-                  {erros.senha
-                    ? <ErrorMessage id="erro-senha">{erros.senha}</ErrorMessage>
-                    : <IndicadorForcaSenha senha={senha} />}
-                </div>
-              </div>
+                <Button
+                  type="submit"
+                  variant="premium"
+                  size="lg"
+                  fullWidth
+                  loading={loading}
+                  rightIcon={<ArrowRight size={18} />}
+                >
+                  Continuar
+                </Button>
 
-              <div>
-                <label className="flex items-start gap-2.5 text-xs text-muted-foreground leading-relaxed">
-                  <input
-                    type="checkbox"
-                    checked={aceitaTermos}
-                    onChange={(e) => { setAceitaTermos(e.target.checked); limparErro('termos'); }}
-                    aria-invalid={Boolean(erros.termos)}
-                    aria-describedby={erros.termos ? 'erro-termos' : undefined}
-                    className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
-                  />
-                  <span>
-                    Li e aceito os{' '}
-                    <a href={LINKS.TERMOS} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">
-                      Termos de Uso
-                    </a>{' '}
-                    e a{' '}
-                    <a href={LINKS.PRIVACIDADE} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">
-                      Política de Privacidade
-                    </a>{' '}
-                    do Nexofy.
-                  </span>
-                </label>
-                <ErrorMessage id="erro-termos">{erros.termos}</ErrorMessage>
-              </div>
-
-              <Button
-                type="submit"
-                variant="premium"
-                size="lg"
-                fullWidth
-                loading={loading}
-                rightIcon={<ArrowRight size={18} />}
-              >
-                Continuar
-              </Button>
-
-              <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                <ShieldCheck size={13} className="text-success" /> 14 dias grátis, sem cartão
-              </p>
-            </form>
+                <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                  <ShieldCheck size={13} className="text-success" /> 14 dias grátis, sem cartão
+                </p>
+              </form>
+            </>
           )}
 
           <div className="text-center">
