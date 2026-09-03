@@ -119,6 +119,16 @@ export const LINKS = {
   PRIVACIDADE:  '/politica-privacidade',
 };
 
+// ── DOCUMENTOS_LEGAIS ────────────────────────────────────────────────────
+// Fonte única de versão/vigência de Termos e Política — referenciada pelas
+// próprias páginas (linha de vigência) e pelo registro de consentimento
+// (public.consentimentos.versao), para que um aceite antigo nunca seja
+// confundido com a versão vigente do texto (PED-136, PED-138).
+export const DOCUMENTOS_LEGAIS = {
+  TERMOS:      { versao: '2026-09-03', vigenteDesde: '2026-09-03' },
+  PRIVACIDADE: { versao: '2026-09-03', vigenteDesde: '2026-09-03' },
+};
+
 export const ICONES_STATUS = {
   ativo:    'CheckCircle',
   inativo:  'XCircle',
@@ -153,5 +163,5 @@ export const PALETA_CORES = [
 export default {
   STATUS_MENSALIDADE, ROLES, DIAS_SEMANA, PAGINACAO, FORMAS_PAGAMENTO,
   TIPOS_AULA, LIMITES, MENSAGENS, CONFIG_DATA, API_ENDPOINTS, REGEX,
-  LINKS, ICONES_STATUS, CORES_GRAFICOS_TOKENS, PALETA_CORES,
+  LINKS, DOCUMENTOS_LEGAIS, ICONES_STATUS, CORES_GRAFICOS_TOKENS, PALETA_CORES,
 };

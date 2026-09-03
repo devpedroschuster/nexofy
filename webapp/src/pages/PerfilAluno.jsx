@@ -568,6 +568,14 @@ function AbaAnamnese({ aluno, alunoId, estudioId, queryClient, observacoesMedica
   const linkValido = novoLink.trim() && /^https?:\/\/.+/.test(novoLink.trim());
   return (
     <div className="max-w-2xl space-y-6 animate-in slide-in-from-bottom-4">
+      <div className="flex gap-3 rounded-2xl border border-warning/30 bg-warning-soft p-4">
+        <Activity size={16} className="text-warning shrink-0 mt-0.5" />
+        <p className="text-xs text-warning leading-relaxed">
+          Observações médicas e link de anamnese são <strong>dado sensível de saúde</strong>{' '}
+          (LGPD, art. 5º, II). Antes de preencher, confirme que o aluno (ou responsável)
+          autorizou especificamente o registro dessa informação.
+        </p>
+      </div>
       <Surface variant="card" padding="lg" className="bg-primary-soft border-primary/20 space-y-5">
         <div className="flex items-start justify-between gap-4">
           <div>

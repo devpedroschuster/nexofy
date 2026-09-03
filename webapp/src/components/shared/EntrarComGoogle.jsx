@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase';
 import { showToast } from './Toast';
 import Button from '../ui/Button';
 import { cn } from '../../lib/cn';
+import { CONSENTIMENTO_PENDENTE_KEY } from '../../lib/consentimento';
 
 function GoogleIcon(props) {
   return (
@@ -20,13 +21,44 @@ function GoogleIcon(props) {
   );
 }
 
-export default function EntrarComGoogle({ texto = 'Continuar com Google', className }) {
+export default function EntrarComGoogle({
+  texto = 'Continuar com Google',
+  className,
+  disabled = false,
+  onBlocked,
+  consentimentoPendente,
+}) {
   const [loading, setLoading] = useState(false);
 
   async function handleClick() {
     if (loading) return;
+
+    // Gate "soft" (PED-135): o botão continua clicável — assim o clique
+    // consegue revelar o erro inline de Termos, igual ao submit do form —
+    // só bloqueia o INÍCIO do OAuth. /login não passa `disabled`, então
+    // este ramo nunca roda lá.
+    if (disabled) {
+      onBlocked?.();
+      return;
+    }
+
     setLoading(true);
     try {
+      // Marca a intenção de aceite ANTES do redirect (PED-136):
+      // signInWithOAuth() não aceita metadata customizada (diferente de
+      // signUp()), então é assim que a versão aceita sobrevive à
+      // ida-e-volta pro Google. useAuth.jsx lê e apaga este marcador no
+      // primeiro SIGNED_IN.
+      if (consentimentoPendente) {
+        try {
+          sessionStorage.setItem(CONSENTIMENTO_PENDENTE_KEY, JSON.stringify(consentimentoPendente));
+        } catch {
+          // sessionStorage indisponível (modo privado restritivo etc.) —
+          // segue sem marcador; pior caso é só não registrar o
+          // consentimento do caminho Google, não bloquear o login.
+        }
+      }
+
       // redirectTo aponta sempre para /login: é a única das rotas públicas
       // (/, /login, /cadastro) cujo componente trata o retorno de erro do
       // OAuth via query string — ver useEffect em Login.jsx. Em caso de

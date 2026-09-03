@@ -32,6 +32,7 @@ import React, {
   useState,
 } from 'react';
 import { supabase } from '../lib/supabase';
+import { parseConsentimentoPendente, CONSENTIMENTO_PENDENTE_KEY } from '../lib/consentimento';
 
 const AuthContext = createContext(null);
 
@@ -65,6 +66,45 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let cancelled = false;
+
+    // Fecha o caminho Google do PED-136: signInWithOAuth() não aceita
+    // metadata customizada, então EntrarComGoogle.jsx grava um marcador em
+    // sessionStorage antes do redirect (só quando Cadastro.jsx passou
+    // consentimentoPendente, ou seja, só no cadastro via Google — nunca em
+    // /login). Aqui, no primeiro SIGNED_IN, lemos e apagamos esse marcador
+    // e gravamos em consentimentos via client autenticado (RLS garante
+    // user_id = auth.uid()). Fire-and-forget: não deve atrasar nem quebrar
+    // o carregamento de perfil se falhar.
+    const registrarConsentimentoPendente = (session) => {
+      if (!session?.user) return;
+
+      let bruto = null;
+      try {
+        bruto = sessionStorage.getItem(CONSENTIMENTO_PENDENTE_KEY);
+      } catch {
+        return;
+      }
+      if (!bruto) return;
+
+      try {
+        sessionStorage.removeItem(CONSENTIMENTO_PENDENTE_KEY);
+      } catch {
+        // segue mesmo assim — pior caso é tentar de novo no próximo SIGNED_IN
+      }
+
+      const dados = parseConsentimentoPendente(bruto);
+      if (!dados) return;
+
+      supabase
+        .from('consentimentos')
+        .insert([
+          { user_id: session.user.id, documento: 'termos', versao: dados.termos_versao },
+          { user_id: session.user.id, documento: 'privacidade', versao: dados.privacidade_versao },
+        ])
+        .then(({ error }) => {
+          if (error) console.error('[useAuth] Falha ao registrar consentimento (Google):', error);
+        });
+    };
 
     // Helper local: reseta os três campos de segmento pros defaults —
     // chamado em todo ponto onde estudioId também volta pra null (logout,
@@ -319,6 +359,8 @@ export function AuthProvider({ children }) {
         setLoading(false);
 
       } else if (event === 'SIGNED_IN') {
+        registrarConsentimentoPendente(session);
+
         if (perfilJaCarregado.current && perfilCarregadoParaId.current === session?.user?.id) {
           setSessao(session);
           return;
