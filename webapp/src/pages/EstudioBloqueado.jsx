@@ -1,17 +1,23 @@
 // webapp/src/pages/EstudioBloqueado.jsx
 //
 // Tela exibida quando o usuário logado (admin/professor) pertence a um
-// estúdio cujo `status` não é 'ativo' (inativo, suspenso ou cancelado).
-// A resolução vem do AuthContext (useAuth) via RPC verificar_status_estudio,
-// que roda SECURITY DEFINER e por isso funciona mesmo com o estúdio
-// bloqueado no RLS (meu_estudio_id()/estudio_id_atual() retornam null
-// nesse cenário, cortando todo o resto dos dados em cascata).
+// estúdio cujo `status` não é 'ativo' (inativo, suspenso ou cancelado) OU
+// cujo trial expirou. A resolução vem do AuthContext (useAuth) via RPC
+// verificar_status_estudio, que roda SECURITY DEFINER e por isso funciona
+// mesmo com o estúdio bloqueado no RLS (meu_estudio_id()/estudio_id_atual()
+// retornam null nesse cenário, cortando todo o resto dos dados em cascata).
 //
 // super_admin NUNCA cai aqui: ele acessa qualquer estúdio via
 // impersonation (estudio_ativo_via_override()), que é um caminho à parte.
+//
+// PED-115: quando o motivo é especificamente trial_expirado, a ação
+// primária vira "Assinar agora" (pra /upgrade) em vez de só suporte — é a
+// saída self-service do bloqueio. Pros outros motivos (inativo/suspenso/
+// cancelado, decididos pelo time), a única ação continua sendo suporte.
 
 import React from 'react';
-import { AlertTriangle, LogOut, Mail } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { AlertTriangle, LogOut, Mail, CreditCard } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import Button from '../components/ui/Button';
@@ -36,7 +42,7 @@ const MENSAGENS_POR_STATUS = {
   trial_expirado: {
     titulo: 'Período de teste encerrado',
     descricao:
-      'Seus 14 dias de teste grátis chegaram ao fim. Entre em contato com o suporte para continuar usando a Nexofy.',
+      'Seus 14 dias de teste grátis chegaram ao fim. Assine um plano pra continuar usando a Nexofy.',
   },
 };
 
@@ -52,6 +58,7 @@ export default function EstudioBloqueado() {
   const nomeEstudio = estudioStatusInfo?.nome ?? 'seu estúdio';
   const chave = chaveMensagemBloqueio(estudioStatusInfo);
   const { titulo, descricao } = MENSAGENS_POR_STATUS[chave] ?? MENSAGEM_PADRAO;
+  const ehTrialExpirado = chave === 'trial_expirado';
 
   async function handleSair() {
     await supabase.auth.signOut();
@@ -78,6 +85,12 @@ export default function EstudioBloqueado() {
         )}
 
         <div className="mt-8 flex flex-col gap-3">
+          {ehTrialExpirado && (
+            <Button as={Link} to="/upgrade" leftIcon={<CreditCard size={16} />}>
+              Assinar agora
+            </Button>
+          )}
+
           <a
             href="mailto:suporte@nexofy.app"
             className="inline-flex items-center justify-center gap-2 text-sm font-bold text-primary hover:underline"

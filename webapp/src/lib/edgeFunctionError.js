@@ -11,7 +11,7 @@
 export async function extrairMensagemErro(error, fallback) {
   try {
     const corpo = await error?.context?.json();
-    if (corpo?.error) return corpo.error;
+    if (corpo?.erro || corpo?.error) return corpo.erro ?? corpo.error;
   } catch {
     // corpo ausente, já consumido, ou não era JSON — usa o fallback
   }

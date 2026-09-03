@@ -7,6 +7,7 @@
 // que impersonation é sempre perfil 'super_admin', nunca 'admin'.
 
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Clock } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { diasRestantesTrial } from '../../lib/trial';
@@ -34,6 +35,11 @@ export default function TrialBanner() {
       <span>
         Período de teste — {dias === 0 ? 'último dia' : `faltam ${dias} dia${dias === 1 ? '' : 's'}`}
       </span>
+      {urgente && (
+        <Link to="/upgrade" className="underline underline-offset-2 hover:no-underline">
+          Assinar agora
+        </Link>
+      )}
     </div>
   );
 }

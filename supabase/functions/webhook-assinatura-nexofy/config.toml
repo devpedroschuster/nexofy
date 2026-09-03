@@ -1,0 +1,2 @@
+[functions.webhook-assinatura-nexofy]
+verify_jwt = false

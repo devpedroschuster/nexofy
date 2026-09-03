@@ -187,6 +187,14 @@ verify_jwt = true
 import_map = "./functions/criar-subconta-asaas/deno.json"
 entrypoint = "./functions/criar-subconta-asaas/index.ts"
 
+[functions.assinar-plano-nexofy]
+enabled = true
+# Sempre exige JWT — ação sensível (move dinheiro real), sem invocação
+# por cron, chamada só pelo admin autenticado do próprio estúdio.
+verify_jwt = true
+import_map = "./functions/assinar-plano-nexofy/deno.json"
+entrypoint = "./functions/assinar-plano-nexofy/index.ts"
+
 [functions.gerar-mensalidades]
 enabled = true
 # PED-57/PED-68: precisa ser false para o cron (autenticado via x-cron-secret, sem
@@ -199,3 +207,11 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/gerar-mensalidades/deno.json"
 entrypoint = "./functions/gerar-mensalidades/index.ts"
+
+[functions.webhook-assinatura-nexofy]
+enabled = true
+# Asaas não envia JWT do Supabase — autenticação é via header
+# asaas-access-token (ver comentário de segurança no index.ts).
+verify_jwt = false
+import_map = "./functions/webhook-assinatura-nexofy/deno.json"
+entrypoint = "./functions/webhook-assinatura-nexofy/index.ts"
