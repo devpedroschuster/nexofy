@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { alunosService } from '../services/alunosService';
 import { showToast } from './shared/Toast';
-import { useAuth } from '../hooks/useAuth';
 import { Package, Calendar, DollarSign, Loader2 } from 'lucide-react';
 
 import Modal from './ui/Modal';
@@ -28,8 +27,7 @@ const INITIAL_FORM = {
   valor_pago: ''
 };
 
-export default function ModalRenovarPlano({ isOpen, onClose, alunoId, onSucesso }) {
-  const { estudioId } = useAuth();
+export default function ModalRenovarPlano({ isOpen, onClose, alunoId, estudioId, onSucesso }) {
   const [planos, setPlanos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState(INITIAL_FORM);
@@ -111,7 +109,7 @@ export default function ModalRenovarPlano({ isOpen, onClose, alunoId, onSucesso 
         data_inicio: form.data_inicio,
         data_fim: form.data_fim,
         valor_pago: valor
-      });
+      }, estudioId);
       showToast.success("Plano renovado com sucesso!");
       onSucesso();
       onClose();

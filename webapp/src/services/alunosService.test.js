@@ -48,3 +48,30 @@ describe('alunosService.matricular', () => {
     );
   });
 });
+
+describe('alunosService.renovarPlano', () => {
+  beforeEach(() => {
+    rpcMock.mockClear();
+  });
+
+  it('inclui p_estudio_id na chamada RPC renovar_plano_aluno', async () => {
+    // Mesmo bug do PED-121 (matricular_aluno): renovar_plano_aluno() exige
+    // 6 parâmetros obrigatórios (sem DEFAULT), incluindo p_estudio_id.
+    // renovarPlano() nunca enviava esse parâmetro, então o PostgREST não
+    // encontrava nenhuma função com essa assinatura e rejeitava a chamada
+    // sempre — toda renovação de plano falhava, mascarada pelo toast
+    // genérico "Não foi possível renovar o plano." em ModalRenovarPlano.jsx.
+    const estudioId = 'estudio-uuid-123';
+
+    await alunosService.renovarPlano(
+      'aluno-1',
+      { plano_id: 1, data_inicio: '2026-10-01', data_fim: '2026-11-01', valor_pago: 100 },
+      estudioId
+    );
+
+    expect(rpcMock).toHaveBeenCalledWith(
+      'renovar_plano_aluno',
+      expect.objectContaining({ p_estudio_id: estudioId })
+    );
+  });
+});
