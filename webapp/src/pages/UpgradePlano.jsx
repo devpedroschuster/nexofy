@@ -13,7 +13,6 @@
 // de sessão (useAuth), igual ao resto do bloqueio por trial.
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { CreditCard, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { assinarPlanoNexofy } from '../services/assinaturaNexofyService';
@@ -32,7 +31,6 @@ function formatarMoeda(valor) {
 
 export default function UpgradePlano() {
   const { estudioId, nomeUsuario } = useAuth();
-  const navigate = useNavigate();
 
   const [plano, setPlano] = useState('essencial');
   const [ciclo, setCiclo] = useState('mensal');
@@ -40,6 +38,7 @@ export default function UpgradePlano() {
   const [titular, setTitular] = useState({ ...TITULAR_VAZIO, name: nomeUsuario ?? '' });
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState(null);
+  const [confirmando, setConfirmando] = useState(false);
 
   const valor = resolverValorAssinatura(plano, ciclo);
 
@@ -60,13 +59,35 @@ export default function UpgradePlano() {
     try {
       await assinarPlanoNexofy({ estudioId, plano, ciclo, cartao, titular });
       showToast.success('Assinatura enviada! Confirmando o pagamento…');
-      navigate('/dashboard', { replace: true });
+      setConfirmando(true);
+      // Após ~2 segundos, faz reload completo (remonta AuthProvider, força
+      // refetch de verificar_status_estudio) pra refletir o novo estado
+      // desbloqueado. Aceita residual race se webhook levar >2s (documentado).
+      setTimeout(() => {
+        window.location.assign('/dashboard');
+      }, 2000);
     } catch (err) {
       console.error('[UpgradePlano] Erro ao assinar:', err);
       setErro(err?.message || 'Erro ao processar assinatura.');
     } finally {
       setEnviando(false);
     }
+  }
+
+  if (confirmando) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-background px-4 py-10">
+        <div className="w-full max-w-lg">
+          <Surface className="p-6">
+            <div className="flex flex-col items-center justify-center text-center">
+              <div className="mx-auto mb-6 inline-block h-16 w-16 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+              <h2 className="text-lg font-bold text-foreground tracking-tight">Confirmando o pagamento…</h2>
+              <p className="mt-3 text-sm text-muted-foreground">Aguarde enquanto processamos sua assinatura.</p>
+            </div>
+          </Surface>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -176,7 +197,7 @@ export default function UpgradePlano() {
               <p className="text-sm font-medium text-destructive" role="alert">{erro}</p>
             )}
 
-            <Button type="submit" fullWidth size="lg" loading={enviando} leftIcon={<CheckCircle2 size={18} />}>
+            <Button type="submit" fullWidth size="lg" loading={enviando} disabled={!estudioId} leftIcon={<CheckCircle2 size={18} />}>
               Assinar {PLANOS_NEXOFY[plano].label} — {formatarMoeda(valor)}
               {ciclo === 'anual' ? '/ano' : '/mês'}
             </Button>
