@@ -126,3 +126,38 @@ Regras:
   `docs/POST_MORTEM_TEMPLATE.md` (PED-43).
 - Avise de novo quando resolver, mesmo que curto: "Resolvido — [o que foi
   a causa, em 1 frase, se já souber]".
+
+## 6. Estúdio travado no 409 "assinatura em andamento" (PED-125)
+
+Sintoma: admin de um estúdio tenta assinar um plano em `/upgrade`, o
+cartão foi pra análise de risco da Asaas (`AWAITING_RISK_ANALYSIS`) e
+depois foi reprovado, mas toda nova tentativa recebe 409 "Este estúdio já
+possui uma assinatura em andamento ou ativa" — sem conseguir tentar de
+novo com outro cartão.
+
+Desde este PR, o `webhook-assinatura-nexofy` trata
+`PAYMENT_REPROVED_BY_RISK_ANALYSIS` automaticamente: cancela a assinatura
+órfã na Asaas e limpa `asaas_subscription_id` do estúdio, destravando o
+guard sozinho, normalmente em segundos. Se o admin ainda estiver travado
+depois de confirmado que a Asaas já reprovou o pagamento (**painel Asaas
+→ Cobranças → busque pelo `asaas_subscription_id` do estúdio**), o motivo
+mais provável é entrega do webhook atrasada/falhada, não ausência do
+tratamento:
+
+1. Confira no painel da Asaas (conta master) se a assinatura em questão
+   já está **cancelada**. Se ainda estiver ativa, não prossiga por aqui —
+   cancele-a lá primeiro (`Assinaturas → [assinatura] → Cancelar`), pra
+   não deixar uma assinatura solta tentando cobrar de novo no próximo
+   ciclo.
+2. Confirmada a assinatura cancelada do lado da Asaas, libere o guard
+   manualmente via SQL Editor do painel Supabase (produção):
+   ```sql
+   update estudios
+   set asaas_subscription_id = null
+   where id = '<estudio_id>'
+     and assinatura_status <> 'ativa';
+   ```
+   O `and assinatura_status <> 'ativa'` é uma trava de segurança —
+   garante que o comando nunca mexe num estúdio que já é assinante
+   pagante de verdade.
+3. Avise o admin que já pode tentar assinar de novo em `/upgrade`.
