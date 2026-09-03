@@ -1,6 +1,6 @@
 // webapp/src/App.jsx
-import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useSearchParams } from 'react-router-dom';
 import { RefreshCw, Menu } from 'lucide-react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
@@ -16,7 +16,7 @@ import { useSWUpdateNotifier } from './hooks/useSWUpdateNotifier';
 import { rotaPorPerfil } from './lib/navigation';
 import { destinoRotaModulo } from './lib/rotaModulo';
 import { ThemeProvider } from './providers/ThemeProvider';
-import { ToastProvider } from './components/shared/Toast';
+import { ToastProvider, showToast } from './components/shared/Toast';
 import ErrorBoundary from './components/shared/ErrorBoundary';
 import Sidebar from './components/Sidebar';
 import { PWABanners } from './components/PWABanners';
@@ -201,6 +201,34 @@ const RotaCadastroEstudio = ({ sessao, perfil, loading }) => {
   return <Outlet />;
 };
 
+// Erro de OAuth (ex.: Google) devolvido via query string.
+// PED-111: signInWithOAuth pede redirect para /login (ver EntrarComGoogle.jsx),
+// mas quando o erro é "state not found/expired" o Supabase não consegue
+// resolver o redirect_to original — ele estava codificado no state que já não
+// existe — e cai no Site URL do projeto em vez disso, o que pode aterrissar em
+// "/" ou "/cadastro" em vez de "/login". Por isso este handler fica no shell
+// de rotas (não só em Login.jsx): pega o erro não importa em qual rota
+// pública ele aterrissar, mostra um toast e limpa a query string.
+function OAuthErrorToast() {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    const descricaoErro = searchParams.get('error_description');
+    if (!descricaoErro) return;
+
+    showToast.error(descricaoErro);
+    setSearchParams((atual) => {
+      const proximo = new URLSearchParams(atual);
+      proximo.delete('error');
+      proximo.delete('error_code');
+      proximo.delete('error_description');
+      return proximo;
+    }, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  return null;
+}
+
 // FIX (crítico): toda a lógica que dependia de useAuth() foi extraída para
 // este componente interno, que é renderizado DENTRO de <AuthProvider> (via
 // AppShell abaixo). Antes, `App()` chamava useAuth() na própria raiz, antes
@@ -216,6 +244,7 @@ function AppRoutes() {
   return (
     <BrowserRouter>
       <ToastProvider />
+      <OAuthErrorToast />
       <Routes>
 
         {/* Publicas */}

@@ -28,7 +28,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, KeyRound, X, Info } from 'lucide-react';
 
 import { rotaPorPerfil } from '../lib/navigation';
@@ -60,33 +60,16 @@ export default function Login() {
   const { data: estudioPublico, isLoading: estudioLoading, slug } = useEstudioPublico();
   const nomeEstudio = estudioPublico?.nome || 'plataforma';
 
-  const [searchParams, setSearchParams] = useSearchParams();
-
   // FIX (Race condition): flag explícita para o listener de auth ignorar
   // eventos SIGNED_IN originados de handleLogin (login por senha), em vez de
   // depender de inferir isso a partir de session.user.amr, que não é
   // garantidamente populado de forma síncrona no momento do evento.
   const loginViaSenhaRef = useRef(false);
 
-  /* ── Erro de OAuth (ex.: Google) devolvido via query string ─────────────── */
-  // PED-111: signInWithOAuth sempre redireciona de volta para /login (ver
-  // EntrarComGoogle.jsx) — em caso de falha (consentimento negado, provider
-  // mal configurado etc.), o Supabase anexa error/error_description aqui em
-  // vez de criar sessão. Sem isso, a pessoa só via a tela de login de novo,
-  // sem nenhuma explicação do que deu errado.
-  useEffect(() => {
-    const descricaoErro = searchParams.get('error_description');
-    if (!descricaoErro) return;
-
-    showToast.error(descricaoErro);
-    setSearchParams((atual) => {
-      const proximo = new URLSearchParams(atual);
-      proximo.delete('error');
-      proximo.delete('error_code');
-      proximo.delete('error_description');
-      return proximo;
-    }, { replace: true });
-  }, [searchParams, setSearchParams]);
+  // Erro de OAuth (ex.: Google) devolvido via query string: tratado no shell
+  // de rotas (App.jsx, <OAuthErrorToast />), não aqui — o Supabase nem
+  // sempre redireciona erro de volta pra /login especificamente (ver
+  // comentário lá), então o handler precisa cobrir todas as rotas públicas.
 
   /* ── Captura sessão de magic link (professor novo) ──────────────────────── */
   useEffect(() => {
