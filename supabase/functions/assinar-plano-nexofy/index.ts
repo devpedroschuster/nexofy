@@ -127,7 +127,7 @@ serve(withSentry('assinar-plano-nexofy', async (req: Request) => {
   try {
     const { data: estudio, error: errEstudio } = await supabase
       .from('estudios')
-      .select('id, assinatura_status, asaas_customer_id_nexofy')
+      .select('id, assinatura_status, asaas_customer_id_nexofy, asaas_subscription_id')
       .eq('id', estudioId)
       .maybeSingle()
 
@@ -136,8 +136,8 @@ serve(withSentry('assinar-plano-nexofy', async (req: Request) => {
       return response({ erro: 'Estúdio não encontrado.' }, 404)
     }
 
-    if (estudio.assinatura_status === 'ativa') {
-      return response({ erro: 'Este estúdio já possui uma assinatura ativa.' }, 409)
+    if (estudio.assinatura_status === 'ativa' || estudio.asaas_subscription_id) {
+      return response({ erro: 'Este estúdio já possui uma assinatura em andamento ou ativa.' }, 409)
     }
 
     // 1. Garante customer na Asaas MASTER — diferente da subconta do
