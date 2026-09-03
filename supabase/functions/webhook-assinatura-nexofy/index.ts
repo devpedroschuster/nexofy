@@ -11,7 +11,7 @@
 // aqui). Configurar como um segundo webhook no painel da Asaas.
 //
 // Diferente do webhook-pagamento, este NÃO precisa de checagem de ordem
-// por timestamp: a única transição de estado aqui é 'nenhuma'/'pendente'
+// por timestamp: a única transição de estado aqui é 'nenhuma'
 // -> 'ativa', uma única vez, guardada pelo próprio check de
 // `assinatura_status === 'ativa'` abaixo — não existe caminho de volta
 // neste PR (falha de cobrança recorrente pós-ativação é o PED-125).

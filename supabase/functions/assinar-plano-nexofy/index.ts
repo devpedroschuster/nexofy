@@ -34,8 +34,8 @@ const PRECOS_NEXOFY: Record<string, number> = {
 }
 
 function resolverValor(plano: string, ciclo: string): number | null {
+  if (!Object.hasOwn(PRECOS_NEXOFY, plano)) return null
   const valorMensal = PRECOS_NEXOFY[plano]
-  if (!valorMensal) return null
   if (ciclo === 'mensal') return valorMensal
   if (ciclo === 'anual') return valorMensal * 10
   return null
@@ -158,7 +158,7 @@ serve(withSentry('assinar-plano-nexofy', async (req: Request) => {
       })
       const customerData = await customerRes.json()
       if (!customerRes.ok) {
-        console.error('[assinar-plano-nexofy] Erro ao criar customer na Asaas:', customerData?.errors ?? customerData)
+        console.error('[assinar-plano-nexofy] Erro ao criar customer na Asaas:', customerData?.errors)
         return response({
           erro: 'Não foi possível validar os dados informados.',
           detalhes: customerData?.errors,
