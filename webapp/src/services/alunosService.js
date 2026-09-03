@@ -288,7 +288,7 @@ export const alunosService = {
    * Renova o plano de um aluno de forma atômica via RPC.
    * Função SQL correspondente: renovar_plano_aluno()
    */
-  async renovarPlano(alunoId, dadosRenovacao) {
+  async renovarPlano(alunoId, dadosRenovacao, estudioId) {
     try {
       const { error } = await supabase.rpc('renovar_plano_aluno', {
         p_aluno_id:    alunoId,
@@ -296,6 +296,7 @@ export const alunosService = {
         p_data_inicio: dadosRenovacao.data_inicio,
         p_data_fim:    dadosRenovacao.data_fim,
         p_valor_pago:  dadosRenovacao.valor_pago ?? 0,
+        p_estudio_id:  estudioId,
       });
 
       if (error) throw error;

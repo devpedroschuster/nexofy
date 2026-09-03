@@ -1604,6 +1604,7 @@ export default function PerfilAluno() {
         isOpen={modalRenovarAberto}
         onClose={() => setModalRenovarAberto(false)}
         alunoId={id}
+        estudioId={idEfetivo}
         onSucesso={aoRenovarComSucesso}
       />
 
