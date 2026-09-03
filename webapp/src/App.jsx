@@ -63,6 +63,7 @@ import ConfiguracoesPagamentos from './pages/ConfiguracoesPagamentos';
 
 // Bloqueio de acesso por status do estúdio (inativo/suspenso/cancelado)
 import EstudioBloqueado from './pages/EstudioBloqueado';
+import UpgradePlano from './pages/UpgradePlano';
 
 // Super Admin
 import SuperAdminLayout      from './pages/SuperAdmin';
@@ -239,6 +240,16 @@ function AppRoutes() {
         */}
         <Route path="/estudio-bloqueado" element={
           !sessao ? <Navigate to="/login" replace /> : <EstudioBloqueado />
+        } />
+
+        {/*
+          Upgrade self-service (PED-115). Mesmo padrão de /estudio-bloqueado:
+          exige sessão ativa, mas não exige perfil resolvido nem estúdio
+          ativo — é acessível justamente por quem está bloqueado por trial
+          expirado, pra sair do bloqueio.
+        */}
+        <Route path="/upgrade" element={
+          !sessao ? <Navigate to="/login" replace /> : <UpgradePlano />
         } />
 
         {/* Cadastro self-service — passo 2 (dados do estúdio) */}
