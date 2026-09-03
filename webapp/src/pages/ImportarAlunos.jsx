@@ -21,6 +21,7 @@ import {
   linhasParaObjetos,
   mapearNomesPlano,
   validarLinhaAluno,
+  decodificarBufferCSV,
 } from '../lib/importAlunos';
 import { alunosKeys } from '../lib/alunosQueryKeys';
 import { useAuth } from '../hooks/useAuth';
@@ -32,6 +33,11 @@ import Badge from '../components/ui/Badge';
 import FileDropInput from '../components/shared/FileDropInput';
 
 const ETAPAS = ['Upload', 'Mapear colunas', 'Mapear planos', 'Pré-visualização', 'Resumo'];
+
+// Cada linha vira até 2 requisições sequenciais (criar aluno + matricular)
+// — sem limite, uma planilha muito grande deixava a página presa num loop
+// longo demais pra cancelar com segurança linha a linha (PED-122).
+const MAX_LINHAS_IMPORT = 500;
 
 export default function ImportarAlunos() {
   const navigate = useNavigate();
@@ -48,21 +54,32 @@ export default function ImportarAlunos() {
   const [mapeamentoPlanos, setMapeamentoPlanos] = useState({});
   const [nomesParaResolver, setNomesParaResolver] = useState([]);
   const [linhasValidadas, setLinhasValidadas] = useState([]);
+  const [preparandoPreVisualizacao, setPreparandoPreVisualizacao] = useState(false);
   const [importando, setImportando] = useState(false);
   const [progresso, setProgresso] = useState({ atual: 0, total: 0 });
   const [resumo, setResumo] = useState(null);
+  const cancelarImportacaoRef = React.useRef(false);
 
   async function handleArquivoSelecionado(arquivo) {
     setCarregandoArquivo(true);
     try {
       const XLSX = await import('xlsx');
       const buffer = await arquivo.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, dateNF: 'dd/mm/yyyy' });
+      // .csv é texto puro (encoding ambíguo — ver decodificarBufferCSV);
+      // .xlsx/.xls são binários que o SheetJS já lê certo via 'array'.
+      const workbook = arquivo.name.toLowerCase().endsWith('.csv')
+        ? XLSX.read(decodificarBufferCSV(buffer), { type: 'string', cellDates: true, dateNF: 'dd/mm/yyyy' })
+        : XLSX.read(buffer, { type: 'array', cellDates: true, dateNF: 'dd/mm/yyyy' });
       const primeiraAba = workbook.Sheets[workbook.SheetNames[0]];
       const linhas = XLSX.utils.sheet_to_json(primeiraAba, { header: 1, defval: '' });
 
       if (!linhas.length || !linhas[0].length) {
         showToast.error('A planilha está vazia ou não tem cabeçalho.');
+        return;
+      }
+
+      if (linhas.length - 1 > MAX_LINHAS_IMPORT) {
+        showToast.error(`Essa planilha tem mais de ${MAX_LINHAS_IMPORT} linhas. Divida em arquivos menores e importe em partes.`);
         return;
       }
 
@@ -229,11 +246,11 @@ export default function ImportarAlunos() {
           </Button>
           <Button
             variant="brand"
-            disabled={!mapeamentoValido}
+            disabled={!mapeamentoValido || preparandoPreVisualizacao}
             onClick={avancarParaMapearPlanos}
             rightIcon={<ArrowRight size={16} />}
           >
-            Continuar
+            {preparandoPreVisualizacao ? 'Preparando...' : 'Continuar'}
           </Button>
         </div>
       </Surface>
@@ -243,37 +260,61 @@ export default function ImportarAlunos() {
   const indiceColunaPlano = Object.entries(mapeamentoColunas).find(([, chave]) => chave === 'plano')?.[0];
 
   async function prepararPreVisualizacao(mapeamentoPlanosFinal) {
-    const objetos = linhasParaObjetos(linhasCruas, mapeamentoColunas);
+    setPreparandoPreVisualizacao(true);
+    try {
+      const objetos = linhasParaObjetos(linhasCruas, mapeamentoColunas);
 
-    // .eq('estudio_id', idEfetivo) é redundante com a RLS (tenant_select já
-    // só deixa este admin enxergar linhas do próprio estúdio), mas o
-    // padrão do resto do alunosService.js é sempre reforçar o filtro de
-    // tenant explicitamente como defesa em profundidade (ver comentários
-    // "Bug #4" em atualizar/excluir/alterarStatus) — mantido aqui pela
-    // mesma razão.
-    const emails = objetos.map((o) => o.email).filter(Boolean);
-    const { data: existentes } = emails.length
-      ? await supabase.from('alunos').select('email').eq('estudio_id', idEfetivo).in('email', emails)
-      : { data: [] };
-    const emailsExistentes = new Set((existentes ?? []).map((a) => a.email.toLowerCase()));
+      // .eq('estudio_id', idEfetivo) é redundante com a RLS (tenant_select já
+      // só deixa este admin enxergar linhas do próprio estúdio), mas o
+      // padrão do resto do alunosService.js é sempre reforçar o filtro de
+      // tenant explicitamente como defesa em profundidade (ver comentários
+      // "Bug #4" em atualizar/excluir/alterarStatus) — mantido aqui pela
+      // mesma razão.
+      //
+      // FIX (PED-122): o error dessa query era descartado antes — se ela
+      // falhasse (rede instável, etc.), o wizard ficava "travado" na etapa
+      // atual sem nenhum feedback. Não é um erro fatal pro fluxo (duplicatas
+      // ainda são pegas e reportadas na importação de verdade), então aqui
+      // só avisa e segue sem a checagem antecipada, em vez de travar tudo.
+      const emails = objetos.map((o) => o.email).filter(Boolean);
+      let emailsExistentes = new Set();
+      if (emails.length) {
+        const { data: existentes, error: errExistentes } = await supabase
+          .from('alunos')
+          .select('email')
+          .eq('estudio_id', idEfetivo)
+          .in('email', emails);
+        if (errExistentes) {
+          console.error('[ImportarAlunos] Falha ao checar e-mails duplicados:', errExistentes);
+          showToast.error('Não foi possível checar e-mails já cadastrados agora — duplicatas ainda serão bloqueadas na importação.');
+        } else {
+          emailsExistentes = new Set((existentes ?? []).map((a) => a.email.toLowerCase()));
+        }
+      }
 
-    const validadas = await Promise.all(objetos.map(async (linha) => {
-      const { valida, erros } = await validarLinhaAluno(linha);
-      const emailDuplicado = linha.email && emailsExistentes.has(String(linha.email).toLowerCase());
-      const nomePlano = linha.plano;
-      const planoId = nomePlano ? (mapeamentoPlanosFinal[nomePlano] ?? null) : null;
+      const validadas = await Promise.all(objetos.map(async (linhaOriginal) => {
+        const { valida, erros, linha } = await validarLinhaAluno(linhaOriginal);
+        const emailDuplicado = linha.email && emailsExistentes.has(String(linha.email).toLowerCase());
+        const nomePlano = linha.plano;
+        const planoId = nomePlano ? (mapeamentoPlanosFinal[nomePlano] ?? null) : null;
 
-      return {
-        linha,
-        planoId,
-        valida: valida && !emailDuplicado,
-        erros: emailDuplicado ? [...erros, 'E-mail já cadastrado no sistema.'] : erros,
-      };
-    }));
+        return {
+          linha,
+          planoId,
+          valida: valida && !emailDuplicado,
+          erros: emailDuplicado ? [...erros, 'E-mail já cadastrado no sistema.'] : erros,
+        };
+      }));
 
-    setMapeamentoPlanos(mapeamentoPlanosFinal);
-    setLinhasValidadas(validadas);
-    setEtapa(3);
+      setMapeamentoPlanos(mapeamentoPlanosFinal);
+      setLinhasValidadas(validadas);
+      setEtapa(3);
+    } catch (err) {
+      console.error('[ImportarAlunos] Falha ao preparar pré-visualização:', err);
+      showToast.error('Não foi possível preparar a pré-visualização. Tente novamente.');
+    } finally {
+      setPreparandoPreVisualizacao(false);
+    }
   }
 
   function renderEtapaMapearPlanos() {
@@ -315,10 +356,11 @@ export default function ImportarAlunos() {
           </Button>
           <Button
             variant="brand"
+            disabled={preparandoPreVisualizacao}
             onClick={() => prepararPreVisualizacao(mapeamentoPlanos)}
             rightIcon={<ArrowRight size={16} />}
           >
-            Continuar
+            {preparandoPreVisualizacao ? 'Preparando...' : 'Continuar'}
           </Button>
         </div>
       </Surface>
@@ -373,6 +415,13 @@ export default function ImportarAlunos() {
               : `Importar ${linhasValidas.length} aluno${linhasValidas.length === 1 ? '' : 's'}`}
           </Button>
         </div>
+        {importando && (
+          <div className="flex justify-end">
+            <Button variant="ghost" onClick={() => { cancelarImportacaoRef.current = true; }}>
+              Cancelar importação
+            </Button>
+          </div>
+        )}
       </Surface>
     );
   }
@@ -380,12 +429,24 @@ export default function ImportarAlunos() {
   async function executarImportacao() {
     setImportando(true);
     setProgresso({ atual: 0, total: linhasValidas.length });
+    cancelarImportacaoRef.current = false;
 
     let criados = 0;
     let matriculados = 0;
     const pulados = [];
+    let cancelada = false;
 
     for (let i = 0; i < linhasValidas.length; i++) {
+      // FIX (PED-122): uma planilha grande sem forma de cancelar deixava o
+      // admin refém do processo até o fim (ou até fechar a aba, perdendo o
+      // controle de onde o import parou). Checa a cada linha, entre uma
+      // requisição e outra, pra parar rápido sem deixar uma criação/matrícula
+      // pela metade.
+      if (cancelarImportacaoRef.current) {
+        cancelada = true;
+        break;
+      }
+
       const { linha, planoId } = linhasValidas[i];
       try {
         const { plano: _plano, ...dadosAluno } = linha; // 'plano' não é campo de alunos
@@ -400,13 +461,14 @@ export default function ImportarAlunos() {
             console.error('[ImportarAlunos] Falha ao matricular:', errMatricula);
             pulados.push({
               linha,
+              tipo: 'matricula_falhou',
               motivo: `Aluno criado, mas a matrícula falhou: ${errMatricula.message}`,
             });
           }
         }
       } catch (errCriar) {
         console.error('[ImportarAlunos] Falha ao criar aluno:', errCriar);
-        pulados.push({ linha, motivo: errCriar.message || 'Erro ao criar o aluno.' });
+        pulados.push({ linha, tipo: 'nao_criado', motivo: errCriar.message || 'Erro ao criar o aluno.' });
       }
 
       setProgresso({ atual: i + 1, total: linhasValidas.length });
@@ -414,7 +476,7 @@ export default function ImportarAlunos() {
 
     const pulacoesJaConhecidas = linhasValidadas
       .filter((item) => !item.valida)
-      .map((item) => ({ linha: item.linha, motivo: item.erros.join(' ') }));
+      .map((item) => ({ linha: item.linha, tipo: 'nao_criado', motivo: item.erros.join(' ') }));
 
     // FIX (PED-106 review): sem invalidar a cache do react-query aqui, o
     // admin volta pra /alunos (useAlunos, staleTime de 5min) e não vê os
@@ -425,25 +487,44 @@ export default function ImportarAlunos() {
       await queryClient.invalidateQueries({ queryKey: alunosKeys.listaTodas(idEfetivo) });
     }
 
-    setResumo({ criados, matriculados, pulados: [...pulacoesJaConhecidas, ...pulados] });
+    setResumo({ criados, matriculados, pulados: [...pulacoesJaConhecidas, ...pulados], cancelada });
     setImportando(false);
     setEtapa(4);
   }
 
   function renderEtapaResumo() {
+    const naoCriados = resumo.pulados.filter((p) => p.tipo === 'nao_criado');
+    const matriculaFalhou = resumo.pulados.filter((p) => p.tipo === 'matricula_falhou');
+
     return (
       <Surface variant="card" padding="lg" className="space-y-4">
         <div>
-          <h2 className="text-xl font-black text-foreground">Import concluído</h2>
+          <h2 className="text-xl font-black text-foreground">
+            {resumo.cancelada ? 'Import cancelado' : 'Import concluído'}
+          </h2>
+          {resumo.cancelada && (
+            <p className="text-sm text-muted-foreground mt-1">
+              A importação foi interrompida a pedido. O que já tinha sido processado até aqui foi salvo — nada depois disso.
+            </p>
+          )}
         </div>
 
         <div className="flex gap-4 flex-wrap">
           <Badge tone="success" variant="soft">{resumo.criados} aluno{resumo.criados === 1 ? '' : 's'} criado{resumo.criados === 1 ? '' : 's'}</Badge>
           <Badge tone="info" variant="soft">{resumo.matriculados} matriculado{resumo.matriculados === 1 ? '' : 's'} em plano</Badge>
-          {resumo.pulados.length > 0 && (
-            <Badge tone="warning" variant="soft">{resumo.pulados.length} pulado{resumo.pulados.length === 1 ? '' : 's'}</Badge>
+          {naoCriados.length > 0 && (
+            <Badge tone="warning" variant="soft">{naoCriados.length} não criado{naoCriados.length === 1 ? '' : 's'}</Badge>
+          )}
+          {matriculaFalhou.length > 0 && (
+            <Badge tone="warning" variant="soft">{matriculaFalhou.length} criado{matriculaFalhou.length === 1 ? '' : 's'} sem matrícula</Badge>
           )}
         </div>
+
+        {resumo.matriculados > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Alunos importados já podem ter pago fora do Nexofy — a cobrança automática das mensalidades só passa a valer a partir do próximo ciclo. Se for gerar mensalidades manualmente pro mês atual em /financeiro, cheque se algum desses alunos já pagou por fora antes de confirmar.
+          </p>
+        )}
 
         {resumo.pulados.length > 0 && (
           <div className="space-y-2">

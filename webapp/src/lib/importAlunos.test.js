@@ -7,6 +7,7 @@ import {
   linhasParaObjetos,
   mapearNomesPlano,
   validarLinhaAluno,
+  decodificarBufferCSV,
 } from './importAlunos';
 
 describe('normalizarTexto', () => {
@@ -183,5 +184,37 @@ describe('validarLinhaAluno', () => {
     });
     expect(resultado.valida).toBe(false);
     expect(resultado.erros).toContain('Insira um e-mail válido.');
+  });
+
+  it('normaliza o e-mail pra minúsculas na linha retornada (PED-122)', async () => {
+    const resultado = await validarLinhaAluno({
+      nome_completo: 'Maria Silva',
+      email: 'Maria.Silva@TESTE.com',
+    });
+    expect(resultado.valida).toBe(true);
+    expect(resultado.linha.email).toBe('maria.silva@teste.com');
+  });
+
+  it('preserva campos fora do schema (ex.: plano) na linha retornada', async () => {
+    const resultado = await validarLinhaAluno({
+      nome_completo: 'Maria Silva',
+      email: 'maria@teste.com',
+      plano: 'Plano Mensal',
+    });
+    expect(resultado.linha.plano).toBe('Plano Mensal');
+  });
+});
+
+describe('decodificarBufferCSV', () => {
+  it('decodifica um CSV em UTF-8 normalmente', () => {
+    const buffer = new TextEncoder().encode('nome,email\nSão Paulo,sp@teste.com').buffer;
+    expect(decodificarBufferCSV(buffer)).toBe('nome,email\nSão Paulo,sp@teste.com');
+  });
+
+  it('cai pra windows-1252 quando os bytes não são UTF-8 válido (CSV exportado do Excel pt-BR)', () => {
+    // "São Paulo" em windows-1252: 'ã' é o byte 0xE3, que sozinho não é
+    // uma sequência UTF-8 válida (0xE3 exige 2 bytes de continuação).
+    const buffer = new Uint8Array([0x53, 0xE3, 0x6F, 0x20, 0x50, 0x61, 0x75, 0x6C, 0x6F]).buffer;
+    expect(decodificarBufferCSV(buffer)).toBe('São Paulo');
   });
 });

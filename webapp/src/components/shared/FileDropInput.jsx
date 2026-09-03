@@ -19,12 +19,25 @@ export default function FileDropInput({ accept, onFileSelected, descricao, disab
 
   return (
     <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
       className={cn(
         'rounded-2xl border-2 border-dashed p-10 text-center transition-colors cursor-pointer',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary',
         arrastando ? 'border-primary bg-primary-soft' : 'border-border bg-muted/40 hover:bg-muted',
         disabled && 'opacity-50 pointer-events-none'
       )}
       onClick={() => inputRef.current?.click()}
+      onKeyDown={(e) => {
+        // Div clicável não é alcançável via teclado por padrão — Enter/Espaço
+        // replicam o comportamento nativo de um <button> ou <input type=file>
+        // (PED-122).
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          inputRef.current?.click();
+        }
+      }}
       onDragOver={(e) => { e.preventDefault(); setArrastando(true); }}
       onDragLeave={() => setArrastando(false)}
       onDrop={(e) => {
@@ -44,6 +57,7 @@ export default function FileDropInput({ accept, onFileSelected, descricao, disab
         accept={accept}
         className="hidden"
         disabled={disabled}
+        onClick={(e) => { e.target.value = null; }}
         onChange={(e) => processarArquivo(e.target.files?.[0])}
       />
     </div>
