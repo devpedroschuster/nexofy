@@ -37,6 +37,7 @@ import { REGEX } from '../lib/constants';
 import { useEstudioPublico } from '../hooks/useEstudioPublico'; // FIX: agora realmente usado
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import EntrarComGoogle from '../components/shared/EntrarComGoogle';
 import { cn } from '../lib/cn';
 
 /* ── Componente principal ───────────────────────────────────────────────────── */
@@ -64,6 +65,11 @@ export default function Login() {
   // depender de inferir isso a partir de session.user.amr, que não é
   // garantidamente populado de forma síncrona no momento do evento.
   const loginViaSenhaRef = useRef(false);
+
+  // Erro de OAuth (ex.: Google) devolvido via query string: tratado no shell
+  // de rotas (App.jsx, <OAuthErrorToast />), não aqui — o Supabase nem
+  // sempre redireciona erro de volta pra /login especificamente (ver
+  // comentário lá), então o handler precisa cobrir todas as rotas públicas.
 
   /* ── Captura sessão de magic link (professor novo) ──────────────────────── */
   useEffect(() => {
@@ -323,6 +329,8 @@ export default function Login() {
               </p>
             </div>
           </div>
+
+          <EntrarComGoogle texto="Entrar com Google" />
 
           {/* ── Formulário ───────────────────────────────────────────────── */}
           <form onSubmit={handleLogin} className="space-y-4" noValidate>
