@@ -47,6 +47,22 @@ const SUGESTOES_POR_PALAVRA_CHAVE = {
   plano: ['plano contratado', 'plano'],
 };
 
+// Exportações de Excel em pt-BR tipicamente usam Windows-1252 (ANSI), não
+// UTF-8 — sem tratar isso, um CSV lido como ArrayBuffer e decodificado
+// direto como UTF-8 vira mojibake em qualquer nome acentuado (PED-122).
+// Tenta UTF-8 estrito primeiro (o caso mais comum hoje, incl. arquivos já
+// exportados corretamente); se a sequência de bytes não for UTF-8 válido,
+// cai pra windows-1252, o superset mais comum de CSV exportado do Excel
+// em pt-BR. Só se aplica a .csv — .xlsx/.xls são formatos binários que o
+// SheetJS já lê corretamente via `type: 'array'`.
+export function decodificarBufferCSV(buffer) {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    return new TextDecoder('windows-1252').decode(buffer);
+  }
+}
+
 export function normalizarTexto(valor) {
   return String(valor ?? '')
     .normalize('NFD')
@@ -171,12 +187,18 @@ export function mapearNomesPlano(nomesDistintos, planosExistentes) {
 // linha que o formulário individual rejeitaria. Campos que a linha não
 // tem (ex.: "plano", que não faz parte do schema) são ignorados pelo yup
 // por padrão, sem erro.
+//
+// Retorna também `linha` com o valor "cast" pelo yup mesclado por cima do
+// original (ex.: e-mail com .trim().lowercase() aplicado) — sem isso, o
+// import salvava o e-mail exatamente como veio da planilha (podendo ficar
+// com maiúsculas), diferente do cadastro manual via NovoAluno.jsx, que
+// sempre usa o valor cast do yupResolver (PED-122).
 export async function validarLinhaAluno(linha) {
   try {
-    await alunoSchema.validate(linha, { abortEarly: false });
-    return { valida: true, erros: [] };
+    const linhaCast = await alunoSchema.validate(linha, { abortEarly: false });
+    return { valida: true, erros: [], linha: { ...linha, ...linhaCast } };
   } catch (err) {
     const erros = err.inner?.length ? err.inner.map((e) => e.message) : [err.message];
-    return { valida: false, erros };
+    return { valida: false, erros, linha };
   }
 }

@@ -166,7 +166,7 @@ export default function Modalidades() {
       fetchDados();
     } catch (err) {
       console.error('Erro ao atualizar modalidade:', err);
-      showToast.error('Erro ao atualizar modalidade.');
+      showToast.error(err?.code === '23505' ? 'Já existe uma modalidade com esse nome.' : 'Erro ao atualizar modalidade.');
     } finally {
       setSavingEdit(false);
     }
