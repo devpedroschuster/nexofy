@@ -8,7 +8,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, FileWarning } from 'lucide-react';
-import { LINKS } from '../lib/constants';
+import { LINKS, DOCUMENTOS_LEGAIS } from '../lib/constants';
 
 export default function TermosDeUso() {
   return (
@@ -22,6 +22,10 @@ export default function TermosDeUso() {
         </Link>
 
         <h1 className="font-display mt-8 text-3xl font-bold tracking-tight">Termos de Uso</h1>
+        <p className="mt-2 text-xs font-medium text-muted-foreground">
+          Versão {DOCUMENTOS_LEGAIS.TERMOS.versao} · vigente desde{' '}
+          {new Date(`${DOCUMENTOS_LEGAIS.TERMOS.vigenteDesde}T00:00:00`).toLocaleDateString('pt-BR')}
+        </p>
 
         <div className="mt-6 flex gap-3 rounded-2xl border border-warning/30 bg-warning-soft p-4">
           <FileWarning size={18} className="text-warning shrink-0 mt-0.5" />
@@ -59,13 +63,24 @@ export default function TermosDeUso() {
             </p>
           </section>
           <section>
-            <h2 className="font-display text-lg font-bold text-foreground">4. Dados dos seus alunos</h2>
+            <h2 className="font-display text-lg font-bold text-foreground">4. Dados dos seus alunos — papéis e responsabilidades</h2>
             <p className="mt-2">
-              Os dados que você cadastra sobre o seu estúdio e seus alunos continuam seus. O
-              tratamento desses dados segue a nossa{' '}
+              Sobre os dados que você cadastra a respeito dos seus alunos, o seu estúdio é o{' '}
+              <strong>controlador</strong> (decide o quê e por quê coletar) e o Nexofy é o{' '}
+              <strong>operador</strong> (trata o dado só para operar a plataforma, seguindo as
+              suas instruções). Isso significa que o Nexofy: (i) trata esses dados apenas para
+              prestar o serviço contratado; (ii) aplica medidas de segurança razoáveis para
+              protegê-los; (iii) ajuda o seu estúdio a responder pedidos de titulares (acesso,
+              correção, exclusão) sobre os dados dos seus alunos; (iv) exclui ou devolve os
+              dados ao final do contrato, salvo obrigação legal de retenção.
+            </p>
+            <p className="mt-2">
+              Como controlador, é seu estúdio quem deve ter base legal e, quando aplicável,
+              consentimento específico do aluno para os dados que cadastra — isso vale em
+              especial para dado sensível, como observações médicas e anamnese (ver{' '}
               <Link to={LINKS.PRIVACIDADE} className="font-semibold underline">
                 Política de Privacidade
-              </Link>.
+              </Link>).
             </p>
           </section>
           <section>

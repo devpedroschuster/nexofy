@@ -7,7 +7,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, FileWarning } from 'lucide-react';
-import { LINKS } from '../lib/constants';
+import { LINKS, DOCUMENTOS_LEGAIS } from '../lib/constants';
 
 export default function PoliticaPrivacidade() {
   return (
@@ -21,6 +21,10 @@ export default function PoliticaPrivacidade() {
         </Link>
 
         <h1 className="font-display mt-8 text-3xl font-bold tracking-tight">Política de Privacidade</h1>
+        <p className="mt-2 text-xs font-medium text-muted-foreground">
+          Versão {DOCUMENTOS_LEGAIS.PRIVACIDADE.versao} · vigente desde{' '}
+          {new Date(`${DOCUMENTOS_LEGAIS.PRIVACIDADE.vigenteDesde}T00:00:00`).toLocaleDateString('pt-BR')}
+        </p>
 
         <div className="mt-6 flex gap-3 rounded-2xl border border-warning/30 bg-warning-soft p-4">
           <FileWarning size={18} className="text-warning shrink-0 mt-0.5" />
@@ -44,14 +48,27 @@ export default function PoliticaPrivacidade() {
             </p>
           </section>
           <section>
-            <h2 className="font-display text-lg font-bold text-foreground">2. Como usamos esses dados</h2>
+            <h2 className="font-display text-lg font-bold text-foreground">2. Dado de saúde dos alunos</h2>
+            <p className="mt-2">
+              Quando o seu estúdio cadastra observações médicas ou um link de anamnese sobre um
+              aluno, isso é <strong>dado pessoal sensível</strong> (art. 5º, II da LGPD). Esse
+              campo é preenchido pelo estúdio, com a finalidade de personalizar o atendimento e
+              a segurança do aluno durante as aulas — a base legal é o consentimento específico
+              do titular (art. 11, I), que é responsabilidade do estúdio obter diretamente do
+              aluno antes de preencher o campo. O Nexofy armazena esse dado como operador, nas
+              condições descritas na cláusula de tratamento de dados dos{' '}
+              <Link to={LINKS.TERMOS} className="font-semibold underline">Termos de Uso</Link>.
+            </p>
+          </section>
+          <section>
+            <h2 className="font-display text-lg font-bold text-foreground">3. Como usamos esses dados</h2>
             <p className="mt-2">
               Para operar a plataforma: autenticar seu acesso, calcular relatórios financeiros,
               enviar comunicações essenciais sobre a sua conta.
             </p>
           </section>
           <section>
-            <h2 className="font-display text-lg font-bold text-foreground">3. Compartilhamento</h2>
+            <h2 className="font-display text-lg font-bold text-foreground">4. Compartilhamento</h2>
             <p className="mt-2">
               Não vendemos seus dados nem os de seus alunos. Compartilhamento com terceiros,
               quando necessário para operar o serviço (ex. processador de pagamento), será
@@ -59,7 +76,7 @@ export default function PoliticaPrivacidade() {
             </p>
           </section>
           <section>
-            <h2 className="font-display text-lg font-bold text-foreground">4. Seus direitos (LGPD)</h2>
+            <h2 className="font-display text-lg font-bold text-foreground">5. Seus direitos (LGPD)</h2>
             <p className="mt-2">
               Você pode solicitar acesso, correção ou exclusão dos seus dados a qualquer momento,
               escrevendo para{' '}
