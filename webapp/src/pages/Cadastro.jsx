@@ -22,6 +22,7 @@ import Input, { ErrorMessage } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import IndicadorForcaSenha from '../components/shared/IndicadorForcaSenha';
 import EntrarComGoogle from '../components/shared/EntrarComGoogle';
+import { construirConsentimentoPendente } from '../lib/consentimento';
 
 // FIX: removido NOME_MAX local (=120) divergente de LIMITES.NOME_MAX (=100).
 // Antes: front permitia até 120 chars enquanto o backend/DB assume 100 como
@@ -110,7 +111,10 @@ export default function Cadastro() {
         email: email.trim().toLowerCase(),
         password: senha,
         options: {
-          data: { nome: nome.trim().slice(0, LIMITES.NOME_MAX) },
+          data: {
+            nome: nome.trim().slice(0, LIMITES.NOME_MAX),
+            ...construirConsentimentoPendente(),
+          },
           emailRedirectTo: `${window.location.origin}/cadastro/estudio`,
         },
       });
@@ -205,7 +209,36 @@ export default function Cadastro() {
             </div>
           ) : (
             <>
-              <EntrarComGoogle />
+              <div>
+                <label className="flex items-start gap-2.5 text-xs text-muted-foreground leading-relaxed">
+                  <input
+                    type="checkbox"
+                    checked={aceitaTermos}
+                    onChange={(e) => { setAceitaTermos(e.target.checked); limparErro('termos'); }}
+                    aria-invalid={Boolean(erros.termos)}
+                    aria-describedby={erros.termos ? 'erro-termos' : undefined}
+                    className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
+                  />
+                  <span>
+                    Li e aceito os{' '}
+                    <a href={LINKS.TERMOS} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">
+                      Termos de Uso
+                    </a>{' '}
+                    e a{' '}
+                    <a href={LINKS.PRIVACIDADE} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">
+                      Política de Privacidade
+                    </a>{' '}
+                    do Nexofy.
+                  </span>
+                </label>
+                <ErrorMessage id="erro-termos">{erros.termos}</ErrorMessage>
+              </div>
+
+              <EntrarComGoogle
+                disabled={!aceitaTermos}
+                onBlocked={() => setErros((e) => ({ ...e, termos: 'Aceite os Termos e a Política de Privacidade para continuar.' }))}
+                consentimentoPendente={construirConsentimentoPendente()}
+              />
 
               <form onSubmit={handleSubmit} className="space-y-4" noValidate>
                 <div className="space-y-3">
@@ -260,31 +293,6 @@ export default function Cadastro() {
                       ? <ErrorMessage id="erro-senha">{erros.senha}</ErrorMessage>
                       : <IndicadorForcaSenha senha={senha} />}
                   </div>
-                </div>
-
-                <div>
-                  <label className="flex items-start gap-2.5 text-xs text-muted-foreground leading-relaxed">
-                    <input
-                      type="checkbox"
-                      checked={aceitaTermos}
-                      onChange={(e) => { setAceitaTermos(e.target.checked); limparErro('termos'); }}
-                      aria-invalid={Boolean(erros.termos)}
-                      aria-describedby={erros.termos ? 'erro-termos' : undefined}
-                      className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
-                    />
-                    <span>
-                      Li e aceito os{' '}
-                      <a href={LINKS.TERMOS} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">
-                        Termos de Uso
-                      </a>{' '}
-                      e a{' '}
-                      <a href={LINKS.PRIVACIDADE} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">
-                        Política de Privacidade
-                      </a>{' '}
-                      do Nexofy.
-                    </span>
-                  </label>
-                  <ErrorMessage id="erro-termos">{erros.termos}</ErrorMessage>
                 </div>
 
                 <Button
