@@ -25,7 +25,10 @@ export async function loginComoAdmin(page, host, email, password, nomeEstudio) {
 
   await page.getByLabel('E-mail').fill(email);
   await page.getByLabel('Senha').fill(password);
-  await page.getByRole('button', { name: 'Entrar' }).click();
+  // exact: true — desde a PED-111 (login com Google), a página também tem
+  // um botão "Entrar com Google"; sem exact, o match por substring de
+  // 'Entrar' resolve pros dois botões (strict mode violation).
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
 
   // Timeout generoso de propósito (PED-72): o redirect pra /dashboard só
   // acontece depois do signInWithPassword + resolução de perfil (useAuth) —

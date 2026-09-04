@@ -57,7 +57,9 @@ test.describe('Login e isolamento entre tenants', () => {
     await page.goto(urlFor(TENANT_A_HOST, '/login'));
     await page.getByLabel('E-mail').fill(ADMIN_A.email);
     await page.getByLabel('Senha').fill('senha-errada-123');
-    await page.getByRole('button', { name: 'Entrar' }).click();
+    // exact: true — ver comentário em helpers/auth.js (PED-111 adicionou
+    // um botão "Entrar com Google" na mesma página).
+    await page.getByRole('button', { name: 'Entrar', exact: true }).click();
 
     await expect(page.getByText('E-mail ou senha incorretos.')).toBeVisible();
     await expect(page).toHaveURL(urlFor(TENANT_A_HOST, '/login'));
