@@ -65,30 +65,41 @@ Resumo pra quem está sob pressão:
 
 ## 4. Como pausar processamento financeiro
 
-**Contexto atual (releia antes de agir): hoje não existe nenhum cron
-ativo em produção** — `gerar-repasses-mensais` só roda quando alguém
-clica manualmente em "Gerar Repasses do Mês" no painel (ver
+**Contexto atual (releia antes de agir, confirmado ao vivo em produção
+via `select * from cron.job` em 2026-09-04): existe 1 cron ativo hoje** —
+`cobrancas-mensais`, que chama `gerar-mensalidades` todo dia 1 às 11h UTC
+(08h horário de Brasília). `gerar-repasses-mensais` continua **sem**
+nenhum cron agendado (confirmado na mesma consulta — o `[[cron]]` de
+`gerar-repasses-mensais/config.toml` não tem o bloco correspondente em
+`supabase/config.toml` da raiz, então não é lido no deploy, mesmo
+parecendo pronto no arquivo) e só roda quando alguém clica manualmente em
+"Gerar Repasses do Mês" no painel (ver
 `supabase/functions/gerar-repasses-mensais/RUNBOOK.md`, PED-18/PED-33).
-Ou seja, na prática, "pausar" hoje é principalmente uma questão de
-**comunicação, não de código**:
 
-1. **Ação imediata (sempre funciona, é só disciplina):** avise quem tem
-   acesso admin (hoje, só um usuário) pra não clicar em nenhum botão de
-   geração financeira (Comissões → "Gerar Repasses do Mês", ou qualquer
-   fluxo de `gerar-mensalidades`) até o incidente ser resolvido. Como não
-   há cron nem automação hoje, isso sozinho já pausa 100% do
-   processamento financeiro em lote.
-2. **Se uma automação (cron/script) chegar a estar ativa no futuro** — o
-   `[[cron]]` de `gerar-repasses-mensais/config.toml` está desabilitado
-   hoje (ver aviso PED-33 no próprio arquivo), mas se/quando for
-   habilitado: revogue o secret que autentica a chamada, `CRON_SECRET`
+Ou seja, "pausar" hoje tem **dois caminhos diferentes**, dependendo de
+qual fluxo o incidente afeta:
+
+1. **`gerar-repasses-mensais` (ainda manual): é questão de comunicação,
+   não de código.** Avise quem tem acesso admin (hoje, só um usuário) pra
+   não clicar em nenhum botão de geração financeira (Comissões → "Gerar
+   Repasses do Mês") até o incidente ser resolvido. Isso sozinho já pausa
+   100% desse fluxo.
+2. **`gerar-mensalidades` (cron ativo desde PED-68): pausar exige ação
+   técnica real, não só disciplina.** O cron dispara sozinho todo dia 1,
+   08h BRT, sem intervenção manual — "avisar pra não clicar" não pausa
+   nada aqui. Revogue o secret que autentica a chamada, `CRON_SECRET`
    (`supabase secrets unset CRON_SECRET` ou defina um valor novo que
    ninguém mais conhece) no projeto de produção. Isso quebra apenas a
    chamada automatizada (`x-cron-secret`) sem afetar chamadas manuais de
    admin (que usam JWT, um caminho de autenticação separado — ver
    comentário "AUTORIZAÇÃO" em
-   `supabase/functions/gerar-repasses-mensais/index.ts`).
-3. **Webhook de pagamento (`webhook-pagamento`) é diferente — normalmente
+   `supabase/functions/gerar-mensalidades/index.ts`). Depois de resolvido
+   o incidente, redefina `CRON_SECRET` com o valor esperado pela function
+   pra reativar o cron.
+3. **Se `gerar-repasses-mensais` ganhar um cron real no futuro** (hoje não
+   tem, ver acima): mesma técnica do item 2 — revogar `CRON_SECRET` pausa
+   os dois de uma vez, já que compartilham o mesmo secret.
+4. **Webhook de pagamento (`webhook-pagamento`) é diferente — normalmente
    NÃO deve ser pausado:** ele só grava status de pagamento e é
    idempotente (`webhook_events` com `UNIQUE event_id`, PED-12/14) — o
    Asaas reentrega automaticamente em caso de falha, então pausar esse
@@ -97,7 +108,7 @@ Ou seja, na prática, "pausar" hoje é principalmente uma questão de
    `ASAAS_WEBHOOK_TOKEN`) se o incidente for especificamente nessa
    function causando dano ativo (ex.: um bug gravando status errado) — não
    como precaução genérica.
-4. **Último recurso (evite, é lento de reverter):** `supabase functions
+5. **Último recurso (evite, é lento de reverter):** `supabase functions
    delete <nome-da-function>` remove a function do ar até o próximo
    deploy. Só use se as opções acima não bastarem — redesplegar depois
    exige rodar o deploy de novo (`supabase functions deploy`), não é

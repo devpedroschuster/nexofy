@@ -86,18 +86,31 @@ arquivo, dentro da cache nova.
 
 `main` nunca recebe merge sem passar por um **Preview Deployment da
 Vercel** já testado manualmente. Cada PR aberto no GitHub já dispara esse
-preview automaticamente (integração Git da Vercel). A proteção de branch
-de `main` no GitHub (Settings → Branches) exige os checks `Lint, Test &
-Build` e `Vercel` antes de permitir o merge — confirmar com `gh api
-repos/devpedroschuster/nexofy/branches/main/protection` sempre que um
-workflow do CI for renomeado, já que um required check com nome
-desatualizado não trava merge nenhum, só fica "pendente" pra sempre (foi
-o que aconteceu até aqui com o check antigo "Lint & Build", órfão desde
-que o job de CI passou a se chamar "Lint, Test & Build").
+preview automaticamente (integração Git da Vercel), mas hoje isso é
+convenção de processo, não um gate técnico — ver `enforce_admins` abaixo.
+A proteção de branch de `main` no GitHub (Settings → Branches) exige os
+checks **`Lint, Test & Build`** e **`Deno Check (Supabase Functions)`**
+antes de permitir o merge (confirmado ao vivo via `gh api
+repos/devpedroschuster/nexofy/branches/main/protection` em 2026-09-04;
+`Vercel` não é mais um required check) — reconfirme com esse mesmo comando
+sempre que um workflow do CI for renomeado, já que um required check com
+nome desatualizado não trava merge nenhum, só fica "pendente" pra sempre
+(foi o que aconteceu até aqui com o check antigo "Lint & Build", órfão
+desde que o job de CI passou a se chamar "Lint, Test & Build" — e é
+exatamente por isso que os nomes acima também podem ficar desatualizados
+sem aviso).
 
-`enforce_admins` está `false`: o admin (único usuário do repo hoje) ainda
-consegue mergear com um check pendente ou vermelho, numa emergência. O
-gate acima é uma convenção reforçada por CI, não um bloqueio absoluto.
+`enforce_admins` está `true` (mudou de `false`, confirmado na mesma
+checagem de 2026-09-04): o admin (único usuário do repo hoje) **não**
+consegue mais mergear com um check pendente ou vermelho, nem em
+emergência — o gate deixou de ser só convenção reforçada por CI e virou
+bloqueio absoluto, inclusive pra quem administra o repo. Se um required
+check ficar órfão (cenário do parágrafo acima) ou travado por qualquer
+outro motivo durante um incidente, a única saída é desabilitar
+temporariamente a proteção de branch em Settings → Branches (ou via `gh
+api --method DELETE .../branches/main/protection`), mergear, e
+reabilitá-la logo em seguida — `enforce_admins=true` não impede o admin de
+editar a própria regra, só de contorná-la enquanto ela está ativa.
 
 ## 4. Canary release por tenant (feature flags)
 
