@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useSearchParams } from 
 import { RefreshCw, Menu } from 'lucide-react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import * as Sentry from '@sentry/react';
 
 // FIX (crítico): AuthProvider era usado no JSX mas nunca era importado
 // (ReferenceError: AuthProvider is not defined — a aplicação não chegava
@@ -209,14 +210,43 @@ const RotaCadastroEstudio = ({ sessao, perfil, loading }) => {
 // "/" ou "/cadastro" em vez de "/login". Por isso este handler fica no shell
 // de rotas (não só em Login.jsx): pega o erro não importa em qual rota
 // pública ele aterrissar, mostra um toast e limpa a query string.
+//
+// PED-146: error_description vem cru da query string, então qualquer um pode
+// forjar uma URL (ex.: /login?error_description=Sua+conta+foi+suspensa...) e
+// fazer o app exibir texto arbitrário como toast "oficial", no domínio real e
+// com HTTPS válido — vetor de phishing. Por isso nunca exibimos esse texto:
+// mapeamos error_code/error (valores fechados que o GoTrue/OAuth definem)
+// para mensagens próprias, com fallback genérico. O texto original só vai
+// pro Sentry, para depuração.
+const MENSAGENS_ERRO_OAUTH = {
+  access_denied: 'Você cancelou o login com o Google.',
+  server_error: 'O provedor de login está indisponível no momento. Tente novamente.',
+  temporarily_unavailable: 'Serviço de login temporariamente indisponível. Tente novamente em instantes.',
+  bad_oauth_state: 'Sua sessão de login expirou. Tente novamente.',
+  bad_oauth_callback: 'Sua sessão de login expirou. Tente novamente.',
+  flow_state_expired: 'Sua sessão de login expirou. Tente novamente.',
+  flow_state_not_found: 'Sua sessão de login expirou. Tente novamente.',
+  provider_disabled: 'Login com Google está temporariamente indisponível.',
+  oauth_provider_not_supported: 'Login com Google está temporariamente indisponível.',
+  over_request_rate_limit: 'Muitas tentativas em pouco tempo. Aguarde alguns instantes e tente novamente.',
+};
+
 function OAuthErrorToast() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
-    const descricaoErro = searchParams.get('error_description');
-    if (!descricaoErro) return;
+    const codigo = searchParams.get('error_code') || searchParams.get('error');
+    if (!codigo) return;
 
-    showToast.error(descricaoErro);
+    const descricaoErro = searchParams.get('error_description');
+    if (descricaoErro) {
+      Sentry.captureMessage(`Erro de OAuth: ${descricaoErro}`, {
+        level: 'warning',
+        tags: { fluxo: 'oauth_login', codigo },
+      });
+    }
+
+    showToast.error(MENSAGENS_ERRO_OAUTH[codigo] ?? 'Não foi possível concluir o login. Tente novamente.');
     setSearchParams((atual) => {
       const proximo = new URLSearchParams(atual);
       proximo.delete('error');
