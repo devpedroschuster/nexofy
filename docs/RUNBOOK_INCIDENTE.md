@@ -19,12 +19,12 @@ disponibilidade). Identificação é manual, olhando estes três lugares:
    - Card "Latência webhook (p95)": badge vermelho = p95 acima da meta de
      `docs/OBSERVABILIDADE.md` (5s) — webhook do Asaas processando devagar
      ou com erro.
-2. **Sentry, projeto `nexofy-edge-functions`** — link direto no terceiro
-   card da mesma página (https://dev-pedro-schuster.sentry.io/issues/).
-   Toda Edge Function usa `_shared/sentry.ts`; exceções não tratadas
-   aparecem aqui automaticamente (requer o secret `SENTRY_DSN` configurado
-   — se o card de erros parecer vazio demais, confirme que o secret não
-   foi removido).
+2. **Sentry** — dois links diretos nos cards de erro da mesma página
+   (PED-150): projeto `nexofy-web` (erros do navegador do usuário final) e
+   projeto `nexofy-edge-functions` (exceções não tratadas nas Edge
+   Functions, via `_shared/sentry.ts` — requer o secret `SENTRY_DSN`
+   configurado; se o card de erros parecer vazio demais, confirme que o
+   secret não foi removido).
 3. **Reclamação de cliente** (suporte/WhatsApp/email) — sinal mais direto
    e mais lento; se um cliente reportou algo, trate como incidente
    confirmado e siga direto pra comunicação (seção 5), mesmo sem

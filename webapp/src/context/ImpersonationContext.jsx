@@ -82,6 +82,7 @@ import React, {
   useState,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import * as Sentry from '@sentry/react';
 import { supabase } from '../lib/supabase';
 import { showToast } from '../components/shared/Toast';
 
@@ -168,6 +169,10 @@ export function ImpersonationProvider({ children }) {
     limparTimersExpiracao();
     setEstudioAtivo(null);
     setCarregando(false);
+    // PED-149: caminho único de saída de impersonation (logout, expiração
+    // de TTL, override invalidado) — limpa a tag aqui cobre os três casos
+    // de uma vez. undefined remove a tag da scope atual do Sentry.
+    Sentry.setTag('estudio', undefined);
   }, [limparTimersExpiracao]);
 
   // qc.clear() fica fora de resetDuro para poder ser chamado sem
@@ -298,6 +303,10 @@ export function ImpersonationProvider({ children }) {
         terminologia: estudioRow?.terminologia ?? {},
         modulos_ativos: estudioRow?.modulos_ativos ?? [],
       });
+      // PED-149: identifica no Sentry qual estúdio o super_admin está
+      // vendo — sem isso, uma issue durante impersonation não diz qual
+      // tenant foi afetado. Só slug (LGPD — nada de dados do estúdio).
+      Sentry.setTag('estudio', estudio.slug);
 
       // obter_impersonation_ativa() é uma função de retorno de tabela — vem
       // como array; pega a primeira (e única) linha.
@@ -334,6 +343,7 @@ export function ImpersonationProvider({ children }) {
 
       limparTimersExpiracao(); // saída manual cancela o timer de expiração agendado
       setEstudioAtivo(null);
+      Sentry.setTag('estudio', undefined); // PED-149
 
       // Invalida cache para as queries voltarem ao comportamento cross-tenant
       await qc.invalidateQueries();

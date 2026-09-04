@@ -1,8 +1,19 @@
 /* global process */
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+// PED-149: sem source maps, toda issue de produção no Sentry chega com
+// nomes minificados (ex.: "Xe" em vez de "limparCepErro" no caso do
+// PED-97), tornando a causa raiz quase impossível de achar sem reler o
+// bundle à mão. SENTRY_AUTH_TOKEN só existe no ambiente de Production da
+// Vercel (nunca em build local/CI/Preview — mesma lógica de escopo já
+// usada para VITE_SENTRY_DSN, ver .env.example) — sem o token, o plugin
+// nem entra no array de plugins nem liga sourcemap, então build local/CI
+// e Preview deployments continuam exatamente como hoje (sem .map nenhum).
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
 
 // Substitui %%CACHE_VERSION%% em dist/sw.js depois do build. O Vite copia
 // public/sw.js pra dist/ sem processar (comportamento padrão de arquivos
@@ -50,9 +61,32 @@ export function swCacheVersionPlugin() {
 }
 
 export default defineConfig({
-  plugins: [react(), swCacheVersionPlugin()],
+  plugins: [
+    react(),
+    swCacheVersionPlugin(),
+    // Sentry Vite plugin precisa vir depois dos demais plugins (recomendação
+    // oficial: https://docs.sentry.io/platforms/javascript/sourcemaps/uploading/vite/).
+    sentryAuthToken &&
+      sentryVitePlugin({
+        org: 'dev-pedro-schuster',
+        project: 'nexofy-web',
+        authToken: sentryAuthToken,
+        sourcemaps: {
+          // "hidden" (abaixo, em build.sourcemap) não referencia o .map no
+          // bundle servido — combinado com filesToDeleteAfterUpload, o .map
+          // é só um artefato de build local que sobe pro Sentry e nunca
+          // chega ao usuário final.
+          filesToDeleteAfterUpload: ['./dist/**/*.map'],
+        },
+      }),
+  ].filter(Boolean),
 
   build: {
+    // "hidden": gera o .map mas SEM o comentário `//# sourceMappingURL=`
+    // no JS final — o navegador nunca tenta buscá-lo, só o Sentry o usa
+    // (via upload). Só liga quando o token existe (build de Production na
+    // Vercel); build local/CI/Preview continuam sem sourcemap nenhum.
+    sourcemap: sentryAuthToken ? 'hidden' : false,
     rollupOptions: {
       output: {
         manualChunks(id) {

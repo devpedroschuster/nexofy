@@ -21,8 +21,25 @@ monitor — não é preciso nenhuma Alert Rule adicional filtrando por
 usados de propósito (decisão do time — só e-mail mesmo); se isso mudar no
 futuro, use a Opção 2 abaixo pra rotear pra um desses canais.
 
-Monitores hoje (slug = `CRON_MONITOR_SLUG` em cada `index.ts`):
-`gerar-mensalidades`, `gerar-repasses-mensais`.
+Monitor ativo hoje na conta do Sentry: só `gerar-mensalidades` (slug =
+`CRON_MONITOR_SLUG` em `gerar-mensalidades/index.ts`), chamado pelo único
+cron agendado em produção (`cobrancas-mensais`, dia 1 de cada mês).
+
+PED-150: `gerar-repasses-mensais/index.ts` também declara um
+`CRON_MONITOR_SLUG` e um `[[cron]]` no próprio `config.toml` da function,
+mas esse bloco **não está espelhado** no `supabase/config.toml` da raiz —
+não é lido no deploy, mesmo parecendo pronto no arquivo (confirmado via
+`select * from cron.job`, ver `docs/RUNBOOK_INCIDENTE.md`). Sem cron real
+chamando essa function, `withCronCheckIn` nunca roda e o Sentry nunca
+recebe o primeiro check-in — o monitor `gerar-repasses-mensais` não existe
+na conta do Sentry. Isso é intencional (`gerar-repasses-mensais` só roda
+hoje via clique manual no painel, ver
+`supabase/functions/gerar-repasses-mensais/RUNBOOK.md`, PED-18/PED-33), mas
+o texto antigo aqui listava os dois monitores como se ambos já
+estivessem ativos — dava falsa sensação de cobertura num incidente. Se
+`gerar-repasses-mensais` ganhar um cron real de verdade no futuro, repita
+a configuração da seção "Ao adicionar um novo cron monitorado" abaixo
+pra esse slug.
 
 ## Projeto Sentry
 

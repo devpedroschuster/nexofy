@@ -9,6 +9,7 @@ import {
   Info, Lock, AlertCircle, KeyRound,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
+import * as Sentry from '@sentry/react';
 
 import { alunosService } from '../services/alunosService';
 import { alunoSchema } from '../lib/validation';
@@ -703,6 +704,10 @@ export default function NovoAluno() {
           );
         } catch (errMatricula) {
           console.error('Erro ao matricular no plano:', errMatricula);
+          // PED-149: fluxo crítico (matrícula) tratado por catch — sem
+          // isso, essa falha nunca chegava ao Sentry (só o toast pro
+          // operador, que já criou o aluno mas não sabe da causa raiz).
+          Sentry.captureException(errMatricula, { tags: { fluxo: 'matricular_aluno' } });
           showToast.error(
             'Aluno criado, mas houve um erro ao gerar o plano/mensalidade. Verifique manualmente.'
           );
