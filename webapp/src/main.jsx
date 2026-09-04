@@ -12,7 +12,12 @@ if (import.meta.env.DEV) {
 if (import.meta.env.PROD && import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
     dsn: import.meta.env.VITE_SENTRY_DSN,
-    environment: import.meta.env.MODE,
+    // FIX (PED-141): import.meta.env.MODE é "production" em QUALQUER
+    // `vite build` (build local, preview da Vercel, staging) — não
+    // distingue ambiente real. VITE_SENTRY_ENVIRONMENT deve ser setada
+    // por ambiente na Vercel (Production / Preview); sem ela, cai em
+    // 'production' só como último recurso (build local sem a env var).
+    environment: import.meta.env.VITE_SENTRY_ENVIRONMENT ?? 'production',
     tracesSampleRate: 0,
     ignoreErrors: [
       'ResizeObserver loop limit exceeded',
