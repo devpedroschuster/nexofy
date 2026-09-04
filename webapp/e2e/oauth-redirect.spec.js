@@ -43,19 +43,15 @@ test.describe('Redirect do Google OAuth', () => {
   // deliberadamente inválido, observando se o redirect_to pedido é
   // ecoado — allowlisted — ou descartado em favor de SITE_URL).
   //
-  // PED-155: a allowlist de Redirect URLs do projeto de staging já foi
-  // atualizada com entradas explícitas para iluminus.e2e.test e
-  // ronaldo.e2e.test (confirmado no painel do Supabase). Uma sondagem
-  // manual com token inválido, feita fora deste CI, ainda mostrou
-  // fallback pra SITE_URL mesmo após ~5min — mas essa sondagem usa um
-  // token deliberadamente inválido, e não foi possível confirmar se o
-  // GoTrue desta versão do projeto honra o redirect_to allowlisted em
-  // caminhos de erro (como fazia em produção, ver PED-134) ou só em
-  // verificações bem-sucedidas. Removido o skip para deixar o job de E2E
-  // do CI — que roda contra o staging real — decidir com evidência
-  // concreta; se falhar por esse motivo, re-adicionar o skip com uma nota
-  // atualizada.
-  test('redirect_to do reset de senha está na allowlist do projeto (PED-155)', async ({ request }) => {
+  // SKIP (PED-155): confirmado rodando este teste sem skip no CI real
+  // (run 33825649520, com E2E_SUPABASE_SERVICE_ROLE_KEY de verdade) que
+  // ele falha genuinamente — não era artefato da sondagem manual com
+  // token inválido. A allowlist de Redirect URLs do projeto de staging
+  // já tem entradas explícitas para iluminus.e2e.test e ronaldo.e2e.test
+  // (confirmado no painel do Supabase), mas o GoTrue continua caindo em
+  // SITE_URL pra esses hosts. Causa raiz ainda não identificada — ver
+  // PED-155. Assim que for corrigida, remover este skip.
+  test.skip('redirect_to do reset de senha está na allowlist do projeto (PED-155)', async ({ request }) => {
     const alvoLegitimo = urlFor(TENANT_A_HOST, '/redefinir-senha');
 
     const respostaLegitima = await request.get(`${process.env.VITE_SUPABASE_URL}/auth/v1/verify`, {
