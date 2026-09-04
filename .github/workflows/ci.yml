@@ -5,14 +5,18 @@ on:
 
 jobs:
   # PED-142: .gitguardian.yaml já existia na raiz do repo sem nenhum step
-  # que o executasse. `if` guarda o job inteiro: sem o secret
+  # que o executasse. `secrets` não é um contexto válido em nenhum `if:`
+  # (nem de job, nem de step — só em jobs.<job_id>.env e similares), por
+  # isso o secret é espelhado num env de job primeiro; o `if:` do step
+  # então lê `env`, que É válido em steps.if. Sem o secret
   # GITGUARDIAN_API_KEY configurado (crie uma conta grátis em
-  # dashboard.gitguardian.com e adicione o secret no repo), o job aparece
+  # dashboard.gitguardian.com e adicione o secret no repo), o step aparece
   # como "skipped" em vez de falhar toda PR por falta de credencial.
   secret-scan:
     name: GitGuardian Secret Scan
     runs-on: ubuntu-latest
-    if: ${{ secrets.GITGUARDIAN_API_KEY != '' }}
+    env:
+      GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,12 +24,12 @@ jobs:
           fetch-depth: 0
 
       - name: GitGuardian scan
+        if: ${{ env.GITGUARDIAN_API_KEY != '' }}
         uses: GitGuardian/ggshield-action@v1
         env:
           GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
           GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
 
   lint-and-build:
     name: Lint, Test & Build
