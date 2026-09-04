@@ -124,6 +124,12 @@ export default function AreaAluno() {
         .select('*')
         .eq('aluno_id', aluno.id)
         .eq('estudio_id', estudioIdAluno) // FIX: isolamento de tenant
+        // PED-160: matricular_aluno cancela automaticamente a mensalidade
+        // pendente de um plano anterior quando o aluno reassina no mesmo
+        // mês — sem este filtro, o aluno veria essa cobrança anulada
+        // listada como pendente/atrasada (getStatusTexto não conhece
+        // 'cancelado').
+        .neq('status', 'cancelado')
         .order('data_vencimento', { ascending: false });
       if (error && error.code !== '42P01') throw error;
       return data || [];
