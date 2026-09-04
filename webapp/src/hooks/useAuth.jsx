@@ -31,6 +31,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import * as Sentry from '@sentry/react';
 import { supabase } from '../lib/supabase';
 import { parseConsentimentoPendente, CONSENTIMENTO_PENDENTE_KEY } from '../lib/consentimento';
 
@@ -147,11 +148,18 @@ export function AuthProvider({ children }) {
           resetarSegmento();
           resetarBloqueio();
           setLoading(false);
+          // PED-149: sem isso, toda issue do Sentry mostra "Users Impacted:
+          // 0" — impossível responder "quantos estúdios foram afetados" num
+          // incidente. Só id (LGPD — nada de e-mail/nome).
+          Sentry.setUser(null);
         }
         return;
       }
 
-      if (!cancelled) setSessao((prev) => (prev?.user?.id === session.user.id ? prev : session));
+      if (!cancelled) {
+        setSessao((prev) => (prev?.user?.id === session.user.id ? prev : session));
+        Sentry.setUser({ id: session.user.id });
+      }
 
       if (perfilJaCarregado.current && perfilCarregadoParaId.current === session.user.id) {
         if (!cancelled) setLoading(false);
@@ -357,6 +365,7 @@ export function AuthProvider({ children }) {
         resetarSegmento();
         resetarBloqueio();
         setLoading(false);
+        Sentry.setUser(null); // PED-149: limpa o id do Sentry no logout.
 
       } else if (event === 'SIGNED_IN') {
         registrarConsentimentoPendente(session);

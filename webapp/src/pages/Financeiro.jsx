@@ -4,6 +4,7 @@ import {
   Banknote, Clock, CheckCircle, Search, RefreshCw, AlertCircle, Calendar, FileSpreadsheet, Plus,
   Pencil, Trash2
 } from 'lucide-react';
+import * as Sentry from '@sentry/react';
 import { supabase } from '../lib/supabase';
 import { financeiroService } from '../services/financeiroService';
 import { gerarRepassesDaMensalidade } from '../services/repasseService';
@@ -295,6 +296,9 @@ export default function Financeiro() {
       }
     } catch (error) {
       console.error('[Financeiro] handleConfirmarPagamento:', error);
+      // PED-149: fluxo crítico (pagamento) tratado por catch — sem isso,
+      // essa falha nunca chegava ao Sentry (só o toast via pro usuário).
+      Sentry.captureException(error, { tags: { fluxo: 'confirmar_pagamento' } });
       showToast.error('Erro ao processar pagamento');
     }
   };
@@ -321,6 +325,9 @@ export default function Financeiro() {
       refetch();
           } catch (error) {
       console.error('[Financeiro] handleGerarMensalidades:', error);
+      // PED-149: fluxo crítico (geração de mensalidade) tratado por catch —
+      // sem isso, essa falha nunca chegava ao Sentry (só o toast pro usuário).
+      Sentry.captureException(error, { tags: { fluxo: 'gerar_mensalidades' } });
       showToast.error(error.message || 'Erro ao gerar mensalidades');
     } finally {
       setGerando(false);
