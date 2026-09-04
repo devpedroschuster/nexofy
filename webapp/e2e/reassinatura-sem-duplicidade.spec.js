@@ -100,6 +100,11 @@ test.describe('Reassinatura sem duplicidade de mensalidade (PED-160)', () => {
     await page.goto(urlFor(TENANT_B_HOST, '/alunos'));
     await page.getByPlaceholder('Pesquisar por nome ou e-mail...').fill(NOME_ALUNO);
     await expect(page.getByText(NOME_ALUNO, { exact: true })).toBeVisible();
+    // A busca é debounced (buscaDebounced) — sem esperar a lista de fato
+    // narrowar pra 1 linha, "Desativar" ainda resolve pras 3 linhas da
+    // página (todos os alunos do fixture), e o clique quebra em strict
+    // mode violation. Espera a contagem real antes de prosseguir.
+    await expect(page.getByTitle('Desativar')).toHaveCount(1, { timeout: 10_000 });
 
     // "Desativar" — mesmo fluxo que alunosService.alterarStatus (só ativo=false,
     // nunca mexe em mensalidades). O botão-ícone da linha e o botão de
