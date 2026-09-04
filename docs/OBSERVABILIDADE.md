@@ -12,4 +12,4 @@
 
 **Meta:** disponível 99,5% do horário comercial.
 
-**Como é medido:** hoje, não é — é só a meta declarada. Não há monitoramento de uptime automatizado nesta ficha (fora de escopo do PED-35, que pede só a definição por escrito). Se um monitor de uptime vier a ser criado depois, esta é a meta que ele deve reportar contra.
+**Como é medido:** PED-157 adicionou um endpoint de health-check (`supabase/functions/health`) para um monitor de uptime externo bater a cada 5 min — ver `docs/UPTIME_MONITORING.md` para o passo a passo de configuração (UptimeRobot) e o status atual (a criação da conta/alerta é manual, depende do operador). Esta é a meta que esse monitor deve reportar contra.

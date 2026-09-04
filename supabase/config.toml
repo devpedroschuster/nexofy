@@ -208,6 +208,16 @@ verify_jwt = false
 import_map = "./functions/gerar-mensalidades/deno.json"
 entrypoint = "./functions/gerar-mensalidades/index.ts"
 
+[functions.health]
+enabled = true
+# PED-157: precisa ser false para o monitor de uptime externo (UptimeRobot /
+# Better Uptime) conseguir chamar esta function — esses serviços não enviam
+# JWT do Supabase. Mesma lição do bloco [functions.gerar-mensalidades] acima:
+# o config.toml por-function sozinho não é suficiente, este bloco na RAIZ é
+# o que efetivamente vale no deploy.
+verify_jwt = false
+entrypoint = "./functions/health/index.ts"
+
 [functions.webhook-assinatura-nexofy]
 enabled = true
 # Asaas não envia JWT do Supabase — autenticação é via header
