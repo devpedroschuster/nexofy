@@ -26,10 +26,6 @@ interface MensalidadeExistente {
   aluno_id: string
 }
 
-interface MembroAdmin {
-  user_id: string
-}
-
 interface ResultadoGeracao {
   geradas: number
   mes: string
@@ -351,45 +347,13 @@ async function gerarMensalidadesDoEstudio(
   const totalInseridas = ((resultadoInsercao ?? []) as { out_aluno_id: number; out_inserida: boolean }[])
     .filter((r) => r.out_inserida).length
 
-  // 6. Notifica admins deste estúdio via tabela notificacoes
-  // FIX: "profiles" é um sistema de roles paralelo a "estudio_membros" e
-  // não é a fonte de verdade usada pelo resto do app — useAuth.js (e
-  // toda a auditoria de RLS) confirmam que o frontend lê role/estudio_id
-  // de estudio_membros, não de profiles. profiles é populada só pelo
-  // fluxo de criar-estudio (validação de super_admin) e pode estar
-  // dessincronizada ou simplesmente vazia para membros comuns. Trocado
-  // para a fonte real.
-  const { data: admins } = await supabase
-    .from('estudio_membros')
-    .select('user_id')
-    .eq('estudio_id', estudioId)   // ← isolamento
-    .eq('role', 'admin')
-    .returns<MembroAdmin[]>()
-
-  if (totalInseridas > 0 && admins && admins.length > 0) {
-    // NOTA: a tabela "notificacoes" não foi encontrada no banco durante
-    // a sprint de RLS (ALTER TABLE notificacoes falhou com "relation
-    // does not exist" — ver 001_rls_multitenant.sql). Esse INSERT abaixo
-    // provavelmente já falha hoje, silenciosamente (sem .error tratado).
-    // Confirme se a tabela existe antes de assumir que notificações
-    // estão sendo entregues; se não existir, crie a tabela ou remova
-    // este bloco até decidir o que fazer com o módulo de notificações.
-    const { error: errNotif } = await supabase.from('notificacoes').insert(
-      admins.map((admin: MembroAdmin) => ({
-        estudio_id: estudioId,     // ← isolamento
-        user_id: admin.user_id,
-        tipo: 'cobranca',
-        titulo: '💰 Cobranças geradas',
-        mensagem: `${totalInseridas} mensalidade(s) gerada(s) para ${mesLabel}.`,
-        lida: false,
-      }))
-    )
-    if (errNotif) {
-      // Não derruba a função por causa de notificação — mensalidades já
-      // foram geradas com sucesso no passo 5. Só loga para investigação.
-      console.error('[gerar-mensalidades] Falha ao notificar admins:', errNotif)
-    }
-  }
+  // PED-163: bloco de notificação a admins via tabela "notificacoes" foi
+  // removido — a tabela não existe em staging nem produção (confirmado
+  // via information_schema.tables) e nada no app lê dela hoje (a página
+  // "Notificações" do frontend é 100% computada em memória a partir de
+  // `alunos`, sem relação com esta tabela). O insert falhava sempre,
+  // silenciosamente. Se o módulo de notificações via banco for retomado,
+  // recriar este passo junto com a tabela e seus consumidores.
 
   return { geradas: totalInseridas, mes: mesLabel, data_vencimento }
 }
