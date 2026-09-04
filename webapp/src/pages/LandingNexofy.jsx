@@ -1,7 +1,7 @@
 // Landing de MARKETING do Nexofy (acesso sem slug)
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Menu, X, ArrowRight, Calendar, Users, Wallet, CheckCircle2, Star,
   ChevronRight, BarChart3, Clock, Bell, ShieldCheck, Sparkles,
@@ -510,17 +510,15 @@ export default function LandingNexofy() {
             <div>
               <p className="font-display font-bold text-sm">Empresa</p>
               <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
-                <li><a href="#" className="hover:text-foreground">Sobre</a></li>
-                <li><a href="#" className="hover:text-foreground">Contato</a></li>
-                <li><a href="#" className="hover:text-foreground">Central de ajuda</a></li>
+                <li><a href={CONTATO_ESPECIALISTA_URL} className="hover:text-foreground">Contato</a></li>
               </ul>
             </div>
 
             <div>
               <p className="font-display font-bold text-sm">Legal</p>
               <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
-                <li><a href="#" className="hover:text-foreground">Termos de uso</a></li>
-                <li><a href="#" className="hover:text-foreground">Privacidade</a></li>
+                <li><Link to={LINKS.TERMOS} className="hover:text-foreground">Termos de uso</Link></li>
+                <li><Link to={LINKS.PRIVACIDADE} className="hover:text-foreground">Privacidade</Link></li>
               </ul>
             </div>
           </div>
