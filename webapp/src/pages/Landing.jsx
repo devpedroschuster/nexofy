@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import './landing.css';
 import { useEstudioPublico } from '../hooks/useEstudioPublico';
 import { usePlanosPublicos } from '../hooks/usePlanosPublicos';
@@ -7,6 +7,7 @@ import { useModalidadesPublicas } from '../hooks/useModalidadesPublicas';
 import { resolverLandingCopy, resolverConteudoLanding } from '../lib/landingCopy';
 import { montarCssVarsMarca } from '../lib/corMarca';
 import { leadsService } from '../services/leadsService';
+import { LINKS } from '../lib/constants';
 import LandingNexofy from './LandingNexofy';
 
 function setMetaTag(attr, key, content) {
@@ -344,6 +345,10 @@ export default function Landing() {
                       </a>
                     </>
                   )}
+                </p>
+                <p className="hero-form-hint">
+                  Ao enviar, você concorda que {nomeEstudio} entre em contato pelo WhatsApp. Veja como tratamos seus dados na{' '}
+                  <Link to={LINKS.PRIVACIDADE} className="hero-form-link">Política de Privacidade</Link>.
                 </p>
               </form>
             )}
