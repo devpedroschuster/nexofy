@@ -43,14 +43,19 @@ test.describe('Redirect do Google OAuth', () => {
   // deliberadamente inválido, observando se o redirect_to pedido é
   // ecoado — allowlisted — ou descartado em favor de SITE_URL).
   //
-  // SKIP: hoje a allowlist de Redirect URLs do projeto de staging não
-  // cobre os hosts *.e2e.test (nem localhost:4173) — confirmado via
-  // sondagem manual durante a implementação da PED-147. Navegar de
-  // verdade para um link de recuperação também cairia fora do app pelo
-  // mesmo motivo (ver comentário em redefinir-senha.spec.js). Rastreado
-  // na PED-155: assim que a allowlist de staging for corrigida, remover
-  // este skip.
-  test.skip('redirect_to do reset de senha está na allowlist do projeto (PED-155)', async ({ request }) => {
+  // PED-155: a allowlist de Redirect URLs do projeto de staging já foi
+  // atualizada com entradas explícitas para iluminus.e2e.test e
+  // ronaldo.e2e.test (confirmado no painel do Supabase). Uma sondagem
+  // manual com token inválido, feita fora deste CI, ainda mostrou
+  // fallback pra SITE_URL mesmo após ~5min — mas essa sondagem usa um
+  // token deliberadamente inválido, e não foi possível confirmar se o
+  // GoTrue desta versão do projeto honra o redirect_to allowlisted em
+  // caminhos de erro (como fazia em produção, ver PED-134) ou só em
+  // verificações bem-sucedidas. Removido o skip para deixar o job de E2E
+  // do CI — que roda contra o staging real — decidir com evidência
+  // concreta; se falhar por esse motivo, re-adicionar o skip com uma nota
+  // atualizada.
+  test('redirect_to do reset de senha está na allowlist do projeto (PED-155)', async ({ request }) => {
     const alvoLegitimo = urlFor(TENANT_A_HOST, '/redefinir-senha');
 
     const respostaLegitima = await request.get(`${process.env.VITE_SUPABASE_URL}/auth/v1/verify`, {
