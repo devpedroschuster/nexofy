@@ -30,9 +30,10 @@ import Badge from '../components/ui/Badge';
 // ─── helpers ──────────────────────────────────────────────────────────────────
 /**
  * Deriva o status real de exibição a partir de `item.status` + `item.data_vencimento`.
- * O BD só armazena 'pago' | 'pendente', mas "atrasado" é calculado no front-end.
+ * O BD armazena 'pago' | 'pendente' | 'cancelado' — "atrasado" é calculado
+ * no front-end a partir de 'pendente' + data_vencimento vencida.
  *
- * @returns {{ tipo: 'pago'|'pendente'|'atrasado', diasAtraso: number }}
+ * @returns {{ tipo: 'pago'|'pendente'|'atrasado'|'cancelado', diasAtraso: number }}
  */
 
 /** Data local (não UTC) no formato YYYY-MM-DD. */
@@ -43,6 +44,11 @@ function hojeLocal() {
 
 function calcularStatusReal(item) {
   if (item.status === 'pago') return { tipo: 'pago', diasAtraso: 0 };
+  // PED-160: matricular_aluno cancela automaticamente a mensalidade
+  // pendente anterior quando o aluno reassina no mesmo mês — sem este
+  // branch, a mensalidade cancelada caía no fallback abaixo e aparecia
+  // como "PENDENTE"/"ATRASADO" (cobrança fantasma) e entrava nos totais.
+  if (item.status === 'cancelado') return { tipo: 'cancelado', diasAtraso: 0 };
   const hoje = hojeLocal();
   if (item.data_vencimento < hoje) {
     const venc = new Date(item.data_vencimento + 'T12:00:00');
@@ -52,7 +58,7 @@ function calcularStatusReal(item) {
   return { tipo: 'pendente', diasAtraso: 0 };
 }
 
-const ORDEM_STATUS = { atrasado: 0, pendente: 1, pago: 2 };
+const ORDEM_STATUS = { atrasado: 0, pendente: 1, pago: 2, cancelado: 3 };
 
 function CelulaFinAlunoFixa({ item }) {
   return (
@@ -110,12 +116,14 @@ function CelulaFinStatusFixa({ statusReal }) {
   return (
     <Badge
       tone={
-        statusReal === 'pago'     ? 'success'     :
-        statusReal === 'atrasado' ? 'destructive' : 'warning'
+        statusReal === 'pago'      ? 'success'     :
+        statusReal === 'atrasado'  ? 'destructive' :
+        statusReal === 'cancelado' ? 'neutral'     : 'warning'
       }
     >
-      {statusReal === 'atrasado' ? 'ATRASADO'
-        : statusReal === 'pago'  ? 'PAGO'
+      {statusReal === 'atrasado'  ? 'ATRASADO'
+        : statusReal === 'pago'      ? 'PAGO'
+        : statusReal === 'cancelado' ? 'CANCELADO'
         : 'PENDENTE'}
     </Badge>
   );
@@ -229,6 +237,9 @@ export default function Financeiro() {
     // Usa data local (não UTC) — mesma lógica de calcularStatusReal
     const hoje = hojeLocal();
     return mensalidades.reduce((acc, m) => {
+      // PED-160: mensalidade cancelada (reassinatura no mesmo mês) não é
+      // cobrança em aberto nem receita — não entra em nenhum dos cards.
+      if (m.status === 'cancelado') return acc;
       const valorOriginal = Number(m.planos?.preco) || 0;
       const valorReal = m.valor_pago !== null ? Number(m.valor_pago) : valorOriginal;
       if (m.status === 'pago') {
@@ -501,6 +512,10 @@ export default function Financeiro() {
   // ── Rodapé da tabela: soma os valores do subconjunto filtrado ──────────────
   const totalFiltrado = useMemo(() => {
     return alunosFiltrados.reduce((acc, item) => {
+      // PED-160: mensalidade cancelada não soma no total exibido (visível
+      // na aba "Todos", já que não tem aba própria) — é cobrança anulada,
+      // não um valor em aberto nem recebido.
+      if (item.status === 'cancelado') return acc;
       const valor =
         item.status === 'pago'
           ? (item.valor_pago !== null ? Number(item.valor_pago) : Number(item.planos?.preco))
