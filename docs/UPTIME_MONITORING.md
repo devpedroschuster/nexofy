@@ -26,4 +26,4 @@ O endpoint de health-check é público (`verify_jwt = false`, ver `supabase/conf
 
 ## Status atual
 
-**Pendente** — depende de uma conta pessoal (e-mail/celular do operador) que só o usuário pode criar; não é algo que possa ser automatizado por código ou CI. Atualizar esta seção (e a "Disponibilidade do app" em `docs/OBSERVABILIDADE.md`) para "ativo" assim que os passos acima forem confirmados manualmente.
+**Ativo.** Conta criada no UptimeRobot, os dois monitores (site + health-check) cadastrados e o alerta por push testado de verdade pelo operador (app instalado, notificação confirmada chegando no celular).
