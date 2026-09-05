@@ -7,6 +7,7 @@ export const alunosKeys = {
   perfil: (alunoId, estudioId) => ['aluno', alunoId, estudioId],
   planos: (alunoId, estudioId) => ['aluno-planos', alunoId, estudioId],
   frequencia: (alunoId, estudioId) => ['aluno-frequencia', alunoId, estudioId],
+  consentimentoResponsavel: (alunoId, estudioId) => ['aluno-consentimento-responsavel', alunoId, estudioId],
 
   // Aniversariantes
   aniversariantes: (estudioId) => ['alunos', estudioId, 'aniversariantes'],

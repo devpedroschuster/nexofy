@@ -102,6 +102,38 @@ export const validarTelefone = (telefone) => {
   return digitos.length === 10 || digitos.length === 11;
 };
 
+/**
+ * Calcula idade em anos completos a partir de uma data de nascimento
+ * (string "YYYY-MM-DD" ou ISO completo). Retorna null para valor
+ * ausente/inválido — quem chama decide o que fazer com "idade desconhecida"
+ * (normalmente tratar como não-menor, já que data_nascimento é opcional).
+ */
+export const calcularIdade = (dataNascimento) => {
+  if (!dataNascimento) return null;
+  const somenteData = String(dataNascimento).split('T')[0];
+  const nascimento = new Date(`${somenteData}T12:00:00`);
+  if (Number.isNaN(nascimento.getTime())) return null;
+
+  const hoje = new Date();
+  let idade = hoje.getFullYear() - nascimento.getFullYear();
+  const aindaNaoFezAniversarioEsteAno =
+    hoje.getMonth() < nascimento.getMonth() ||
+    (hoje.getMonth() === nascimento.getMonth() && hoje.getDate() < nascimento.getDate());
+  if (aindaNaoFezAniversarioEsteAno) idade -= 1;
+
+  return idade;
+};
+
+// PED-170: usado tanto na validação do cadastro (exigir consentimento do
+// responsável legal) quanto no gate de campos sensíveis de saúde
+// (anamnese/observações médicas) — mesma regra de corte (18 anos
+// completos) em todos os pontos, pra não haver uma tela mais permissiva
+// que outra pro mesmo aluno.
+export const ehMenorDeIdade = (dataNascimento) => {
+  const idade = calcularIdade(dataNascimento);
+  return idade !== null && idade < 18;
+};
+
 export const coresStatus = {
   pago:     { bg: 'bg-success-soft', text: 'text-success' },
   pendente: { bg: 'bg-warning-soft', text: 'text-warning' },

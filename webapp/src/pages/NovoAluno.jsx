@@ -13,7 +13,7 @@ import * as Sentry from '@sentry/react';
 
 import { alunosService } from '../services/alunosService';
 import { alunoSchema } from '../lib/validation';
-import { formatarCPF, validarCPF, formatarTelefone } from '../lib/utils';
+import { formatarCPF, validarCPF, formatarTelefone, ehMenorDeIdade } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
@@ -125,6 +125,97 @@ function CepField({ register, buscandoCep, cepErro, onBlur, className = '' }) {
   );
 }
 
+// PED-170 (LGPD art. 14): aluno menor de 18 anos exige identificação e
+// consentimento do responsável legal antes de liberar o cadastro completo.
+// `jaConsentido` vem de um registro existente em consentimentos_responsavel_legal
+// (edição de aluno já consentido antes) — nesse caso o checkbox já chega
+// marcado (setValue no efeito de carregarFichaCompleta) e este fieldset só
+// avisa que já há consentimento, sem forçar o operador a re-digitar os dados
+// do responsável pra poder salvar qualquer outra alteração no cadastro.
+function ResponsavelLegalFieldset({ register, errors, jaConsentido }) {
+  return (
+    <div className="md:col-span-2 bg-warning-soft border border-warning/30 rounded-2xl p-5 space-y-4
+      animate-in slide-in-from-top-2">
+      <div className="flex items-center gap-2">
+        <ShieldCheck className="text-warning shrink-0" size={18} />
+        <h4 className="font-black text-warning text-xs uppercase tracking-widest">
+          Responsável Legal — obrigatório para menores de 18 anos
+        </h4>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="md:col-span-2">
+          <input
+            {...register('responsavel_legal_nome')}
+            placeholder="Nome completo do responsável legal *"
+            className="w-full px-4 py-4 bg-card rounded-2xl border border-transparent
+              focus:border-primary outline-none font-medium text-foreground"
+          />
+          {errors.responsavel_legal_nome && (
+            <p className="text-xs text-destructive mt-1.5 ml-1 font-medium">
+              {errors.responsavel_legal_nome.message}
+            </p>
+          )}
+        </div>
+        <div>
+          <input
+            {...register('responsavel_legal_cpf')}
+            placeholder="CPF do responsável *"
+            maxLength={14}
+            className="w-full px-4 py-4 bg-card rounded-2xl border border-transparent
+              focus:border-primary outline-none font-medium text-foreground"
+          />
+          {errors.responsavel_legal_cpf && (
+            <p className="text-xs text-destructive mt-1.5 ml-1 font-medium">
+              {errors.responsavel_legal_cpf.message}
+            </p>
+          )}
+        </div>
+        <div>
+          <select
+            {...register('responsavel_legal_parentesco')}
+            defaultValue=""
+            className="w-full px-4 py-4 bg-card rounded-2xl border border-transparent
+              focus:border-primary outline-none font-bold text-muted-foreground cursor-pointer"
+          >
+            <option value="">Parentesco...</option>
+            <option value="mae">Mãe</option>
+            <option value="pai">Pai</option>
+            <option value="tutor_legal">Tutor(a) legal</option>
+            <option value="outro">Outro responsável</option>
+          </select>
+          {errors.responsavel_legal_parentesco && (
+            <p className="text-xs text-destructive mt-1.5 ml-1 font-medium">
+              {errors.responsavel_legal_parentesco.message}
+            </p>
+          )}
+        </div>
+      </div>
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          {...register('consentimento_responsavel')}
+          className="mt-1 w-4 h-4 accent-warning shrink-0"
+        />
+        <span className="text-xs text-warning leading-relaxed font-medium">
+          Declaro ser responsável legal por este aluno e autorizo o cadastro e o
+          tratamento dos seus dados pessoais nesta plataforma, em conformidade com a
+          LGPD (Lei 13.709/2018, art. 14).
+        </span>
+      </label>
+      {errors.consentimento_responsavel && (
+        <p className="text-xs text-destructive ml-1 font-medium">
+          {errors.consentimento_responsavel.message}
+        </p>
+      )}
+      {jaConsentido && (
+        <p className="text-xs text-success font-bold flex items-center gap-1.5">
+          <Check size={12} /> Consentimento já registrado para este aluno.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // Main component
 export default function NovoAluno() {
   const navigate     = useNavigate();
@@ -201,6 +292,12 @@ export default function NovoAluno() {
   const roleAtual          = watch('role');
   const planoSelecionado   = watch('plano_id');
   const dataInicioPlano    = useWatch({ control, name: 'data_inicio_plano' });
+  // PED-170: reavaliado a cada digitação de data_nascimento — controla tanto
+  // a exibição do bloco "Responsável Legal" quanto quais campos entram na
+  // validação por step (avancarStep) e no payload de consentimento no submit.
+  const dataNascimentoAtual = useWatch({ control, name: 'data_nascimento' });
+  const menorDeIdade        = ehMenorDeIdade(dataNascimentoAtual);
+  const [consentimentoResponsavel, setConsentimentoResponsavel] = useState(null);
   const planoSelecionadoObj = planos.find(p => String(p.id) === String(planoSelecionado));
   const regrasPlano         = planoSelecionadoObj?.regras_acesso || [];
 
@@ -231,6 +328,7 @@ export default function NovoAluno() {
       setStepAtual(1);
       setCadastroSalvo(false);
       setMetadataForm({});
+      setConsentimentoResponsavel(null);
     }
   }, [location.pathname, reset, alunoParaEditar, leadParaConversao, limparCepErro]);
 
@@ -318,6 +416,25 @@ export default function NovoAluno() {
           if (aluno.cpf) setCpfDisplay(formatarCPF(aluno.cpf));
           setModalidadesSelecionadas(aluno.modalidades_selecionadas || []);
           setMetadataForm(aluno.metadata || {});
+
+          // PED-170: se já existe consentimento do responsável legal registrado,
+          // pré-marca o checkbox e preenche os dados dele — sem isso, reabrir
+          // o cadastro de um menor já consentido bloquearia o salvamento de
+          // qualquer outro campo até "re-consentir" de novo.
+          if (ehMenorDeIdade(aluno.data_nascimento)) {
+            const consentimento = await alunosService.buscarConsentimentoResponsavel(
+              alunoParaEditar.id, idEfetivo
+            );
+            if (!cancelled) {
+              setConsentimentoResponsavel(consentimento);
+              if (consentimento) {
+                setValue('responsavel_legal_nome',       consentimento.nome_responsavel);
+                setValue('responsavel_legal_cpf',        consentimento.cpf_responsavel || '');
+                setValue('responsavel_legal_parentesco', consentimento.parentesco);
+                setValue('consentimento_responsavel',    true);
+              }
+            }
+          }
         }
       } else if (leadParaConversao && !cancelled) {
         reset({
@@ -389,7 +506,13 @@ export default function NovoAluno() {
   // ─────────────────────────────────────────────────────────
   // Fix #2 – per-step validation before advancing
   // ─────────────────────────────────────────────────────────
-  const camposPorStep = { 1: ['nome_completo'], 2: ['email'], 3: [], 4: [] };
+  const camposStep1Menor = [
+    'responsavel_legal_nome', 'responsavel_legal_cpf', 'responsavel_legal_parentesco', 'consentimento_responsavel',
+  ];
+  const camposPorStep = {
+    1: ['nome_completo', ...(menorDeIdade ? camposStep1Menor : [])],
+    2: ['email'], 3: [], 4: [],
+  };
 
   const avancarStep = async () => {
     if (stepAtual === 1 && cpfErro) return;         // block on invalid CPF
@@ -634,11 +757,35 @@ export default function NovoAluno() {
         }
       }
 
+      // PED-170: registra o consentimento do responsável legal (linha nova,
+      // append-only, em consentimentos_responsavel_legal) quando o aluno é
+      // menor e ainda não havia um consentimento gravado para ele. Não
+      // bloqueia o fluxo em caso de falha — o cadastro/atualização em si já
+      // foi persistido; um erro aqui só avisa o operador pra tentar de novo
+      // pela aba Saúde/Anamnese, sem perder o cadastro que acabou de salvar.
+      const registrarConsentimentoSeNecessario = async (alunoId) => {
+        if (!menorDeIdade || !data.consentimento_responsavel || consentimentoResponsavel) return;
+        try {
+          await alunosService.registrarConsentimentoResponsavel(alunoId, idEfetivo, {
+            nome:       data.responsavel_legal_nome?.trim(),
+            cpf:        data.responsavel_legal_cpf || null,
+            parentesco: data.responsavel_legal_parentesco,
+          });
+        } catch (errConsentimento) {
+          console.error('Erro ao registrar consentimento do responsável legal:', errConsentimento);
+          Sentry.captureException(errConsentimento, { tags: { fluxo: 'consentimento_responsavel_legal' } });
+          showToast.error(
+            'Cadastro salvo, mas houve um erro ao registrar o consentimento do responsável legal. Tente novamente na aba Saúde/Anamnese.'
+          );
+        }
+      };
+
       // EDIT MODE – unchanged behaviour
       if (alunoParaEditar) {
         await alunosService.atualizar(alunoParaEditar.id, {
           ...payloadBase, nome_completo: data.nome_completo,
         }, idEfetivo);
+        await registrarConsentimentoSeNecessario(alunoParaEditar.id);
         showToast.success('Cadastro atualizado com sucesso!');
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: alunosKeys.listaTodas(idEfetivo) }),
@@ -685,6 +832,8 @@ export default function NovoAluno() {
         );
         novoAlunoId = alunoInserido.id;
       }
+
+      await registrarConsentimentoSeNecessario(novoAlunoId);
 
       // Financial records
       // FIX: os dois INSERTs manuais (historico_planos + mensalidades) foram
@@ -1042,6 +1191,14 @@ export default function NovoAluno() {
           </div>
         </div>
 
+        {menorDeIdade && (
+          <ResponsavelLegalFieldset
+            register={register}
+            errors={errors}
+            jaConsentido={!!consentimentoResponsavel}
+          />
+        )}
+
         {camposDinamicos.length > 0 && (
           <div className="pt-2">
             <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-4">
@@ -1250,6 +1407,14 @@ export default function NovoAluno() {
               />
             </div>
           </div>
+
+          {menorDeIdade && (
+            <ResponsavelLegalFieldset
+              register={register}
+              errors={errors}
+              jaConsentido={!!consentimentoResponsavel}
+            />
+          )}
 
           {camposDinamicos.length > 0 && (
             <div className="pt-2">

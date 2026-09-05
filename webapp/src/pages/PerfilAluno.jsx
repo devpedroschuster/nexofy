@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { alunosService } from '../services/alunosService';
+import { ehMenorDeIdade, validarCPF } from '../lib/utils';
 import { useEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
 import { useBuscaCep } from '../hooks/useBuscaCep';
@@ -113,7 +114,7 @@ function BotaoWhatsApp({ aluno, nomeEstudio = 'Estúdio' }) {
 // ─────────────────────────────────────────────────────────────
 // Modal Editar Cadastro
 // ─────────────────────────────────────────────────────────────
-function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }) {
+function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose, consentimentoResponsavel }) {
   const [salvando, setSalvando] = useState(false);
   const [form, setForm] = useState({
     nome_completo:      aluno?.nome_completo      ?? '',
@@ -128,7 +129,15 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
     complemento:  aluno?.complemento  ?? '',
     bairro:       aluno?.bairro       ?? '',
     cidade:       aluno?.cidade       ?? '',
+    // PED-170 (LGPD art. 14): só relevantes quando o aluno é menor de idade
+    // e ainda não há consentimento registrado (ver menorSemConsentimento).
+    responsavel_legal_nome:       consentimentoResponsavel?.nome_responsavel ?? '',
+    responsavel_legal_cpf:        consentimentoResponsavel?.cpf_responsavel ?? '',
+    responsavel_legal_parentesco: consentimentoResponsavel?.parentesco ?? '',
+    consentimento_responsavel:    !!consentimentoResponsavel,
   });
+  const menorDeIdade         = ehMenorDeIdade(form.data_nascimento);
+  const menorSemConsentimento = menorDeIdade && !consentimentoResponsavel;
   // Item 1 do plano multi-segmento: valores dos campos dinâmicos do estúdio,
   // separado de `form` (que segue o schema fixo) pelo mesmo motivo do
   // NovoAluno.jsx — o merge parcial com o metadata já gravado acontece no
@@ -141,6 +150,29 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
     if (!form.nome_completo.trim()) {
       showToast.error('Nome completo é obrigatório.');
       return;
+    }
+
+    // PED-170: aluno menor de 18 anos sem consentimento do responsável legal
+    // ainda registrado — exige identificação + consentimento antes de salvar
+    // qualquer outra alteração do cadastro (mesmo critério de aceite do
+    // cadastro inicial, aplicado aqui pra cobrir alunos já existentes cuja
+    // data de nascimento só agora está sendo preenchida/corrigida).
+    if (menorSemConsentimento) {
+      if (
+        !form.responsavel_legal_nome.trim()
+        || !form.responsavel_legal_cpf.trim()
+        || !form.responsavel_legal_parentesco
+        || !form.consentimento_responsavel
+      ) {
+        showToast.error(
+          'Aluno menor de idade: preencha nome, CPF e parentesco do responsável legal e confirme o consentimento antes de salvar.'
+        );
+        return;
+      }
+      if (!validarCPF(form.responsavel_legal_cpf)) {
+        showToast.error('CPF do responsável legal inválido. Verifique os dígitos.');
+        return;
+      }
     }
 
     // Fase 7: valida os campos dinâmicos antes de gravar. Mesmo racional do
@@ -176,6 +208,16 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
         cidade:             form.cidade.trim()             || null,
         metadata:           metadataForm,
       }, estudioId);
+
+      if (menorSemConsentimento) {
+        await alunosService.registrarConsentimentoResponsavel(alunoId, estudioId, {
+          nome:       form.responsavel_legal_nome.trim(),
+          cpf:        form.responsavel_legal_cpf,
+          parentesco: form.responsavel_legal_parentesco,
+        });
+        queryClient.invalidateQueries({ queryKey: alunosKeys.consentimentoResponsavel(alunoId, estudioId) });
+      }
+
       queryClient.invalidateQueries({ queryKey: alunosKeys.perfil(alunoId, estudioId) });
       showToast.success('Cadastro atualizado com sucesso!');
       onClose();
@@ -238,6 +280,66 @@ function ModalEditarCadastro({ aluno, alunoId, estudioId, queryClient, onClose }
               <input className={inputClass} value={form.contato_emergencia} onChange={set('contato_emergencia')} placeholder="Nome — (51) 9 0000-0000" />
             </div>
           </div>
+
+          {menorDeIdade && (
+            <div className="space-y-4 p-5 rounded-2xl border border-warning/30 bg-warning-soft">
+              <h3 className="font-black text-warning flex items-center gap-2 text-sm uppercase tracking-wider">
+                <AlertTriangle size={16} /> Responsável Legal (menor de 18 anos)
+              </h3>
+              {consentimentoResponsavel ? (
+                <p className="text-xs font-bold text-success flex items-center gap-1.5">
+                  <CheckCircle size={14} /> Consentimento já registrado
+                  ({consentimentoResponsavel.nome_responsavel} —{' '}
+                  {consentimentoResponsavel.parentesco === 'mae' ? 'mãe'
+                    : consentimentoResponsavel.parentesco === 'pai' ? 'pai'
+                    : consentimentoResponsavel.parentesco === 'tutor_legal' ? 'tutor(a) legal'
+                    : 'outro responsável'}).
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-warning leading-relaxed">
+                    Este aluno é menor de idade. Antes de salvar, identifique o responsável
+                    legal e confirme o consentimento (LGPD, art. 14) — sem isso, campos
+                    sensíveis de saúde (anamnese/observações médicas) continuam bloqueados.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                      <label className={labelClass}>Nome completo do responsável *</label>
+                      <input className={inputClass} value={form.responsavel_legal_nome}
+                        onChange={set('responsavel_legal_nome')} placeholder="Nome do responsável legal" />
+                    </div>
+                    <div>
+                      <label className={labelClass}>CPF do responsável *</label>
+                      <input className={inputClass} value={form.responsavel_legal_cpf}
+                        onChange={set('responsavel_legal_cpf')} placeholder="000.000.000-00" maxLength={14} />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Parentesco *</label>
+                      <select className={inputClass} value={form.responsavel_legal_parentesco}
+                        onChange={set('responsavel_legal_parentesco')}>
+                        <option value="">Selecionar...</option>
+                        <option value="mae">Mãe</option>
+                        <option value="pai">Pai</option>
+                        <option value="tutor_legal">Tutor(a) legal</option>
+                        <option value="outro">Outro responsável</option>
+                      </select>
+                    </div>
+                  </div>
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" checked={form.consentimento_responsavel}
+                      onChange={(e) => setForm(f => ({ ...f, consentimento_responsavel: e.target.checked }))}
+                      className="mt-1 w-4 h-4 accent-warning shrink-0" />
+                    <span className="text-xs text-warning leading-relaxed font-medium">
+                      Declaro que o responsável acima autorizou o cadastro e o tratamento
+                      dos dados pessoais deste aluno nesta plataforma, em conformidade com
+                      a LGPD (Lei 13.709/2018, art. 14).
+                    </span>
+                  </label>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="space-y-5">
             <h3 className="font-black text-foreground flex items-center gap-2 text-sm uppercase tracking-wider text-muted-foreground">
               <Phone size={16} /> Contato
@@ -529,7 +631,10 @@ function HeatmapFrequencia({ frequencia, planoAtivo }) {
 // ─────────────────────────────────────────────────────────────
 // Aba Anamnese
 // ─────────────────────────────────────────────────────────────
-function AbaAnamnese({ aluno, alunoId, estudioId, queryClient, observacoesMedicas, setObservacoesMedicas, salvandoMedico, setSalvandoMedico }) {
+function AbaAnamnese({
+  aluno, alunoId, estudioId, queryClient, observacoesMedicas, setObservacoesMedicas,
+  salvandoMedico, setSalvandoMedico, menorSemConsentimento,
+}) {
   const [editandoLink, setEditandoLink] = useState(false);
   const [novoLink, setNovoLink]         = useState(aluno?.link_anamnese ?? '');
   const [salvandoLink, setSalvandoLink] = useState(false);
@@ -568,14 +673,26 @@ function AbaAnamnese({ aluno, alunoId, estudioId, queryClient, observacoesMedica
   const linkValido = novoLink.trim() && /^https?:\/\/.+/.test(novoLink.trim());
   return (
     <div className="max-w-2xl space-y-6 animate-in slide-in-from-bottom-4">
-      <div className="flex gap-3 rounded-2xl border border-warning/30 bg-warning-soft p-4">
-        <Activity size={16} className="text-warning shrink-0 mt-0.5" />
-        <p className="text-xs text-warning leading-relaxed">
-          Observações médicas e link de anamnese são <strong>dado sensível de saúde</strong>{' '}
-          (LGPD, art. 5º, II). Antes de preencher, confirme que o aluno (ou responsável)
-          autorizou especificamente o registro dessa informação.
-        </p>
-      </div>
+      {menorSemConsentimento ? (
+        <div className="flex gap-3 rounded-2xl border border-destructive/30 bg-destructive-soft p-4">
+          <AlertTriangle size={16} className="text-destructive shrink-0 mt-0.5" />
+          <p className="text-xs text-destructive leading-relaxed">
+            <strong>Bloqueado:</strong> este aluno é menor de 18 anos e ainda não há
+            consentimento do responsável legal registrado (LGPD, art. 14). Clique em{' '}
+            <strong>"Editar Cadastro"</strong> e preencha os dados do responsável legal
+            para liberar o preenchimento de anamnese/observações médicas.
+          </p>
+        </div>
+      ) : (
+        <div className="flex gap-3 rounded-2xl border border-warning/30 bg-warning-soft p-4">
+          <Activity size={16} className="text-warning shrink-0 mt-0.5" />
+          <p className="text-xs text-warning leading-relaxed">
+            Observações médicas e link de anamnese são <strong>dado sensível de saúde</strong>{' '}
+            (LGPD, art. 5º, II). Antes de preencher, confirme que o aluno (ou responsável)
+            autorizou especificamente o registro dessa informação.
+          </p>
+        </div>
+      )}
       <Surface variant="card" padding="lg" className="bg-primary-soft border-primary/20 space-y-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -584,8 +701,8 @@ function AbaAnamnese({ aluno, alunoId, estudioId, queryClient, observacoesMedica
               Link para o formulário de anamnese preenchido pelo aluno.
             </p>
           </div>
-          <button onClick={() => setEditandoLink(v => !v)}
-            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-primary border border-primary/30 hover:bg-primary/10 transition-colors">
+          <button onClick={() => setEditandoLink(v => !v)} disabled={menorSemConsentimento}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-primary border border-primary/30 hover:bg-primary/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent">
             <Link2 size={13} />
             {editandoLink ? 'Cancelar' : (aluno?.link_anamnese ? 'Editar link' : 'Vincular link')}
           </button>
@@ -647,9 +764,10 @@ function AbaAnamnese({ aluno, alunoId, estudioId, queryClient, observacoesMedica
         <Input as="textarea" rows={6}
           placeholder="Lesões, restrições, alergias, medicamentos em uso..."
           value={observacoesMedicas}
+          disabled={menorSemConsentimento}
           onChange={(e) => setObservacoesMedicas(e.target.value)} />
         <Button variant="brand" size="sm" leftIcon={<Save size={14} />}
-          onClick={handleSalvarObservacoesMedicas} disabled={salvandoMedico}>
+          onClick={handleSalvarObservacoesMedicas} disabled={salvandoMedico || menorSemConsentimento}>
           {salvandoMedico ? 'Salvando...' : 'Salvar Observações'}
         </Button>
       </Surface>
@@ -1277,6 +1395,13 @@ export default function PerfilAluno() {
     queryFn: () => alunosService.buscarHistoricoFrequencia(id, idEfetivo),
     enabled: !!aluno && !!idEfetivo,
   });
+  // PED-170: só busca quando o aluno é menor — evita 1 query extra por
+  // perfil pra maioria dos alunos, que nunca vai precisar desse gate.
+  const { data: consentimentoResponsavel } = useQuery({
+    queryKey: alunosKeys.consentimentoResponsavel(id, idEfetivo),
+    queryFn: () => alunosService.buscarConsentimentoResponsavel(id, idEfetivo),
+    enabled: !!idEfetivo && ehMenorDeIdade(aluno?.data_nascimento),
+  });
   const { data: estudio } = useEstudio(idEfetivo);
   const nomeEstudio = estudio?.nome;
 
@@ -1603,6 +1728,7 @@ export default function PerfilAluno() {
           setObservacoesMedicas={setObservacoesMedicas}
           salvandoMedico={salvandoMedico}
           setSalvandoMedico={setSalvandoMedico}
+          menorSemConsentimento={ehMenorDeIdade(aluno?.data_nascimento) && !consentimentoResponsavel}
         />
       )}
       </div>
@@ -1624,6 +1750,7 @@ export default function PerfilAluno() {
           estudioId={idEfetivo}
           queryClient={queryClient}
           onClose={() => setModalEditarAberto(false)}
+          consentimentoResponsavel={consentimentoResponsavel}
         />
       )}
     </div>
