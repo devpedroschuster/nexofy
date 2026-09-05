@@ -1,5 +1,16 @@
-import { describe, it, expect } from 'vitest';
-import { montarPayloadPresenca, deriveEstadoChamada } from './useListaPresenca';
+import { describe, it, expect, vi } from 'vitest';
+
+// Isola as funções puras sob teste do resto do módulo: useListaPresenca.js
+// importa presencaService/useAuth, que importam lib/supabase — que lança
+// erro na própria avaliação do módulo se as env vars do Supabase não
+// estiverem definidas (guarda em lib/supabase.js). No CI essas env vars
+// não existem (por design — testes não devem depender de credenciais
+// reais), então sem este mock o arquivo inteiro falha ao carregar mesmo
+// sem nenhum teste chamar supabase de verdade (mesmo padrão de
+// useSWUpdateNotifier.test.js e alunosService.test.js).
+vi.mock('../../../lib/supabase', () => ({ supabase: {} }));
+
+const { montarPayloadPresenca, deriveEstadoChamada } = await import('./useListaPresenca');
 
 describe('montarPayloadPresenca', () => {
   it('aluno fixo sem registro do dia: presencaId null, origem fixo', () => {
