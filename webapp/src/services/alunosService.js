@@ -1,5 +1,37 @@
 import { supabase } from '../lib/supabase';
 import { sanitizarMetadata } from '../lib/camposSistema';
+import { ehMenorDeIdade } from '../lib/utils';
+
+// PED-170 (LGPD art. 14): dado sensível de saúde (anamnese/observações
+// médicas) de aluno menor de idade nunca pode ser gravado sem consentimento
+// do responsável legal já registrado em `consentimentos_responsavel_legal`.
+// Esta checagem é defesa em profundidade — a validação "de verdade" (que
+// nenhum client pode contornar, nem chamando o REST direto) é o trigger
+// `bloquear_dados_sensiveis_menor_sem_consentimento` no banco; aqui existe
+// só pra dar um erro claro na tela em vez do operador ver a mensagem crua
+// do Postgres.
+const CAMPOS_SENSIVEIS_SAUDE = ['link_anamnese', 'observacoes_medicas'];
+
+function tocaCampoSensivelSaude(payload) {
+  return CAMPOS_SENSIVEIS_SAUDE.some((campo) => campo in payload && payload[campo]);
+}
+
+const ERRO_MENOR_SEM_CONSENTIMENTO =
+  'Este aluno é menor de idade e ainda não há consentimento do responsável legal ' +
+  'registrado. Registre o consentimento (nome, CPF e parentesco do responsável) ' +
+  'antes de preencher dados sensíveis de saúde.';
+
+async function possuiConsentimentoResponsavel(alunoId, estudioId) {
+  const { data, error } = await supabase
+    .from('consentimentos_responsavel_legal')
+    .select('id')
+    .eq('aluno_id', alunoId)
+    .eq('estudio_id', estudioId)
+    .limit(1);
+
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
+}
 
 // Campos que o cliente pode efetivamente gravar em `alunos` a partir destes
 // dois métodos. `role`, `estudio_id`, `id`, `auth_id` e afins nunca entram
@@ -122,9 +154,20 @@ export const alunosService = {
   // por padrão do banco, e estudio_id é sempre o do parâmetro autenticado.
   async criar(dados, estudioId) {
     try {
+      const payload = filtrarCamposPermitidos(dados);
+
+      // Na criação não há como já existir um registro de consentimento
+      // (o aluno_id do vínculo nem existe ainda) — então dado sensível de
+      // saúde preenchido já no cadastro de um menor é sempre rejeitado.
+      // Na prática o form de cadastro (NovoAluno.jsx) nunca envia esses
+      // campos nesta chamada; isso cobre outros caminhos (import, etc.).
+      if (tocaCampoSensivelSaude(payload) && ehMenorDeIdade(dados.data_nascimento)) {
+        throw new Error(ERRO_MENOR_SEM_CONSENTIMENTO);
+      }
+
       const { data, error } = await supabase
         .from('alunos')
-        .insert([{ ...filtrarCamposPermitidos(dados), estudio_id: estudioId }])
+        .insert([{ ...payload, estudio_id: estudioId }])
         .select()
         .single();
 
@@ -139,6 +182,21 @@ export const alunosService = {
   async atualizar(id, dados, estudioId) {
     try {
       const payload = filtrarCamposPermitidos(dados);
+
+      if (tocaCampoSensivelSaude(payload)) {
+        const { data: alunoAtual, error: errAluno } = await supabase
+          .from('alunos')
+          .select('data_nascimento')
+          .eq('id', id)
+          .eq('estudio_id', estudioId)
+          .single();
+        if (errAluno) throw errAluno;
+
+        if (ehMenorDeIdade(alunoAtual?.data_nascimento)) {
+          const temConsentimento = await possuiConsentimentoResponsavel(id, estudioId);
+          if (!temConsentimento) throw new Error(ERRO_MENOR_SEM_CONSENTIMENTO);
+        }
+      }
 
       // Merge parcial: só entra em ação se este update de fato tocar em
       // metadata. Uma edição que não envolve campos dinâmicos (ex.: só
@@ -445,6 +503,55 @@ export const alunosService = {
       return { normalizados: inserts.length, ignorados };
     } catch (error) {
       console.error('[alunosService.normalizarHistoricoPlanos]', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Registra o consentimento do responsável legal para um aluno menor de
+   * idade (PED-170 / LGPD art. 14). Sempre um INSERT novo — nunca um
+   * update — em `consentimentos_responsavel_legal`, mesmo padrão
+   * append-only de `consentimentos` (a linha é a própria prova do
+   * consentimento; alterá-la depois destruiria esse valor probatório).
+   */
+  async registrarConsentimentoResponsavel(alunoId, estudioId, { nome, cpf, parentesco }) {
+    try {
+      const { data, error } = await supabase
+        .from('consentimentos_responsavel_legal')
+        .insert([{
+          aluno_id: alunoId,
+          estudio_id: estudioId,
+          nome_responsavel: nome,
+          cpf_responsavel: cpf || null,
+          parentesco,
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('[alunosService.registrarConsentimentoResponsavel]', error);
+      throw error;
+    }
+  },
+
+  /** Consentimento mais recente do responsável legal, ou null se nenhum foi registrado. */
+  async buscarConsentimentoResponsavel(alunoId, estudioId) {
+    try {
+      const { data, error } = await supabase
+        .from('consentimentos_responsavel_legal')
+        .select('*')
+        .eq('aluno_id', alunoId)
+        .eq('estudio_id', estudioId)
+        .order('aceito_em', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('[alunosService.buscarConsentimentoResponsavel]', error);
       throw error;
     }
   },

@@ -1,5 +1,5 @@
 import * as yup from 'yup';
-import { validarCPF } from '../lib/utils';
+import { validarCPF, ehMenorDeIdade } from '../lib/utils';
 
 export const alunoSchema = yup.object().shape({
   nome_completo: yup
@@ -71,4 +71,54 @@ export const alunoSchema = yup.object().shape({
   rua: yup.string().trim().max(200).nullable().optional(),
   numero: yup.string().trim().max(20).nullable().optional(),
   bairro: yup.string().trim().max(100).nullable().optional(),
+
+  // PED-170 (LGPD art. 14): aluno menor de 18 anos exige identificação e
+  // consentimento do responsável legal antes de liberar o cadastro
+  // completo. Estes 4 campos não são colunas de `alunos` — são
+  // persistidos à parte, em `consentimentos_responsavel_legal` (registro
+  // append-only, mesmo racional de prova de consentimento já usado em
+  // `consentimentos`), então o schema aqui só garante que o operador não
+  // consiga avançar/salvar sem preenchê-los quando aplicável.
+  responsavel_legal_nome: yup
+    .string()
+    .trim()
+    .when('data_nascimento', {
+      is: (valor) => ehMenorDeIdade(valor),
+      then: (schema) => schema
+        .required('Nome do responsável legal é obrigatório para alunos menores de 18 anos.')
+        .max(150, 'O nome do responsável deve ter no máximo 150 caracteres.'),
+      otherwise: (schema) => schema.nullable().optional(),
+    }),
+
+  responsavel_legal_cpf: yup
+    .string()
+    .when('data_nascimento', {
+      is: (valor) => ehMenorDeIdade(valor),
+      then: (schema) => schema
+        .required('CPF do responsável legal é obrigatório para alunos menores de 18 anos.')
+        .test('cpf-responsavel-valido', 'CPF do responsável inválido. Verifique os dígitos.', (value) => (
+          !!value && validarCPF(value)
+        )),
+      otherwise: (schema) => schema.nullable().optional(),
+    }),
+
+  responsavel_legal_parentesco: yup
+    .string()
+    .when('data_nascimento', {
+      is: (valor) => ehMenorDeIdade(valor),
+      then: (schema) => schema
+        .oneOf(['mae', 'pai', 'tutor_legal', 'outro'], 'Selecione o parentesco do responsável legal.')
+        .required('Selecione o parentesco do responsável legal.'),
+      otherwise: (schema) => schema.nullable().optional(),
+    }),
+
+  consentimento_responsavel: yup
+    .boolean()
+    .when('data_nascimento', {
+      is: (valor) => ehMenorDeIdade(valor),
+      then: (schema) => schema
+        .oneOf([true], 'É necessário confirmar o consentimento do responsável legal.')
+        .required('É necessário confirmar o consentimento do responsável legal.'),
+      otherwise: (schema) => schema.nullable().optional(),
+    }),
 });
