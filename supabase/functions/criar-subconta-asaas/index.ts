@@ -15,9 +15,9 @@ function response(body: object, status = 200) {
 }
 
 // ASAAS_API_URL deve apontar para sandbox (https://api-sandbox.asaas.com/v3)
-// em dev/staging e produção (https://api.asaas.com/v3) em prod. Configurado
-// via secret, não hardcoded, para trocar de ambiente sem redeploy.
-const ASAAS_API_URL = Deno.env.get('ASAAS_API_URL') ?? 'https://api-sandbox.asaas.com/v3'
+// em dev/staging e produção (https://api.asaas.com/v3) em prod. Sem default:
+// se o secret faltar, falha fechado (abaixo) em vez de cair no sandbox.
+const ASAAS_API_URL = Deno.env.get('ASAAS_API_URL')
 const ASAAS_MASTER_API_KEY = Deno.env.get('ASAAS_MASTER_API_KEY') ?? ''
 
 interface DadosAsaas {
@@ -48,9 +48,9 @@ serve(withSentry("criar-subconta-asaas", async (req: Request) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  if (!ASAAS_MASTER_API_KEY) {
+  if (!ASAAS_API_URL || !ASAAS_MASTER_API_KEY) {
     // Falha de configuração do ambiente, não do chamador — 500, não 400.
-    console.error('[criar-subconta-asaas] ASAAS_MASTER_API_KEY não configurada.')
+    console.error('[criar-subconta-asaas] ASAAS_API_URL ou ASAAS_MASTER_API_KEY não configurada.')
     return response({ erro: 'Integração de pagamentos indisponível no momento.' }, 500)
   }
 
