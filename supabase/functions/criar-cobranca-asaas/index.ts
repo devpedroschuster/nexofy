@@ -16,8 +16,14 @@ function response(body: object, status = 200) {
 
 // Sem default de sandbox: se o secret faltar, falha fechado (abaixo) em
 // vez de cair silenciosamente no sandbox.
+//
+// PED-140: cobrança do aluno sai da mesma conta Asaas MASTER usada em
+// criar-subconta-asaas/assinar-plano-nexofy (conta única, sem subcontas
+// dedicadas por estúdio) — antes existia um ASAAS_API_KEY separado só
+// pra esta function, mas era a MESMA credencial em duplicidade: bastava
+// esquecer de configurar um dos dois secrets pra cair no fail-closed.
 const ASAAS_API_URL = Deno.env.get('ASAAS_API_URL')
-const ASAAS_API_KEY = Deno.env.get('ASAAS_API_KEY')
+const ASAAS_MASTER_API_KEY = Deno.env.get('ASAAS_MASTER_API_KEY')
 
 interface Body {
   aluno_id: number
@@ -49,9 +55,9 @@ function primeiroDiaProximoMes(mesReferencia: string): string {
 serve(withSentry("criar-cobranca-asaas", async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
-  if (!ASAAS_API_URL || !ASAAS_API_KEY) {
+  if (!ASAAS_API_URL || !ASAAS_MASTER_API_KEY) {
     // Falha de configuração do ambiente, não do chamador — 500, não 400.
-    console.error('[criar-cobranca-asaas] ASAAS_API_URL ou ASAAS_API_KEY não configurada.')
+    console.error('[criar-cobranca-asaas] ASAAS_API_URL ou ASAAS_MASTER_API_KEY não configurada.')
     return response({ erro: 'Integração de pagamentos indisponível no momento.' }, 500)
   }
 
@@ -190,7 +196,7 @@ serve(withSentry("criar-cobranca-asaas", async (req) => {
   if (!customerId) {
     const customerRes = await fetch(`${ASAAS_API_URL}/customers`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'access_token': ASAAS_API_KEY },
+      headers: { 'Content-Type': 'application/json', 'access_token': ASAAS_MASTER_API_KEY },
       body: JSON.stringify({
         name: aluno.nome, email: aluno.email, cpfCnpj: aluno.cpf, phone: aluno.telefone,
       }),
@@ -237,7 +243,7 @@ serve(withSentry("criar-cobranca-asaas", async (req) => {
 
   const paymentRes = await fetch(`${ASAAS_API_URL}/payments`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'access_token': ASAAS_API_KEY },
+    headers: { 'Content-Type': 'application/json', 'access_token': ASAAS_MASTER_API_KEY },
     body: JSON.stringify(paymentBody),
   })
   const paymentData = await paymentRes.json()
