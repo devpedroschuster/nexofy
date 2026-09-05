@@ -350,9 +350,16 @@ const [novaAula, setNovaAula] = useState(INITIAL_FORM_STATE);
   }}
 />
       </Modal>
-      <Modal isOpen={modais.lista.isOpen} onClose={modais.lista.fechar} titulo="Chamada">
-        <ModalListaPresenca {...hookLista} aulaParaLista={aulaParaLista} dataLista={dataLista} setDataLista={setDataLista} isAdmin={isAdmin} />
-      </Modal>
+      {/* Modo Kiosk: tela cheia própria, não passa pelo <Modal> genérico */}
+      <ModalListaPresenca
+        {...hookLista}
+        aberto={modais.lista.isOpen}
+        fechar={modais.lista.fechar}
+        aulaParaLista={aulaParaLista}
+        dataLista={dataLista}
+        setDataLista={setDataLista}
+        isAdmin={isAdmin}
+      />
       {isAdmin && (
         <Modal isOpen={modais.feriados.isOpen} onClose={modais.feriados.fechar} titulo="Gerenciar Bloqueios (Feriados)">
           <ModalFeriados feriados={feriados} {...hookFeriados} />
