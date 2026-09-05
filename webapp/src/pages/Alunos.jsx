@@ -9,10 +9,12 @@ import { useDebounce } from '../hooks/useDebounce';
 import { useAlunos, PAGE_SIZE } from '../hooks/useAlunos';
 import { useNomeEstudio } from '../hooks/useEstudio';
 import { useAuth } from '../hooks/useAuth';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { useImpersonation } from '../context/ImpersonationContext';
 import { useTabelaColunas } from '../hooks/useTabelaColunas';
 import { renderCelula } from '../components/tabela/CelulaDinamica';
 import { ALUNOS_COLUNAS_FIXAS } from '../lib/tabelaColunas';
+import { calcularStatusVencimento } from '../lib/vencimentoAluno';
 import Surface from '../components/ui/Surface';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -34,19 +36,6 @@ const ROLE_LABEL = {
   admin:     'Admin',
   professor: 'Professor',
 };
-
-function calcularStatusVencimento(dataFim) {
-  if (!dataFim) return { tone: 'neutral', label: 'Sem data', dias: null };
-  const hoje = new Date();
-  const hojeUTC = Date.UTC(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
-  const [ano, mes, dia] = dataFim.split('-').map(Number);
-  const fimUTC = Date.UTC(ano, mes - 1, dia);
-  const dias = Math.round((fimUTC - hojeUTC) / (1000 * 60 * 60 * 24));
-  const dataFormatada = `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${String(ano).slice(-2)}`;
-  if (dias < 0)  return { tone: 'destructive', label: dataFormatada, dias };
-  if (dias <= 7) return { tone: 'warning',     label: dataFormatada, dias };
-  return              { tone: 'success',      label: dataFormatada, dias };
-}
 
 function CelulaAlunoFixa({ aluno, navigate }) {
   return (
@@ -168,8 +157,117 @@ function renderCelulaAluno(coluna, aluno, navigate) {
   return renderCelula(coluna.field_type, aluno.metadata?.[coluna.column_key]);
 }
 
+// Ações de linha compartilhadas entre a tabela desktop e o card mobile —
+// mesmos 4 botões, só o container (visibilidade em hover vs. sempre visível
+// em touch) muda por fora via `className`.
+function AcoesAluno({ aluno, navigate, onEditar, onToggleStatus, onExcluir, className }) {
+  return (
+    <div className={className}>
+      <button onClick={() => navigate(`/alunos/${aluno.id}`)} className="p-2 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary-soft transition-colors" title="Ver Perfil">
+        <Eye size={16} />
+      </button>
+      <button onClick={onEditar} className="p-2 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary-soft transition-colors" title="Editar">
+        <Edit2 size={16} />
+      </button>
+      <button
+        onClick={onToggleStatus}
+        className={`p-2 rounded-xl transition-colors ${
+          aluno.ativo
+            ? 'text-muted-foreground hover:text-warning hover:bg-warning-soft'
+            : 'text-muted-foreground hover:text-success hover:bg-success-soft'
+        }`}
+        title={aluno.ativo ? 'Desativar' : 'Reativar'}
+      >
+        <ShieldAlert size={16} />
+      </button>
+      <button onClick={onExcluir} className="p-2 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive-soft transition-colors" title="Excluir permanentemente">
+        <Trash2 size={16} />
+      </button>
+    </div>
+  );
+}
+
+// Substitui a tabela em telas pequenas: sem hover, uma tabela larga só vira
+// scroll horizontal, que é ruim no celular/tablet — mesmos dados e mesmas
+// ações da tabela, só reorganizados em card.
+function CardAlunoMobile({ aluno, navigate, onEditar, onToggleStatus, onExcluir }) {
+  const statusInfo = STATUS_ATIVO[String(aluno.ativo)] ?? { label: 'Indefinido', tone: 'neutral' };
+  const semVencimento = aluno.role === 'admin' || !aluno.plano_id;
+  const vencimento = calcularStatusVencimento(aluno.data_fim_plano);
+
+  return (
+    <div className="p-4 flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <div
+          className="flex-1 min-w-0 flex items-center gap-3 cursor-pointer"
+          onClick={() => navigate(`/alunos/${aluno.id}`)}
+          role="button" tabIndex={0}
+          onKeyDown={(e) => e.key === 'Enter' && navigate(`/alunos/${aluno.id}`)}
+        >
+          <div className="w-10 h-10 rounded-2xl bg-brand-soft text-brand font-black text-sm flex items-center justify-center shrink-0 uppercase">
+            {aluno.nome_completo?.[0] ?? '?'}
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-sm text-foreground truncate">{aluno.nome_completo}</p>
+            <p className="text-xs text-muted-foreground font-medium truncate">{aluno.email}</p>
+          </div>
+        </div>
+        <AcoesAluno
+          aluno={aluno} navigate={navigate}
+          onEditar={onEditar} onToggleStatus={onToggleStatus} onExcluir={onExcluir}
+          className="flex items-center gap-1 shrink-0"
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <span className="text-xs font-bold text-foreground block">{aluno.planos?.nome || 'Sem Plano'}</span>
+          <span className="text-[10px] font-black uppercase text-muted-foreground">
+            {ROLE_LABEL[aluno.role?.toLowerCase()] ?? aluno.role}
+          </span>
+        </div>
+        <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full shrink-0 ${
+          statusInfo.tone === 'success'
+            ? 'bg-success-soft text-success'
+            : statusInfo.tone === 'destructive'
+            ? 'bg-destructive-soft text-destructive'
+            : 'bg-muted text-muted-foreground'
+        }`}>
+          <div className={`w-1.5 h-1.5 rounded-full ${
+            statusInfo.tone === 'success'     ? 'bg-success'
+            : statusInfo.tone === 'destructive' ? 'bg-destructive'
+            : 'bg-muted-foreground'
+          }`} />
+          <span className="text-[10px] font-black uppercase">{statusInfo.label}</span>
+        </div>
+      </div>
+
+      {!semVencimento && (
+        <div className="flex items-center gap-2">
+          <Calendar size={12} className="text-muted-foreground shrink-0" />
+          <Badge tone={vencimento.tone} variant="soft">{vencimento.label}</Badge>
+          {vencimento.dias !== null && (
+            <span className={`text-[10px] font-black ${
+              vencimento.dias < 0  ? 'text-destructive'
+              : vencimento.dias <= 7 ? 'text-warning'
+              : 'text-muted-foreground'
+            }`}>
+              {vencimento.dias < 0
+                ? `${Math.abs(vencimento.dias)}d em atraso`
+                : vencimento.dias === 0
+                ? 'Vence hoje'
+                : `${vencimento.dias}d restantes`}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Alunos() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
 
   // FIX Bug 2: mesmo padrão do Dashboard.jsx — resolve o tenant efetivo
   // considerando impersonation de super_admin.
@@ -365,6 +463,20 @@ export default function Alunos() {
               </div>
             )}
 
+            {isMobile ? (
+              <div className="divide-y divide-border">
+                {alunos.map((aluno) => (
+                  <CardAlunoMobile
+                    key={aluno.id}
+                    aluno={aluno}
+                    navigate={navigate}
+                    onEditar={() => navigate('/alunos/novo', { state: { alunoParaEditar: aluno } })}
+                    onToggleStatus={() => { setAlunoSelecionado(aluno); modalStatus.abrir(); }}
+                    onExcluir={() => { setAlunoSelecionado(aluno); modalExcluir.abrir(); }}
+                  />
+                ))}
+              </div>
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -397,28 +509,13 @@ export default function Alunos() {
                         ))}
 
                         <td className="px-4 py-3 lg:px-8 lg:py-6 text-right">
-                          <div className="flex items-center justify-end gap-2 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => navigate(`/alunos/${aluno.id}`)} className="p-2 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary-soft transition-colors" title="Ver Perfil">
-                              <Eye size={16} />
-                            </button>
-                            <button onClick={() => navigate('/alunos/novo', { state: { alunoParaEditar: aluno } })} className="p-2 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary-soft transition-colors" title="Editar">
-                              <Edit2 size={16} />
-                            </button>
-                            <button
-                              onClick={() => { setAlunoSelecionado(aluno); modalStatus.abrir(); }}
-                              className={`p-2 rounded-xl transition-colors ${
-                                aluno.ativo
-                                  ? 'text-muted-foreground hover:text-warning hover:bg-warning-soft'
-                                  : 'text-muted-foreground hover:text-success hover:bg-success-soft'
-                              }`}
-                              title={aluno.ativo ? 'Desativar' : 'Reativar'}
-                            >
-                              <ShieldAlert size={16} />
-                            </button>
-                            <button onClick={() => { setAlunoSelecionado(aluno); modalExcluir.abrir(); }} className="p-2 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive-soft transition-colors" title="Excluir permanentemente">
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
+                          <AcoesAluno
+                            aluno={aluno} navigate={navigate}
+                            onEditar={() => navigate('/alunos/novo', { state: { alunoParaEditar: aluno } })}
+                            onToggleStatus={() => { setAlunoSelecionado(aluno); modalStatus.abrir(); }}
+                            onExcluir={() => { setAlunoSelecionado(aluno); modalExcluir.abrir(); }}
+                            className="flex items-center justify-end gap-2 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 transition-opacity"
+                          />
                         </td>
                       </tr>
                     );
@@ -426,6 +523,7 @@ export default function Alunos() {
                 </tbody>
               </table>
             </div>
+            )}
 
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 md:px-8 py-4 border-t border-border bg-muted/20">
               <p className="text-xs font-medium text-muted-foreground">
