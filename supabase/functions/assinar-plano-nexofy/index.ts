@@ -22,7 +22,9 @@ function response(body: object, status = 200) {
   })
 }
 
-const ASAAS_API_URL = Deno.env.get('ASAAS_API_URL') ?? 'https://api-sandbox.asaas.com/v3'
+// Sem default de sandbox: se o secret faltar, falha fechado (abaixo) em
+// vez de cair silenciosamente no sandbox.
+const ASAAS_API_URL = Deno.env.get('ASAAS_API_URL')
 const ASAAS_MASTER_API_KEY = Deno.env.get('ASAAS_MASTER_API_KEY') ?? ''
 
 // Espelha webapp/src/lib/planosNexofy.js — mantido em sincronia manual,
@@ -76,8 +78,8 @@ serve(withSentry('assinar-plano-nexofy', async (req: Request) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  if (!ASAAS_MASTER_API_KEY) {
-    console.error('[assinar-plano-nexofy] ASAAS_MASTER_API_KEY não configurada.')
+  if (!ASAAS_API_URL || !ASAAS_MASTER_API_KEY) {
+    console.error('[assinar-plano-nexofy] ASAAS_API_URL ou ASAAS_MASTER_API_KEY não configurada.')
     return response({ erro: 'Integração de pagamentos indisponível no momento.' }, 500)
   }
 

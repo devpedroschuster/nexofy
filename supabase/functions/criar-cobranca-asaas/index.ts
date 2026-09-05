@@ -14,8 +14,10 @@ function response(body: object, status = 200) {
   })
 }
 
-const ASAAS_API_URL = Deno.env.get('ASAAS_API_URL') ?? 'https://api-sandbox.asaas.com/v3'
-const ASAAS_API_KEY = Deno.env.get('ASAAS_API_KEY')!
+// Sem default de sandbox: se o secret faltar, falha fechado (abaixo) em
+// vez de cair silenciosamente no sandbox.
+const ASAAS_API_URL = Deno.env.get('ASAAS_API_URL')
+const ASAAS_API_KEY = Deno.env.get('ASAAS_API_KEY')
 
 interface Body {
   aluno_id: number
@@ -46,6 +48,12 @@ function primeiroDiaProximoMes(mesReferencia: string): string {
 
 serve(withSentry("criar-cobranca-asaas", async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
+  if (!ASAAS_API_URL || !ASAAS_API_KEY) {
+    // Falha de configuração do ambiente, não do chamador — 500, não 400.
+    console.error('[criar-cobranca-asaas] ASAAS_API_URL ou ASAAS_API_KEY não configurada.')
+    return response({ erro: 'Integração de pagamentos indisponível no momento.' }, 500)
+  }
 
   const body = (await req.json().catch(() => ({}))) as Partial<Body>
   const {
