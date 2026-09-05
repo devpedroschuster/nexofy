@@ -1,152 +1,187 @@
-import React, { useState } from 'react';
-import { RefreshCw, Trash2 } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { ChevronLeft, CheckCircle2, XCircle, Trash2 } from 'lucide-react';
 import { ModalConfirmacao } from '../../../components/ui/Modal';
-import Button from '../../../components/ui/Button';
-import Input, { Label } from '../../../components/ui/Input';
+import Input from '../../../components/ui/Input';
+import { deriveEstadoChamada } from '../hooks/useListaPresenca';
 
-const ROTULO_STATUS = {
-  falta_justificada: 'Falta Avisada',
-  falta_nao_avisada: 'Não Apareceu',
+const ROTULO_TIPO = {
+  fixo: { label: 'Fixo', tone: 'text-purple bg-purple-soft' },
+  avulso: { label: 'Avulso', tone: 'text-info bg-info-soft' },
+  experimental: { label: 'Lead', tone: 'text-warning bg-warning/20' },
 };
 
-const ROTULO_STATUS_FALLBACK = 'Falta';
-
-const EH_FALTA = (status) => status === 'falta_justificada' || status === 'falta_nao_avisada';
-
+// Modo Kiosk: tela cheia (sem o <Modal> genérico) pra caber alvos de toque
+// grandes e caber na tela de um celular/tablet entre uma aula e outra. Cada
+// aluno tem só um toggle Presente/Falta — "Justificar falta" só aparece
+// depois que "Falta" já foi tocado, pra não obrigar 2 decisões no caminho
+// comum. Sem botão de salvar: cada toque já grava (mesmo padrão de
+// auto-save do resto do hook).
 export default function ModalListaPresenca({
+  aberto, fechar,
   aulaParaLista, dataLista, setDataLista, listaPresenca, loadingLista, erroLista,
-  handleRegistrarFalta, handleDesfazerFalta,
+  handleMarcarPresente, handleRegistrarFalta, handleDesfazerFalta,
   alunoParaRemover, solicitarRemocao, confirmarRemocao, cancelarRemocao,
-  removendoId,
+  processandoAcaoId,
   isAdmin,
 }) {
-  // Fix: os cliques em "Avisou" / "Não Veio" / "Desfazer Falta" não tinham
-  // nenhum estado de loading — um clique duplo disparava duas chamadas
-  // concorrentes (upsert) para o mesmo registro, com risco de a segunda
-  // sobrescrever a intenção da primeira antes do refresh do cache chegar.
-  const [processandoId, setProcessandoId] = useState(null);
+  useEffect(() => {
+    if (!aberto) return;
+    const onKey = (e) => e.key === 'Escape' && fechar();
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [aberto, fechar]);
 
-  const executarAcaoUnica = async (id, acao) => {
-    if (processandoId) return; // já existe uma ação em voo; ignora clique
-    setProcessandoId(id);
-    try {
-      await acao();
-    } finally {
-      setProcessandoId(null);
-    }
-  };
+  if (!aberto || !aulaParaLista || typeof document === 'undefined') return null;
 
-  if (!aulaParaLista) return null;
+  const confirmados = listaPresenca.filter(
+    (a) => deriveEstadoChamada(a) !== 'pendente'
+  ).length;
+  const total = listaPresenca.length;
+  const progresso = total > 0 ? Math.round((confirmados / total) * 100) : 0;
 
-  return (
-    <div className="space-y-4 pt-2 min-h-[300px]">
-      <div className="bg-muted p-4 rounded-xl border border-border">
-        <h4 className="font-black text-foreground">{aulaParaLista.atividade}</h4>
-        <div className="mt-3">
-          <Label className="block text-[10px] font-black text-muted-foreground uppercase mb-1">Data da Aula</Label>
-          <Input
-            type="date"
-            value={dataLista}
-            onChange={e => setDataLista(e.target.value)}
-            className="bg-card"
-          />
-        </div>
-      </div>
-      <div>
-        <div className="flex justify-between items-center mb-3">
-          <h5 className="font-bold text-sm text-foreground">Alunos da Turma</h5>
-        </div>
-        {loadingLista ? (
-          <div className="flex justify-center p-6"><RefreshCw className="animate-spin text-muted-foreground" size={24} /></div>
-        ) : erroLista ? (
-          <div className="text-sm text-destructive bg-destructive-soft p-3 rounded-xl">
-            {erroLista}
+  return createPortal(
+    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+      {/* Cabeçalho */}
+      <div className="shrink-0 border-b border-border px-5 pt-5 pb-3.5 flex flex-col gap-3.5">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={fechar}
+            aria-label="Fechar chamada"
+            className="w-9.5 h-9.5 rounded-xl bg-muted flex items-center justify-center shrink-0 text-foreground"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg font-black text-foreground truncate">{aulaParaLista.atividade}</h1>
+            <Input
+              type="date"
+              value={dataLista}
+              onChange={(e) => setDataLista(e.target.value)}
+              className="mt-1 h-7 text-xs bg-transparent border-none px-0 font-semibold text-muted-foreground"
+            />
           </div>
-        ) : listaPresenca.length === 0 ? (
-          <div className="text-center p-6 bg-muted/50 rounded-xl border border-dashed border-border">
-            <p className="text-sm text-muted-foreground font-medium">Ninguém matriculado ou agendado ainda.</p>
+          {total > 0 && (
+            <div className="bg-success-soft text-success rounded-xl px-3 py-2 text-sm font-black whitespace-nowrap shrink-0">
+              {confirmados}/{total}
+            </div>
+          )}
+        </div>
+        {total > 0 && (
+          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full bg-success rounded-full transition-all duration-300"
+              style={{ width: `${progresso}%` }}
+            />
           </div>
-        ) : (
-          <ul className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-            {listaPresenca.map((aluno, idx) => {
-              // Key estável em ordem de preferência (id_relacao cobre fixos
-              // com/sem registro do dia e avulsos/leads; idx é só defesa).
-              const itemKey = aluno.id_relacao
-                ?? aluno.aluno_id
-                ?? aluno.lead_id
-                ?? `fallback-${aluno.tipo}-${idx}`;
-
-              if (import.meta.env.DEV && String(itemKey).startsWith('fallback-')) {
-                console.warn('[ModalListaPresenca] Item sem ID estável:', aluno);
-              }
-
-              const emFalta = EH_FALTA(aluno.status);
-              const estaProcessando = processandoId === itemKey;
-              const estaRemovendo = removendoId === aluno.id_relacao;
-
-              return (
-                <li key={itemKey} className={`p-3 border rounded-xl flex justify-between items-center transition-all ${emFalta ? 'bg-destructive-soft border-destructive/30 opacity-70' : 'bg-card border-border shadow-sm'}`}>
-                  <div>
-                    <span className={`font-bold text-sm ${emFalta ? 'text-destructive line-through' : 'text-foreground'}`}>
-                      {aluno.nome}
-                    </span>
-                    <div className="flex flex-wrap gap-2 mt-1">
-                      {aluno.tipo === 'fixo' && <span className="text-[9px] bg-purple-soft text-purple px-2 py-0.5 rounded font-black uppercase tracking-wider">Fixo</span>}
-                      {aluno.tipo === 'avulso' && <span className="text-[9px] bg-info-soft text-info px-2 py-0.5 rounded font-black uppercase tracking-wider">Avulso</span>}
-                      {aluno.tipo === 'experimental' && (<span className="ml-1.5 text-[10px] font-black bg-warning/20 text-warning px-1.5 py-0.5 rounded-full border border-warning/30">LEAD</span>)}
-                      {emFalta && (
-                        <span className="text-[9px] bg-destructive-soft text-destructive px-2 py-0.5 rounded font-black uppercase tracking-wider">
-                          {ROTULO_STATUS[aluno.status] ?? ROTULO_STATUS_FALLBACK}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="ml-2 flex gap-1.5">
-                    {aluno.tipo === 'fixo' ? (
-                      emFalta ? (
-                        <Button
-                          variant="secondary" size="sm"
-                          disabled={estaProcessando}
-                          onClick={() => executarAcaoUnica(itemKey, () => handleDesfazerFalta(aluno))}
-                        >
-                          {estaProcessando ? 'Aguarde...' : 'Desfazer Falta'}
-                        </Button>
-                      ) : (
-                        <>
-                          <Button
-                            variant="outline" size="sm"
-                            disabled={estaProcessando}
-                            onClick={() => executarAcaoUnica(itemKey, () => handleRegistrarFalta(aluno, 'justificada'))}
-                          >
-                            Avisou
-                          </Button>
-                          <Button
-                            variant="destructive" size="sm"
-                            disabled={estaProcessando}
-                            onClick={() => executarAcaoUnica(itemKey, () => handleRegistrarFalta(aluno, 'nao_avisada'))}
-                          >
-                            Não Veio
-                          </Button>
-                        </>
-                      )
-                    ) : isAdmin ? (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        leftIcon={<Trash2 size={14} />}
-                        disabled={estaRemovendo}
-                        onClick={() => solicitarRemocao(aluno.id_relacao)}
-                      >
-                        {estaRemovendo ? 'Removendo...' : 'Remover'}
-                      </Button>
-                    ) : null}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
         )}
       </div>
+
+      {/* Lista */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        {loadingLista ? (
+          <div className="p-6 text-center text-sm text-muted-foreground font-medium">Carregando...</div>
+        ) : erroLista ? (
+          <div className="p-5 text-sm text-destructive bg-destructive-soft m-4 rounded-xl">{erroLista}</div>
+        ) : listaPresenca.length === 0 ? (
+          <div className="p-6 text-center text-sm text-muted-foreground font-medium">
+            Ninguém matriculado ou agendado ainda.
+          </div>
+        ) : (
+          listaPresenca.map((aluno, idx) => {
+            const itemKey = aluno.id_relacao ?? aluno.aluno_id ?? aluno.lead_id ?? `fallback-${aluno.tipo}-${idx}`;
+            const estado = deriveEstadoChamada(aluno);
+            const estaProcessando = processandoAcaoId === itemKey;
+            const tipoInfo = ROTULO_TIPO[aluno.tipo] ?? ROTULO_TIPO.avulso;
+            const podeRemover = isAdmin && aluno.tipo !== 'fixo';
+            const podeJustificar = estado === 'falta' && aluno.status === 'falta_nao_avisada';
+
+            return (
+              <div key={itemKey} className="px-5 py-4 border-b border-border/70 flex flex-col gap-2.5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10.5 h-10.5 rounded-2xl bg-primary-soft text-primary flex items-center justify-center font-black text-sm uppercase shrink-0">
+                    {aluno.nome?.[0] ?? '?'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-[15px] text-foreground truncate">{aluno.nome}</p>
+                    <span className={`inline-block text-[9.5px] font-black uppercase tracking-wide px-1.75 py-0.5 rounded-md ${tipoInfo.tone}`}>
+                      {tipoInfo.label}
+                    </span>
+                  </div>
+                  {podeRemover && (
+                    <button
+                      onClick={() => solicitarRemocao(aluno.id_relacao)}
+                      aria-label="Remover da lista"
+                      className="w-9.5 h-9.5 rounded-xl flex items-center justify-center text-muted-foreground shrink-0"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    disabled={estaProcessando}
+                    onClick={() => handleMarcarPresente(aluno)}
+                    className={`flex-1 h-11.5 rounded-2xl border-1.5 font-black text-[13.5px] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
+                      estado === 'presente'
+                        ? 'bg-success text-success-foreground border-transparent'
+                        : 'bg-card border-border text-muted-foreground'
+                    }`}
+                  >
+                    {estado === 'presente' && <CheckCircle2 size={16} />}
+                    Presente
+                  </button>
+                  <button
+                    disabled={estaProcessando}
+                    onClick={() => handleRegistrarFalta(aluno, 'nao_avisada')}
+                    className={`flex-1 h-11.5 rounded-2xl border-1.5 font-black text-[13.5px] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
+                      estado === 'falta'
+                        ? 'bg-destructive text-destructive-foreground border-transparent'
+                        : 'bg-card border-border text-muted-foreground'
+                    }`}
+                  >
+                    {estado === 'falta' && <XCircle size={16} />}
+                    Falta
+                  </button>
+                </div>
+
+                {estado === 'falta' && (
+                  <div className="pl-0.5">
+                    {podeJustificar ? (
+                      <button
+                        disabled={estaProcessando}
+                        onClick={() => handleRegistrarFalta(aluno, 'justificada')}
+                        className="text-xs font-bold text-muted-foreground disabled:opacity-50"
+                      >
+                        Justificar falta →
+                      </button>
+                    ) : (
+                      <button
+                        disabled={estaProcessando}
+                        onClick={() => handleDesfazerFalta(aluno)}
+                        className="text-xs font-bold text-muted-foreground disabled:opacity-50"
+                      >
+                        Desfazer falta
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      <p className="shrink-0 text-center py-4 text-[11.5px] font-semibold text-muted-foreground">
+        Alterações salvas automaticamente
+      </p>
+
       <ModalConfirmacao
         isOpen={!!alunoParaRemover}
         onClose={cancelarRemocao}
@@ -155,6 +190,7 @@ export default function ModalListaPresenca({
         mensagem="Tem certeza que deseja remover este aluno desta lista de presença?"
         tipo="danger"
       />
-    </div>
+    </div>,
+    document.body
   );
 }
