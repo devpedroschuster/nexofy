@@ -75,7 +75,18 @@ select cron.schedule(
 
 Pra desligar em uma emergência: `select cron.unschedule('retencao-lgpd-mensal');`.
 
-## ⚠️ Antes de registrar o cron em PRODUÇÃO
+## Registrado em produção (08/09/2026)
+
+`jobid=3`, `jobname='retencao-lgpd-mensal'`, `schedule='0 5 1 * *'`,
+`active=true` — confirmado via `select * from cron.job where jobname =
+'retencao-lgpd-mensal';`. `cron.timezone` do banco é `GMT` (=UTC), então
+`05h` no schedule já é 05h UTC = 2h Brasília, sem o desvio de fuso que a
+PED-75 encontrou em `cobrancas-mensais`. Antes de registrar, `dryRun=true`
+contra produção confirmou `estudios.candidatos: 0` e
+`webhookEvents.elegiveis: 0` — nenhum efeito imediato no primeiro disparo
+real (01/10/2026, 05h UTC).
+
+## ⚠️ Antes de mexer de novo neste cron em PRODUÇÃO
 
 - **A primeira execução real (`dryRun=false`) em produção zera
   `webhook_events.payload` de tudo que tiver mais de 12 meses — isso é
@@ -108,5 +119,9 @@ Pra desligar em uma emergência: `select cron.unschedule('retencao-lgpd-mensal')
       (raiz e desta pasta), redeployar e confirmar `verify_jwt=false` no
       resultado do deploy.
 - [ ] Rodar `?dryRun=true` contra staging e depois produção antes de
-      qualquer execução real, e antes de registrar o cron de verdade.
-- [ ] Ver a seção "⚠️ Antes de registrar o cron em PRODUÇÃO" acima.
+      qualquer execução manual real.
+- [ ] Ver a seção "⚠️ Antes de mexer de novo neste cron em PRODUÇÃO" acima.
+- [ ] Depois do primeiro disparo real (01/10/2026), conferir
+      `select * from cron.job_run_details where jobid = 3 order by
+      start_time desc limit 3;` e o Sentry Cron Monitor
+      `retencao-lgpd-mensal` pra confirmar que rodou.
