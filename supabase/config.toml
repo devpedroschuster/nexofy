@@ -208,6 +208,16 @@ verify_jwt = false
 import_map = "./functions/gerar-mensalidades/deno.json"
 entrypoint = "./functions/gerar-mensalidades/index.ts"
 
+[functions.expurgo-retencao-lgpd]
+enabled = true
+# PED-176: precisa ser false pro cron (autenticado via x-cron-secret, sem JWT — ver
+# AUTORIZAÇÃO em index.ts) conseguir chamar esta function. Mesma lição do bloco
+# [functions.gerar-mensalidades] acima: o config.toml por-function sozinho não basta,
+# este bloco na RAIZ é o que efetivamente vale no deploy.
+verify_jwt = false
+import_map = "./functions/expurgo-retencao-lgpd/deno.json"
+entrypoint = "./functions/expurgo-retencao-lgpd/index.ts"
+
 [functions.health]
 enabled = true
 # PED-157: precisa ser false para o monitor de uptime externo (UptimeRobot /
