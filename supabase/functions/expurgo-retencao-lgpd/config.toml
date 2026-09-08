@@ -1,0 +1,14 @@
+[functions.expurgo-retencao-lgpd]
+verify_jwt = false  # Cron-only: autorização real é o check de x-cron-secret dentro da
+                    # própria function (ver AUTORIZAÇÃO em index.ts). Mesma ressalva já
+                    # documentada em gerar-mensalidades/config.toml — este arquivo
+                    # por-function sozinho NÃO basta; o que a CLI/deploy realmente lê é
+                    # o bloco da RAIZ (supabase/config.toml), replicado logo abaixo.
+
+[[cron]]
+name = "retencao-lgpd-mensal"
+schedule = "0 5 1 * *"   # Dia 1 de cada mês, 05h UTC (2h Brasília) — fora do horário de
+                          # cobrancas-mensais (11h UTC), pra não concorrer. Registro real
+                          # é manual via cron.schedule (ver RUNBOOK.md) — este bloco é só
+                          # documentação, mesmo caso confirmado pro gerar-mensalidades no PED-56.
+command = "POST https://tciiepqmnrrcjnqhspvw.supabase.co/functions/v1/expurgo-retencao-lgpd -H 'x-cron-secret: ${CRON_SECRET}' -H 'Content-Type: application/json'"

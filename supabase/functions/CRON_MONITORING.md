@@ -41,6 +41,16 @@ estivessem ativos — dava falsa sensação de cobertura num incidente. Se
 a configuração da seção "Ao adicionar um novo cron monitorado" abaixo
 pra esse slug.
 
+PED-176: `expurgo-retencao-lgpd/index.ts` também declara um
+`CRON_MONITOR_SLUG` (`retencao-lgpd-mensal`), mas — mesma ressalva do
+`gerar-repasses-mensais` acima — o monitor só passa a existir de verdade
+na conta do Sentry depois que o `[[cron]]` real (`cron.schedule` em
+produção, ver `expurgo-retencao-lgpd/RUNBOOK.md`) estiver registrado e a
+function tiver recebido seu primeiro check-in real. Até lá, esta function
+está deployada e validada em staging, mas sem monitor/alerta ativo.
+Quando o cron for registrado em produção, repita a configuração da seção
+"Ao adicionar um novo cron monitorado" abaixo pra esse slug.
+
 ## Projeto Sentry
 
 `nexofy-edge-functions`, organização `dev-pedro-schuster`
