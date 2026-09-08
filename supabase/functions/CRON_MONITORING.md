@@ -42,14 +42,13 @@ a configuração da seção "Ao adicionar um novo cron monitorado" abaixo
 pra esse slug.
 
 PED-176: `expurgo-retencao-lgpd/index.ts` também declara um
-`CRON_MONITOR_SLUG` (`retencao-lgpd-mensal`), mas — mesma ressalva do
-`gerar-repasses-mensais` acima — o monitor só passa a existir de verdade
-na conta do Sentry depois que o `[[cron]]` real (`cron.schedule` em
-produção, ver `expurgo-retencao-lgpd/RUNBOOK.md`) estiver registrado e a
-function tiver recebido seu primeiro check-in real. Até lá, esta function
-está deployada e validada em staging, mas sem monitor/alerta ativo.
-Quando o cron for registrado em produção, repita a configuração da seção
-"Ao adicionar um novo cron monitorado" abaixo pra esse slug.
+`CRON_MONITOR_SLUG` (`retencao-lgpd-mensal`). O cron real já está
+registrado em produção desde 08/09/2026 (`jobid=3`, ver
+`expurgo-retencao-lgpd/RUNBOOK.md`), mas o monitor só passa a existir de
+verdade na conta do Sentry depois do primeiro check-in real — o primeiro
+disparo é só em 01/10/2026. Até lá, sem monitor/alerta ativo pra esse
+slug. Depois do primeiro disparo, repita a configuração da seção "Ao
+adicionar um novo cron monitorado" abaixo pra esse slug.
 
 ## Projeto Sentry
 
