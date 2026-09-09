@@ -6,7 +6,7 @@ import {
   User, CreditCard, Calendar, Activity,
   ArrowLeft, ExternalLink, FileText, CheckCircle, MapPin, Edit2, AlertTriangle,
   Link2, Save, TrendingUp, TrendingDown, Minus, MessageCircle, X, Phone,
-  CalendarDays, BookOpen, RefreshCw, Plus, Trash2, Lock, Info,
+  CalendarDays, BookOpen, RefreshCw, Plus, Trash2, Lock, Info, Download,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { alunosService } from '../services/alunosService';
@@ -1371,6 +1371,39 @@ export default function PerfilAluno() {
   const [modalEditarAberto, setModalEditarAberto] = useState(false);
   const [observacoesMedicas, setObservacoesMedicas] = useState('');
   const [salvandoMedico, setSalvandoMedico] = useState(false);
+  const [exportandoLgpd, setExportandoLgpd] = useState(false);
+
+  // PED-172 (LGPD art. 18 V): exportação iniciada pelo admin, para tratar
+  // manualmente um pedido de acesso/portabilidade recebido por outro canal
+  // (ex.: e-mail). A Edge Function confirma que o admin pertence a este
+  // mesmo estúdio antes de devolver qualquer dado.
+  const handleExportarDadosLgpd = async () => {
+    setExportandoLgpd(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('exportar-dados-aluno', {
+        method: 'POST',
+        body: { aluno_id: Number(id) },
+      });
+      if (error) throw error;
+
+      const blob = new Blob([JSON.stringify(data.dados, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `dados-aluno-${id}-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      showToast.success('Dados exportados.');
+    } catch (error) {
+      console.error('Erro ao exportar dados do aluno:', error);
+      showToast.error('Não foi possível exportar os dados agora. Tente novamente.');
+    } finally {
+      setExportandoLgpd(false);
+    }
+  };
  
   const hoje = new Date();
   const noventa = new Date(hoje);
@@ -1447,6 +1480,12 @@ export default function PerfilAluno() {
         </div>
         <div className="flex items-center gap-3">
           <BotaoWhatsApp aluno={aluno} nomeEstudio={nomeEstudio} />
+          <Button variant="outline" size="md" leftIcon={<Download size={16} />}
+            loading={exportandoLgpd}
+            onClick={handleExportarDadosLgpd}
+            title="Exporta os dados deste aluno em JSON (LGPD art. 18)">
+            Exportar dados (LGPD)
+          </Button>
           <Button variant="outline" size="md" leftIcon={<Edit2 size={16} />}
             onClick={() => setModalEditarAberto(true)}>
             Editar Cadastro

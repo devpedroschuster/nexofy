@@ -52,6 +52,8 @@ export default function AreaAluno() {
   const [formEdit, setFormEdit] = useState({ telefone: '', cpf: '', data_nascimento: '' });
   const [salvandoPerfil, setSalvandoPerfil] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [exportandoDados, setExportandoDados] = useState(false);
+  const [solicitandoExclusao, setSolicitandoExclusao] = useState(false);
 
   const { data: aluno, isLoading: loadingAluno, isError: erroAluno } = useQuery({
     queryKey: alunosKeys.meuPerfil(),
@@ -247,6 +249,70 @@ export default function AreaAluno() {
       showToast.error(error.message || 'Erro ao atualizar os dados.');
     } finally {
       setSalvandoPerfil(false);
+    }
+  };
+
+  // PED-172 (LGPD art. 18 V — portabilidade): baixa os dados do próprio
+  // aluno em JSON via a Edge Function `exportar-dados-aluno`. Sem
+  // aluno_id no payload — a function resolve o titular por auth.uid().
+  const handleExportarDados = async () => {
+    setExportandoDados(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('exportar-dados-aluno', {
+        method: 'POST',
+        body: {},
+      });
+      if (error) throw error;
+
+      const blob = new Blob([JSON.stringify(data.dados, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `meus-dados-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      showToast.success('Seus dados foram exportados.');
+    } catch (error) {
+      console.error('Erro ao exportar dados:', error);
+      showToast.error('Não foi possível exportar seus dados agora. Tente novamente.');
+    } finally {
+      setExportandoDados(false);
+    }
+  };
+
+  // PED-172 (LGPD art. 18 — exclusão): não apaga a conta na hora (ação
+  // irreversível, pode exigir checar pendência financeira) — registra o
+  // pedido em `solicitacoes_titular` pra o admin do estúdio tratar dentro
+  // do SLA documentado em PoliticaPrivacidade.jsx.
+  const handleSolicitarExclusao = async () => {
+    if (!window.confirm(
+      'Isso vai enviar um pedido de exclusão dos seus dados para o estúdio. ' +
+      'A exclusão em si é feita pelo estúdio após verificação, dentro do prazo informado ' +
+      'na Política de Privacidade. Deseja continuar?'
+    )) {
+      return;
+    }
+
+    setSolicitandoExclusao(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const { error } = await supabase.from('solicitacoes_titular').insert({
+        aluno_id: aluno.id,
+        estudio_id: aluno.estudio_id,
+        tipo: 'exclusao',
+        solicitado_por: session?.user?.id,
+      });
+      if (error) throw error;
+
+      showToast.success('Solicitação enviada. O estúdio entrará em contato.');
+    } catch (error) {
+      console.error('Erro ao solicitar exclusão:', error);
+      showToast.error('Não foi possível registrar sua solicitação agora. Tente novamente.');
+    } finally {
+      setSolicitandoExclusao(false);
     }
   };
 
@@ -673,6 +739,37 @@ export default function AreaAluno() {
                 >
                   💬 Suporte via WhatsApp
                 </button>
+              </div>
+
+              {/* PED-172 (LGPD art. 18): canal self-service do titular —
+                  antes só existia a orientação de escrever por e-mail. */}
+              <div className="card" style={{ marginBottom: '24px' }}>
+                <div
+                  style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--muted)', marginBottom: '12px' }}
+                >
+                  Meus Dados (LGPD)
+                </div>
+                <p style={{ fontSize: '13px', opacity: 0.7, margin: '0 0 12px' }}>
+                  Baixe uma cópia dos seus dados ou solicite a exclusão da sua conta.
+                </p>
+                <div className="wa-btn-row" style={{ gap: '8px' }}>
+                  <button
+                    className="btn btn-full"
+                    onClick={handleExportarDados}
+                    disabled={exportandoDados}
+                    style={{ padding: '12px', fontSize: '14px' }}
+                  >
+                    {exportandoDados ? 'Exportando...' : '⬇️ Baixar meus dados'}
+                  </button>
+                  <button
+                    className="btn btn-full"
+                    onClick={handleSolicitarExclusao}
+                    disabled={solicitandoExclusao}
+                    style={{ padding: '12px', fontSize: '14px' }}
+                  >
+                    {solicitandoExclusao ? 'Enviando...' : 'Solicitar exclusão da minha conta'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

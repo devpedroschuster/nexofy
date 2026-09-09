@@ -47,6 +47,21 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [modalAberto, setModalAberto] = useState(false);
 
+  // PED-175 (MFA/TOTP): quando o usuário já tem um fator verificado,
+  // signInWithPassword() autentica normalmente (aal1) mas
+  // getAuthenticatorAssuranceLevel() sinaliza nextLevel='aal2' pendente —
+  // sem tratar isso aqui, o fator ficaria cadastrado mas NUNCA verificado
+  // no login, o que anularia o propósito do MFA. `desafioMfa` guarda o
+  // necessário pra completar o desafio num segundo submit, sem repetir
+  // e-mail/senha. `authDataRef` carrega o resultado do signIn original
+  // pro fluxo de pós-login (resolverDestinoPosLogin) continuar depois da
+  // verificação — state não sobrevive ao re-render entre os dois
+  // submits, mas um ref sim.
+  const [desafioMfa, setDesafioMfa] = useState(null); // { factorId, challengeId }
+  const [codigoMfa, setCodigoMfa] = useState('');
+  const [verificandoMfa, setVerificandoMfa] = useState(false);
+  const authDataRef = useRef(null);
+
   const navigate = useNavigate();
 
   // FIX (Bug crítico #1 - tenant isolation): contexto do estúdio atual via slug
@@ -122,6 +137,175 @@ export default function Login() {
     return () => subscription.unsubscribe();
   }, [estudioPublico?.id, navigate]);
 
+  // Centraliza a interpretação de erro pra ser usada tanto pelo submit de
+  // senha (handleLogin) quanto pelo submit do código MFA (handleVerificarMfa)
+  // — mesmas mensagens, sem duplicar o if/else em dois lugares.
+  function mostrarErroLogin(err) {
+    if (err.code === 'invalid_credentials' || err.message?.includes('Invalid login')) {
+      showToast.error('E-mail ou senha incorretos.');
+    } else if (err.code === 'email_not_confirmed') {
+      showToast.error('Confirme seu e-mail antes de acessar.');
+    } else if (err.status === 429) {
+      showToast.error('Muitas tentativas. Aguarde alguns minutos e tente novamente.');
+    } else if (err.message?.includes('expired') || err.message?.includes('invalid')) {
+      showToast.error('Link expirado. Solicite um novo link de recuperação.');
+    } else {
+      showToast.error('Erro ao conectar. Tente novamente.');
+    }
+  }
+
+  // Resolução de perfil/redirect pós-autenticação — extraído de
+  // handleLogin (sem mudança de comportamento) pra poder ser chamado tanto
+  // logo após signInWithPassword (usuário sem MFA) quanto depois de
+  // handleVerificarMfa confirmar o código (usuário com MFA ativo).
+  async function resolverDestinoPosLogin(authData) {
+    // FIX (login no domínio raiz): sem estúdio de tenant resolvido, não dá
+    // pra (e não faz sentido) filtrar alunos/professores por estudio_id
+    // aqui. Quem resolve o perfil real neste caso é useAuth()/App.jsx via
+    // estudio_membros (super_admin, admin ou professor, sem exigir
+    // subdomínio).
+    // FIX (PED-104): não navega mais explicitamente pra raiz aqui — a
+    // própria rota /login já é reativa a `sessao` (ver App.jsx), então
+    // assim que o listener onAuthStateChange de useAuth() processar este
+    // SIGNED_IN ela troca sozinha pra <Navigate to={destinoPosAuth(...)}>.
+    // O navigate('/') explícito que existia antes rodava em paralelo com
+    // a resolução de perfil independente de useAuth() — como as duas
+    // terminam em momentos imprevisíveis uma da outra, o navigate() podia
+    // disparar DEPOIS do guard reativo já ter levado o usuário pro
+    // destino certo, jogando-o de volta pra "/" e reabrindo uma nova
+    // rodada de redirect. Esse era o padrão de corrida por trás do E2E
+    // login-tenant-isolation flaky (3ª recorrência).
+    if (!estudioPublico?.id) {
+      showToast.success('Login realizado!');
+      return;
+    }
+
+    // ⚠️ ASSUMIR/VALIDAR: mesma suposição de estudio_id + RLS pública citada acima,
+    // agora para a tabela `alunos`.
+    // FIX (PED-73): as 3 queries de perfil (alunos/professores/estudio_membros)
+    // rodavam em sequência — para um usuário do fluxo "moderno" (só existe em
+    // estudio_membros, sem linha em alunos/professores), isso custava 2
+    // round-trips desperdiçados (alunos e professores, ambos vazios) antes da
+    // query que realmente resolve. Agora as 3 disparam em paralelo via
+    // Promise.all e a MESMA precedência de antes (alunos > professores >
+    // estudio_membros) é aplicada sobre os resultados já resolvidos — essa
+    // ordem não foi alterada (pode ser intencional para o caso de um mesmo
+    // auth_id existir em mais de uma tabela). Efeito colateral aceito: antes,
+    // um erro em `alunos` interrompia tudo antes de professores/estudio_membros
+    // rodarem; agora as 3 já dispararam e os outros dois resultados são apenas
+    // computados e descartados (só afeta o caminho raro de erro, não o de
+    // sucesso).
+    const [alunoResult, profResult, membroResult] = await Promise.all([
+      supabase
+        .from('alunos')
+        .select('primeiro_acesso, nome_completo, role')
+        .eq('auth_id', authData.user.id)
+        .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
+        .maybeSingle(),
+      supabase
+        .from('professores')
+        .select('primeiro_acesso, nome')
+        .eq('auth_id', authData.user.id)
+        .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
+        .maybeSingle(),
+      supabase
+        .from('estudio_membros')
+        .select('role')
+        .eq('user_id', authData.user.id)
+        .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
+        .maybeSingle(),
+    ]);
+
+    // 1. Verificar primeiro_acesso em alunos
+    const { data: alunoData, error: alunoError } = alunoResult;
+
+    if (alunoError) throw alunoError; // FIX: erro não é mais descartado
+
+    if (alunoData?.primeiro_acesso) {
+      navigate('/redefinir-senha', {
+        state: { primeiroAcesso: true, nome: (alunoData.nome_completo || '').split(' ')[0] },
+      });
+      return;
+    }
+
+    // 2. Verificar primeiro_acesso em professores
+    if (!alunoData) {
+      const { data: profData, error: profError } = profResult;
+
+      if (profError) throw profError; // FIX: erro não é mais descartado
+
+      if (profData?.primeiro_acesso) {
+        navigate('/redefinir-senha', {
+          state: { primeiroAcesso: true, nome: (profData.nome || '').split(' ')[0] },
+        });
+        return;
+      }
+
+      if (profData) {
+        const nome = (profData.nome || '').split(' ')[0];
+        showToast.success(nome ? `Bem-vindo de volta, ${nome}!` : 'Login realizado!');
+        navigate('/agenda');
+        return;
+      }
+    }
+
+    // 3. Admin ou aluno normal
+    if (alunoData) {
+      const nome = (alunoData.nome_completo || '').split(' ')[0];
+      showToast.success(nome ? `Bem-vindo de volta, ${nome}!` : 'Login realizado!');
+      navigate(rotaPorPerfil(alunoData.role === 'admin' ? 'admin' : 'aluno'));
+      return;
+    }
+
+    // 4. estudio_membros (fluxo "moderno" — ver useAuth.jsx): cobre
+    // admin/professor cujo vínculo já não passa pelas tabelas legadas
+    // acima. Sem este check, esse usuário caía direto no fallback de
+    // erro abaixo — mesmo logando com sucesso (PED-46).
+    const { data: membro, error: membroError } = membroResult;
+
+    if (membroError) throw membroError;
+
+    if (membro) {
+      // Sem primeiro_acesso nem nome prontos nesta tabela — mesmo padrão
+      // já usado acima para "sem estúdio de tenant resolvido" (FIX
+      // PED-104): não navega explicitamente, deixa o guard reativo de
+      // useAuth()/App.jsx (que já resolve estudio_membros de qualquer
+      // forma, de forma independente) decidir o destino final por perfil.
+      showToast.success('Login realizado!');
+      return;
+    }
+
+    // Fallback: nenhum perfil encontrado neste estúdio.
+    // FIX: antes caía aqui silenciosamente até em casos de erro descartado;
+    // agora só chega aqui de fato quando não existe vínculo nenhum.
+    showToast.error('Não encontramos seu perfil neste estúdio. Contate o suporte.');
+  }
+
+  // PED-175: segundo submit do form de login, só quando desafioMfa está
+  // preenchido (usuário com fator TOTP verificado). Reaproveita authData
+  // do signIn original (guardado em authDataRef por handleLogin) pra
+  // seguir exatamente o mesmo fluxo de pós-login de quem não tem MFA.
+  async function handleVerificarMfa(e) {
+    e.preventDefault();
+    if (verificandoMfa || !desafioMfa) return;
+
+    setVerificandoMfa(true);
+    try {
+      const { error } = await supabase.auth.mfa.verify({
+        factorId: desafioMfa.factorId,
+        challengeId: desafioMfa.challengeId,
+        code: codigoMfa.trim(),
+      });
+      if (error) throw error;
+
+      await resolverDestinoPosLogin(authDataRef.current);
+    } catch (err) {
+      mostrarErroLogin(err);
+    } finally {
+      setVerificandoMfa(false);
+    }
+  }
+
   /* ── Login ──────────────────────────────────────────────────────────────── */
   async function handleLogin(e) {
     e.preventDefault();
@@ -157,140 +341,33 @@ export default function Login() {
 
       if (error) throw error;
 
-      // FIX (login no domínio raiz): sem estúdio de tenant resolvido, não dá
-      // pra (e não faz sentido) filtrar alunos/professores por estudio_id
-      // aqui. Quem resolve o perfil real neste caso é useAuth()/App.jsx via
-      // estudio_membros (super_admin, admin ou professor, sem exigir
-      // subdomínio).
-      // FIX (PED-104): não navega mais explicitamente pra raiz aqui — a
-      // própria rota /login já é reativa a `sessao` (ver App.jsx), então
-      // assim que o listener onAuthStateChange de useAuth() processar este
-      // SIGNED_IN ela troca sozinha pra <Navigate to={destinoPosAuth(...)}>.
-      // O navigate('/') explícito que existia antes rodava em paralelo com
-      // a resolução de perfil independente de useAuth() — como as duas
-      // terminam em momentos imprevisíveis uma da outra, o navigate() podia
-      // disparar DEPOIS do guard reativo já ter levado o usuário pro
-      // destino certo, jogando-o de volta pra "/" e reabrindo uma nova
-      // rodada de redirect. Esse era o padrão de corrida por trás do E2E
-      // login-tenant-isolation flaky (3ª recorrência).
-      if (!estudioPublico?.id) {
-        showToast.success('Login realizado!');
-        return;
-      }
+      // PED-175: usuário com fator TOTP verificado autentica só até aal1
+      // aqui — precisa completar o desafio (aal2) antes de seguir pra
+      // resolução de perfil/redirect. Pra quem nunca cadastrou um fator
+      // (100% dos usuários hoje), nextLevel nunca é 'aal2' e este bloco
+      // fica inerte — nenhuma mudança de comportamento pra eles.
+      const { data: aal, error: erroAal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (!erroAal && aal.nextLevel === 'aal2' && aal.nextLevel !== aal.currentLevel) {
+        const { data: factors, error: erroFactors } = await supabase.auth.mfa.listFactors();
+        const fator = factors?.totp?.find((f) => f.status === 'verified');
+        if (erroFactors || !fator) {
+          throw erroFactors ?? new Error('Fator de autenticação de dois fatores não encontrado.');
+        }
 
-      // ⚠️ ASSUMIR/VALIDAR: mesma suposição de estudio_id + RLS pública citada acima,
-      // agora para a tabela `alunos`.
-      // FIX (PED-73): as 3 queries de perfil (alunos/professores/estudio_membros)
-      // rodavam em sequência — para um usuário do fluxo "moderno" (só existe em
-      // estudio_membros, sem linha em alunos/professores), isso custava 2
-      // round-trips desperdiçados (alunos e professores, ambos vazios) antes da
-      // query que realmente resolve. Agora as 3 disparam em paralelo via
-      // Promise.all e a MESMA precedência de antes (alunos > professores >
-      // estudio_membros) é aplicada sobre os resultados já resolvidos — essa
-      // ordem não foi alterada (pode ser intencional para o caso de um mesmo
-      // auth_id existir em mais de uma tabela). Efeito colateral aceito: antes,
-      // um erro em `alunos` interrompia tudo antes de professores/estudio_membros
-      // rodarem; agora as 3 já dispararam e os outros dois resultados são apenas
-      // computados e descartados (só afeta o caminho raro de erro, não o de
-      // sucesso).
-      const [alunoResult, profResult, membroResult] = await Promise.all([
-        supabase
-          .from('alunos')
-          .select('primeiro_acesso, nome_completo, role')
-          .eq('auth_id', authData.user.id)
-          .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
-          .maybeSingle(),
-        supabase
-          .from('professores')
-          .select('primeiro_acesso, nome')
-          .eq('auth_id', authData.user.id)
-          .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
-          .maybeSingle(),
-        supabase
-          .from('estudio_membros')
-          .select('role')
-          .eq('user_id', authData.user.id)
-          .eq('estudio_id', estudioPublico.id) // FIX: isolamento por tenant
-          .maybeSingle(),
-      ]);
-
-      // 1. Verificar primeiro_acesso em alunos
-      const { data: alunoData, error: alunoError } = alunoResult;
-
-      if (alunoError) throw alunoError; // FIX: erro não é mais descartado
-
-      if (alunoData?.primeiro_acesso) {
-        navigate('/redefinir-senha', {
-          state: { primeiroAcesso: true, nome: (alunoData.nome_completo || '').split(' ')[0] },
+        const { data: challenge, error: erroChallenge } = await supabase.auth.mfa.challenge({
+          factorId: fator.id,
         });
+        if (erroChallenge) throw erroChallenge;
+
+        authDataRef.current = authData;
+        setDesafioMfa({ factorId: fator.id, challengeId: challenge.id });
         return;
       }
 
-      // 2. Verificar primeiro_acesso em professores
-      if (!alunoData) {
-        const { data: profData, error: profError } = profResult;
-
-        if (profError) throw profError; // FIX: erro não é mais descartado
-
-        if (profData?.primeiro_acesso) {
-          navigate('/redefinir-senha', {
-            state: { primeiroAcesso: true, nome: (profData.nome || '').split(' ')[0] },
-          });
-          return;
-        }
-
-        if (profData) {
-          const nome = (profData.nome || '').split(' ')[0];
-          showToast.success(nome ? `Bem-vindo de volta, ${nome}!` : 'Login realizado!');
-          navigate('/agenda');
-          return;
-        }
-      }
-
-      // 3. Admin ou aluno normal
-      if (alunoData) {
-        const nome = (alunoData.nome_completo || '').split(' ')[0];
-        showToast.success(nome ? `Bem-vindo de volta, ${nome}!` : 'Login realizado!');
-        navigate(rotaPorPerfil(alunoData.role === 'admin' ? 'admin' : 'aluno'));
-        return;
-      }
-
-      // 4. estudio_membros (fluxo "moderno" — ver useAuth.jsx): cobre
-      // admin/professor cujo vínculo já não passa pelas tabelas legadas
-      // acima. Sem este check, esse usuário caía direto no fallback de
-      // erro abaixo — mesmo logando com sucesso (PED-46).
-      const { data: membro, error: membroError } = membroResult;
-
-      if (membroError) throw membroError;
-
-      if (membro) {
-        // Sem primeiro_acesso nem nome prontos nesta tabela — mesmo padrão
-        // já usado acima para "sem estúdio de tenant resolvido" (FIX
-        // PED-104): não navega explicitamente, deixa o guard reativo de
-        // useAuth()/App.jsx (que já resolve estudio_membros de qualquer
-        // forma, de forma independente) decidir o destino final por perfil.
-        showToast.success('Login realizado!');
-        return;
-      }
-
-      // Fallback: nenhum perfil encontrado neste estúdio.
-      // FIX: antes caía aqui silenciosamente até em casos de erro descartado;
-      // agora só chega aqui de fato quando não existe vínculo nenhum.
-      showToast.error('Não encontramos seu perfil neste estúdio. Contate o suporte.');
+      await resolverDestinoPosLogin(authData);
 
     } catch (err) {
-      if (err.code === 'invalid_credentials' || err.message?.includes('Invalid login')) {
-        showToast.error('E-mail ou senha incorretos.');
-      } else if (err.code === 'email_not_confirmed') {
-        showToast.error('Confirme seu e-mail antes de acessar.');
-      } else if (err.status === 429) {
-        // FIX: tratamento específico para rate limit do Supabase Auth
-        showToast.error('Muitas tentativas. Aguarde alguns minutos e tente novamente.');
-      } else if (err.message?.includes('expired') || err.message?.includes('invalid')) {
-        showToast.error('Link expirado. Solicite um novo link de recuperação.');
-      } else {
-        showToast.error('Erro ao conectar. Tente novamente.');
-      }
+      mostrarErroLogin(err);
     } finally {
       setLoading(false);
       loginViaSenhaRef.current = false; // FIX: libera o listener para futuros magic links
@@ -330,6 +407,45 @@ export default function Login() {
             </div>
           </div>
 
+          {desafioMfa ? (
+            /* ── PED-175: desafio de autenticação de dois fatores ────────── */
+            <form onSubmit={handleVerificarMfa} className="space-y-4" noValidate>
+              <p className="text-sm text-muted-foreground text-center">
+                Digite o código de 6 dígitos do seu app autenticador.
+              </p>
+              <Input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                autoFocus
+                required
+                placeholder="000000"
+                aria-label="Código de autenticação"
+                leftIcon={<Lock size={16} />}
+                value={codigoMfa}
+                onChange={(e) => setCodigoMfa(e.target.value.replace(/\D/g, ''))}
+              />
+              <Button
+                type="submit"
+                variant="premium"
+                size="lg"
+                fullWidth
+                loading={verificandoMfa}
+                disabled={codigoMfa.length !== 6}
+                rightIcon={<ArrowRight size={18} />}
+              >
+                Verificar
+              </Button>
+              <button
+                type="button"
+                onClick={() => { setDesafioMfa(null); setCodigoMfa(''); }}
+                className="w-full text-center text-sm font-medium text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
+              >
+                Voltar
+              </button>
+            </form>
+          ) : (
+          <>
           <EntrarComGoogle texto="Entrar com Google" />
 
           {/* ── Formulário ───────────────────────────────────────────────── */}
@@ -402,6 +518,8 @@ export default function Login() {
               Ainda não tem conta? Criar meu estúdio
             </a>
           </div>
+          </>
+          )}
         </div>
       </div>
 

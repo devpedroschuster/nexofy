@@ -115,9 +115,24 @@ auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
 [auth.mfa]
 max_enrolled_factors = 10
 
+# PED-175 (achado de auditoria LGPD): contas de dono/admin de estúdio
+# administram dado sensível de saúde e dado financeiro de terceiros
+# (alunos) — MFA ausente era um risco desproporcional ao que está em jogo.
+# TOTP habilitado (app autenticador, sem custo por SMS); enrollment é
+# opcional/incentivado por ora (link "Segurança" no menu admin, ver
+# webapp/src/components/Sidebar.jsx), não bloqueante — ver
+# webapp/src/pages/SegurancaConta.jsx pro fluxo de enrollment e
+# webapp/src/pages/Login.jsx pro desafio aal2 no login de quem já tiver um
+# fator verificado.
+#
+# ⚠️ Este arquivo só afeta o stack local (`supabase start`)/CLI. Staging e
+# produção são projetos hospedados — o mesmo toggle precisa ser replicado
+# manualmente em Authentication → Providers → Multi-Factor Authentication
+# no dashboard de cada projeto (não há hoje uma tool de MCP nem um passo de
+# CI que sincronize auth config de config.toml pros projetos hospedados).
 [auth.mfa.totp]
-enroll_enabled = false
-verify_enabled = false
+enroll_enabled = true
+verify_enabled = true
 
 [auth.mfa.phone]
 enroll_enabled = false
@@ -217,6 +232,13 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/expurgo-retencao-lgpd/deno.json"
 entrypoint = "./functions/expurgo-retencao-lgpd/index.ts"
+
+[functions.exportar-dados-aluno]
+enabled = true
+# PED-172: sempre exige JWT — self-service do próprio titular ou pedido
+# tratado por admin/super_admin autenticado, nunca chamada anônima/cron.
+verify_jwt = true
+entrypoint = "./functions/exportar-dados-aluno/index.ts"
 
 [functions.health]
 enabled = true

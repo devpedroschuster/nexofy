@@ -5,7 +5,7 @@ const ENTIDADE_PADRAO = 'aluno';
 
 const CAMPOS_GRAVAVEIS = [
   'field_name', 'label', 'field_type', 'opcoes',
-  'is_required', 'is_active', 'display_order',
+  'is_required', 'is_active', 'display_order', 'sensivel',
 ];
 
 function filtrarCamposPermitidos(dados) {
@@ -20,7 +20,7 @@ export const camposDinamicosService = {
     try {
       let query = supabase
         .from('campos_dinamicos')
-        .select('id, field_name, label, field_type, opcoes, is_required, is_active, display_order')
+        .select('id, field_name, label, field_type, opcoes, is_required, is_active, display_order, sensivel')
         .eq('estudio_id', estudioId)
         .eq('entidade', entidade);
 
