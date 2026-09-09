@@ -101,8 +101,20 @@ describe('alunosService — gate LGPD (PED-170)', () => {
     ).resolves.toBeTruthy();
   });
 
-  it('permite atualizar observacoes_medicas de aluno maior de idade sem exigir consentimento', async () => {
+  // PED-168: aluno maior de idade também exige consentimento (do próprio
+  // titular, em vez do responsável legal) — ver
+  // alunosService.consentimentoTitular.test.js para a cobertura completa
+  // desse gate.
+  it('bloqueia atualizar observacoes_medicas de aluno maior de idade sem consentimento do titular', async () => {
     mockarTabelas({ dataNascimento: NASCIMENTO_MAIOR, temConsentimento: false });
+
+    await expect(
+      alunosService.atualizar(1, { observacoes_medicas: 'Sem restrições' }, 'estudio-1')
+    ).rejects.toThrow(/específico do titular/);
+  });
+
+  it('permite atualizar observacoes_medicas de aluno maior de idade com consentimento do titular já registrado', async () => {
+    mockarTabelas({ dataNascimento: NASCIMENTO_MAIOR, temConsentimento: true });
 
     await expect(
       alunosService.atualizar(1, { observacoes_medicas: 'Sem restrições' }, 'estudio-1')

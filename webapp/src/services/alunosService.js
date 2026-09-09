@@ -33,6 +33,34 @@ async function possuiConsentimentoResponsavel(alunoId, estudioId) {
   return (data?.length ?? 0) > 0;
 }
 
+// PED-168 (LGPD art. 5º, II / art. 11, I): quando o aluno é MAIOR de idade
+// (ou a data de nascimento ainda não está cadastrada), a exigência de
+// consentimento específico recai sobre o próprio titular, não sobre um
+// responsável legal — ver `consentimentos_dados_sensiveis_saude`
+// (supabase/migrations/20260908190000_create_consentimento_titular_dados_sensiveis.sql).
+// Mesma defesa em profundidade de possuiConsentimentoResponsavel acima; a
+// validação "de verdade" é o trigger `bloquear_dados_sensiveis_sem_consentimento_titular`.
+const ERRO_TITULAR_SEM_CONSENTIMENTO =
+  'Consentimento específico do titular para dado sensível de saúde ainda não ' +
+  'registrado. Confirme o consentimento antes de preencher anamnese/observações médicas.';
+
+// Identifica o texto de consentimento apresentado ao operador do estúdio em
+// PerfilAluno.jsx (AbaAnamnese) — se o texto mudar de forma relevante,
+// incremente esta versão (mesmo aceite anterior não cobre o texto novo).
+const VERSAO_CONSENTIMENTO_TITULAR_DADOS_SENSIVEIS = 'v1';
+
+async function possuiConsentimentoTitular(alunoId, estudioId) {
+  const { data, error } = await supabase
+    .from('consentimentos_dados_sensiveis_saude')
+    .select('id')
+    .eq('aluno_id', alunoId)
+    .eq('estudio_id', estudioId)
+    .limit(1);
+
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
+}
+
 // Campos que o cliente pode efetivamente gravar em `alunos` a partir destes
 // dois métodos. `role`, `estudio_id`, `id`, `auth_id` e afins nunca entram
 // por aqui — mudança de papel/tenant deve passar por um fluxo dedicado e
@@ -158,11 +186,14 @@ export const alunosService = {
 
       // Na criação não há como já existir um registro de consentimento
       // (o aluno_id do vínculo nem existe ainda) — então dado sensível de
-      // saúde preenchido já no cadastro de um menor é sempre rejeitado.
-      // Na prática o form de cadastro (NovoAluno.jsx) nunca envia esses
-      // campos nesta chamada; isso cobre outros caminhos (import, etc.).
-      if (tocaCampoSensivelSaude(payload) && ehMenorDeIdade(dados.data_nascimento)) {
-        throw new Error(ERRO_MENOR_SEM_CONSENTIMENTO);
+      // saúde preenchido já no cadastro é sempre rejeitado, seja o titular
+      // menor (responsável legal) ou maior de idade (PED-168, o próprio
+      // titular). Na prática o form de cadastro (NovoAluno.jsx) nunca envia
+      // esses campos nesta chamada; isso cobre outros caminhos (import, etc.).
+      if (tocaCampoSensivelSaude(payload)) {
+        throw new Error(
+          ehMenorDeIdade(dados.data_nascimento) ? ERRO_MENOR_SEM_CONSENTIMENTO : ERRO_TITULAR_SEM_CONSENTIMENTO
+        );
       }
 
       const { data, error } = await supabase
@@ -195,6 +226,11 @@ export const alunosService = {
         if (ehMenorDeIdade(alunoAtual?.data_nascimento)) {
           const temConsentimento = await possuiConsentimentoResponsavel(id, estudioId);
           if (!temConsentimento) throw new Error(ERRO_MENOR_SEM_CONSENTIMENTO);
+        } else {
+          // PED-168: maior de idade (ou data de nascimento ainda não
+          // cadastrada) — exige consentimento do próprio titular.
+          const temConsentimento = await possuiConsentimentoTitular(id, estudioId);
+          if (!temConsentimento) throw new Error(ERRO_TITULAR_SEM_CONSENTIMENTO);
         }
       }
 
@@ -552,6 +588,52 @@ export const alunosService = {
       return data;
     } catch (error) {
       console.error('[alunosService.buscarConsentimentoResponsavel]', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Registra o consentimento específico do próprio titular (aluno maior de
+   * idade) para dado sensível de saúde (PED-168 / LGPD art. 5º, II e
+   * art. 11, I). Sempre um INSERT novo — nunca um update — mesmo padrão
+   * append-only de `registrarConsentimentoResponsavel` acima.
+   */
+  async registrarConsentimentoTitular(alunoId, estudioId) {
+    try {
+      const { data, error } = await supabase
+        .from('consentimentos_dados_sensiveis_saude')
+        .insert([{
+          aluno_id: alunoId,
+          estudio_id: estudioId,
+          versao: VERSAO_CONSENTIMENTO_TITULAR_DADOS_SENSIVEIS,
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('[alunosService.registrarConsentimentoTitular]', error);
+      throw error;
+    }
+  },
+
+  /** Consentimento mais recente do titular, ou null se nenhum foi registrado. */
+  async buscarConsentimentoTitular(alunoId, estudioId) {
+    try {
+      const { data, error } = await supabase
+        .from('consentimentos_dados_sensiveis_saude')
+        .select('*')
+        .eq('aluno_id', alunoId)
+        .eq('estudio_id', estudioId)
+        .order('aceito_em', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('[alunosService.buscarConsentimentoTitular]', error);
       throw error;
     }
   },

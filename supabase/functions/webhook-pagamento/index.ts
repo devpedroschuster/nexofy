@@ -5,6 +5,7 @@ import { runInBackground } from "../_shared/backgroundTask.ts"
 import { gerarRepassesParaMensalidade } from "../_shared/repasses.ts"
 import { enviarPushUnico } from "../_shared/expoPush.ts"
 import { createLogger } from "../_shared/logger.ts"
+import { timingSafeEqualString } from "../_shared/timingSafeEqual.ts"
 
 // ─────────────────────────────────────────────────────────────────────────
 // webhook-pagamento
@@ -28,13 +29,24 @@ import { createLogger } from "../_shared/logger.ts"
 //      EdgeRuntime.waitUntil (runInBackground) — processamento pesado não
 //      compete mais com o prazo de timeout do Asaas.
 //
-// SEGURANÇA — validação do remetente:
-// O Asaas não assina o payload por HMAC como Stripe; a autenticação é
-// feita via um "Access Token" definido no painel de configuração do
-// webhook, enviado de volta no header `asaas-access-token`. Configure o
-// mesmo valor em ASAAS_WEBHOOK_TOKEN (edge function secret) e no painel
-// Asaas > Integrações > Webhooks. Sem essa checagem, qualquer request
-// externo poderia marcar mensalidades como pagas.
+// SEGURANÇA — validação do remetente (PED-171):
+// O Asaas não oferece assinatura HMAC por requisição para webhooks — a
+// documentação oficial (docs.asaas.com/docs/sobre-os-webhooks e
+// duvidas-frequentes-webhooks, consultada em 2026-09) só descreve o
+// "Access Token" estático definido no painel de configuração do webhook e
+// devolvido no header `asaas-access-token`; não existe um segredo por
+// requisição para assinar o payload. Migrar para HMAC não é possível aqui
+// porque o remetente (Asaas) não gera essa assinatura.
+//
+// A blindagem possível é sobre a própria comparação do token:
+// `receivedToken !== expectedToken` compara byte a byte e retorna assim
+// que acha a primeira diferença, vazando pelo tempo de resposta quantos
+// caracteres iniciais do token um atacante já acertou. timingSafeEqualString
+// (_shared/timingSafeEqual.ts) hasheia os dois valores antes de comparar,
+// eliminando esse canal. Configure o valor do token em ASAAS_WEBHOOK_TOKEN
+// (edge function secret) e no painel Asaas > Integrações > Webhooks — sem
+// essa checagem, qualquer request externo poderia marcar mensalidades como
+// pagas.
 //
 // verify_jwt = false é necessário (o Asaas não envia JWT do Supabase);
 // a autenticidade da chamada é garantida pelo token acima, não pelo JWT.
@@ -67,7 +79,7 @@ serve(withSentry("webhook-pagamento", async (req) => {
 
   const expectedToken = Deno.env.get("ASAAS_WEBHOOK_TOKEN") ?? ""
   const receivedToken = req.headers.get("asaas-access-token") ?? ""
-  if (!expectedToken || receivedToken !== expectedToken) {
+  if (!expectedToken || !receivedToken || !(await timingSafeEqualString(receivedToken, expectedToken))) {
     logger.error("Token de webhook inválido ou ausente.")
     return response({ erro: "Não autorizado." }, 401)
   }

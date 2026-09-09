@@ -633,11 +633,36 @@ function HeatmapFrequencia({ frequencia, planoAtivo }) {
 // ─────────────────────────────────────────────────────────────
 function AbaAnamnese({
   aluno, alunoId, estudioId, queryClient, observacoesMedicas, setObservacoesMedicas,
-  salvandoMedico, setSalvandoMedico, menorSemConsentimento,
+  salvandoMedico, setSalvandoMedico, menorSemConsentimento, consentimentoTitular,
 }) {
   const [editandoLink, setEditandoLink] = useState(false);
   const [novoLink, setNovoLink]         = useState(aluno?.link_anamnese ?? '');
   const [salvandoLink, setSalvandoLink] = useState(false);
+  // PED-168 (LGPD art. 5º, II / art. 11, I): aluno maior de idade (ou sem
+  // data de nascimento cadastrada) sem consentimento específico do próprio
+  // titular ainda registrado — bloqueia os campos até o operador confirmar
+  // o consentimento abaixo. Menor de idade já é coberto por
+  // menorSemConsentimento (PED-170, consentimento do responsável legal).
+  const [aceitaConsentimentoTitular, setAceitaConsentimentoTitular] = useState(false);
+  const [registrandoConsentimento, setRegistrandoConsentimento]     = useState(false);
+  const precisaConsentimentoTitular = !menorSemConsentimento && !ehMenorDeIdade(aluno?.data_nascimento) && !consentimentoTitular;
+  const camposBloqueados = menorSemConsentimento || precisaConsentimentoTitular;
+
+  const handleRegistrarConsentimentoTitular = async () => {
+    if (registrandoConsentimento) return;
+    setRegistrandoConsentimento(true);
+    try {
+      await alunosService.registrarConsentimentoTitular(alunoId, estudioId);
+      queryClient.invalidateQueries({ queryKey: alunosKeys.consentimentoTitular(alunoId, estudioId) });
+      showToast.success('Consentimento registrado!');
+    } catch (err) {
+      console.error('[PerfilAluno] Erro ao registrar consentimento do titular:', err);
+      showToast.error('Erro ao registrar o consentimento. Tente novamente.');
+    } finally {
+      setRegistrandoConsentimento(false);
+    }
+  };
+
   React.useEffect(() => {
     setNovoLink(aluno?.link_anamnese ?? '');
   }, [aluno?.link_anamnese]);
@@ -683,13 +708,43 @@ function AbaAnamnese({
             para liberar o preenchimento de anamnese/observações médicas.
           </p>
         </div>
+      ) : precisaConsentimentoTitular ? (
+        <div className="space-y-3 rounded-2xl border border-destructive/30 bg-destructive-soft p-4">
+          <div className="flex gap-3">
+            <AlertTriangle size={16} className="text-destructive shrink-0 mt-0.5" />
+            <p className="text-xs text-destructive leading-relaxed">
+              <strong>Bloqueado:</strong> observações médicas e link de anamnese são{' '}
+              <strong>dado sensível de saúde</strong> (LGPD, art. 5º, II) e exigem
+              consentimento específico e destacado do próprio titular (art. 14, I) —
+              distinto do aceite genérico de Termos/Privacidade feito no cadastro.
+              Confirme abaixo antes de preencher.
+            </p>
+          </div>
+          <label className="flex items-start gap-3 cursor-pointer pl-1">
+            <input type="checkbox" checked={aceitaConsentimentoTitular}
+              onChange={(e) => setAceitaConsentimentoTitular(e.target.checked)}
+              className="mt-1 w-4 h-4 accent-destructive shrink-0" />
+            <span className="text-xs text-destructive leading-relaxed font-medium">
+              Declaro que {aluno?.nome_completo || 'o(a) aluno(a)'} autorizou, de forma
+              específica e destacada, o registro de anamnese/observações médicas nesta
+              plataforma (LGPD, art. 11, I).
+            </span>
+          </label>
+          <Button variant="brand" size="sm" leftIcon={<CheckCircle size={14} />}
+            onClick={handleRegistrarConsentimentoTitular}
+            disabled={!aceitaConsentimentoTitular || registrandoConsentimento}>
+            {registrandoConsentimento ? 'Registrando...' : 'Confirmar consentimento'}
+          </Button>
+        </div>
       ) : (
-        <div className="flex gap-3 rounded-2xl border border-warning/30 bg-warning-soft p-4">
-          <Activity size={16} className="text-warning shrink-0 mt-0.5" />
-          <p className="text-xs text-warning leading-relaxed">
-            Observações médicas e link de anamnese são <strong>dado sensível de saúde</strong>{' '}
-            (LGPD, art. 5º, II). Antes de preencher, confirme que o aluno (ou responsável)
-            autorizou especificamente o registro dessa informação.
+        <div className="flex gap-3 rounded-2xl border border-success/30 bg-success-soft p-4">
+          <CheckCircle size={16} className="text-success shrink-0 mt-0.5" />
+          <p className="text-xs text-success leading-relaxed">
+            Consentimento específico para dado sensível de saúde (LGPD, art. 5º, II e
+            art. 11, I) já registrado
+            {consentimentoTitular?.aceito_em
+              ? ` em ${new Date(consentimentoTitular.aceito_em).toLocaleDateString('pt-BR')}`
+              : ''}.
           </p>
         </div>
       )}
@@ -701,7 +756,7 @@ function AbaAnamnese({
               Link para o formulário de anamnese preenchido pelo aluno.
             </p>
           </div>
-          <button onClick={() => setEditandoLink(v => !v)} disabled={menorSemConsentimento}
+          <button onClick={() => setEditandoLink(v => !v)} disabled={camposBloqueados}
             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-primary border border-primary/30 hover:bg-primary/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent">
             <Link2 size={13} />
             {editandoLink ? 'Cancelar' : (aluno?.link_anamnese ? 'Editar link' : 'Vincular link')}
@@ -764,10 +819,10 @@ function AbaAnamnese({
         <Input as="textarea" rows={6}
           placeholder="Lesões, restrições, alergias, medicamentos em uso..."
           value={observacoesMedicas}
-          disabled={menorSemConsentimento}
+          disabled={camposBloqueados}
           onChange={(e) => setObservacoesMedicas(e.target.value)} />
         <Button variant="brand" size="sm" leftIcon={<Save size={14} />}
-          onClick={handleSalvarObservacoesMedicas} disabled={salvandoMedico || menorSemConsentimento}>
+          onClick={handleSalvarObservacoesMedicas} disabled={salvandoMedico || camposBloqueados}>
           {salvandoMedico ? 'Salvando...' : 'Salvar Observações'}
         </Button>
       </Surface>
@@ -1435,6 +1490,13 @@ export default function PerfilAluno() {
     queryFn: () => alunosService.buscarConsentimentoResponsavel(id, idEfetivo),
     enabled: !!idEfetivo && ehMenorDeIdade(aluno?.data_nascimento),
   });
+  // PED-168: só busca quando o aluno já foi carregado e NÃO é menor — o
+  // caso menor é coberto pelo consentimento do responsável legal acima.
+  const { data: consentimentoTitular } = useQuery({
+    queryKey: alunosKeys.consentimentoTitular(id, idEfetivo),
+    queryFn: () => alunosService.buscarConsentimentoTitular(id, idEfetivo),
+    enabled: !!aluno && !!idEfetivo && !ehMenorDeIdade(aluno?.data_nascimento),
+  });
   const { data: estudio } = useEstudio(idEfetivo);
   const nomeEstudio = estudio?.nome;
 
@@ -1768,6 +1830,7 @@ export default function PerfilAluno() {
           salvandoMedico={salvandoMedico}
           setSalvandoMedico={setSalvandoMedico}
           menorSemConsentimento={ehMenorDeIdade(aluno?.data_nascimento) && !consentimentoResponsavel}
+          consentimentoTitular={consentimentoTitular}
         />
       )}
       </div>
