@@ -72,3 +72,22 @@ export function sanitizarMetadata(metadata = {}) {
     Object.entries(metadata).filter(([chave]) => !CAMPOS_SISTEMA.includes(chave))
   );
 }
+
+// PED-173 (LGPD art. 5º II): espelha, no client, a MESMA heurística aplicada
+// pela trigger `aplicar_heuristica_sensivel_campos_dinamicos` no banco
+// (supabase/migrations/20260908140000_add_sensivel_campos_dinamicos.sql) —
+// usada só pra dar feedback imediato no form (marcar a checkbox "Dado
+// sensível" sozinha enquanto o admin digita). A validação de verdade,
+// que nenhum client pode contornar, é a trigger no banco; se as duas
+// divergirem no futuro, o banco sempre vence.
+const REGEX_SUGESTAO_SENSIVEL =
+  /(sa[uú]de|doenc|alerg|medicament|deficien|\bpcd\b|religi[aã]o|crenca|cren[cç]a|etnia|ra[cç]a|orienta[cç][aã]o sexual|homossexual|bissexual|sindicat|filiac[aã]o partid|biometri|impress[aã]o digital|gen[eé]tic|\bdna\b|\bhiv\b|soropositiv|gravidez|gestante|opini[aã]o pol[ií]tica|transtorno|psiquiatr|psicol[oó]g)/i;
+
+/**
+ * @param {string} fieldName
+ * @param {string} label
+ * @returns {boolean}
+ */
+export function sugereCampoSensivel(fieldName, label) {
+  return REGEX_SUGESTAO_SENSIVEL.test(`${fieldName ?? ''} ${label ?? ''}`);
+}

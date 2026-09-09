@@ -61,6 +61,9 @@ import ResultadoFinanceiro from './pages/ResultadoFinanceiro';
 import ConfiguracoesEstudio from './pages/ConfiguracoesEstudio';
 import ConfiguracoesEspacos from './pages/ConfiguracoesEspacos';
 import ConfiguracoesPagamentos from './pages/ConfiguracoesPagamentos';
+import SolicitacoesTitular from './pages/SolicitacoesTitular';
+import SegurancaConta from './pages/SegurancaConta';
+import ConfiguracoesCamposAluno from './pages/ConfiguracoesCamposAluno';
 
 // Bloqueio de acesso por status do estúdio (inativo/suspenso/cancelado)
 import EstudioBloqueado from './pages/EstudioBloqueado';
@@ -373,6 +376,9 @@ function AppRoutes() {
             <Route path="/configuracoes/estudio" element={<ConfiguracoesEstudio />} />
             <Route path="/configuracoes/espacos" element={<ConfiguracoesEspacos />} />
             <Route path="/configuracoes/pagamentos" element={<ConfiguracoesPagamentos />} />
+            <Route path="/configuracoes/lgpd"       element={<SolicitacoesTitular />} />
+            <Route path="/configuracoes/seguranca"  element={<SegurancaConta />} />
+            <Route path="/configuracoes/campos-aluno" element={<ConfiguracoesCamposAluno />} />
           </Route>
         </Route>
 

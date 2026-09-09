@@ -1,6 +1,7 @@
 # Retenção/expurgo LGPD — processo e automação
 
-> Referenciado a partir de `index.ts` e `config.toml` desta pasta. PED-176.
+> Referenciado a partir de `index.ts` e `config.toml` desta pasta. PED-176,
+> PED-181 e PED-182 (fast-follows, ver seção dedicada abaixo).
 
 ## O que esta function faz
 
@@ -10,13 +11,43 @@ Duas rotinas independentes, uma execução por mês:
    com `status = 'cancelado'`, `cancelado_em` mais antigo que 5 anos e
    `anonimizado_em is null`. Pra cada um, chama a RPC
    `anonimizar_dados_estudio_cancelado`, que zera PII em `alunos`,
-   `professores`, `mensalidades`, `estudio_dados_asaas` e no próprio
-   `estudios`, e **apaga** (não anonimiza) `leads`. Um estúdio falhar não
-   trava os demais — fica registrado em `estudios.detalhes[]` na resposta
-   e reportado ao Sentry individualmente.
+   `professores`, `mensalidades`, `fechamento_comissoes`,
+   `estudio_dados_asaas` e no próprio `estudios`, redige o snapshot de PII
+   já guardado em `audit_log` desse estúdio, e **apaga** (não anonimiza)
+   `leads`. Um estúdio falhar não trava os demais — fica registrado em
+   `estudios.detalhes[]` na resposta e reportado ao Sentry individualmente.
 2. **Expurgo do payload de `webhook_events` com mais de 12 meses** — zera
    só a coluna `payload`, mantém o resto da linha (auditoria sem o corpo
    bruto do evento).
+
+## PED-181 (conta auth.users) e PED-182 (arquivos no Storage)
+
+A RPC `anonimizar_dados_estudio_cancelado` agora também devolve, além dos
+contadores:
+
+- `arquivos_storage_a_remover: [{bucket, path}]` — objetos do Storage do
+  próprio projeto que estavam referenciados por `alunos.avatar_url`/
+  `link_anamnese`/`fechamento_comissoes.comprovante_url` antes de zerar a
+  coluna (URLs externas, coladas manualmente pelo estúdio, não entram
+  aqui — `extrair_objeto_storage()` só reconhece o padrão
+  `.../storage/v1/object/public/<bucket>/<path>`). A function (`index.ts`)
+  chama `supabase.storage.from(bucket).remove([path])` pra cada um,
+  **depois** do commit da anonimização no banco — best-effort, uma falha
+  aqui (arquivo já removido, path inválido) não desfaz nem trava a
+  anonimização, só incrementa `storage.arquivosFalhas` na resposta e loga
+  no Sentry.
+- `auth_ids_a_remover: [uuid]` — contas `auth.users` que ficaram sem
+  NENHUM vínculo ativo (aluno/professor/estudio_membros) em qualquer outro
+  estúdio ainda não anonimizado, depois de desvincular (`auth_id = null`)
+  as linhas deste estúdio. A function chama
+  `supabase.auth.admin.deleteUser(id)` pra cada uma — usa a Admin API (não
+  `DELETE` SQL direto em `auth.users`) porque só ela limpa corretamente
+  sessions/refresh_tokens/identities internos do GoTrue junto com a conta.
+
+Ambos os passos exigem que a function rode com a `SUPABASE_SERVICE_ROLE_KEY`
+(já é o caso — ver `handleRequest` em `index.ts`): `storage.remove()` e
+`auth.admin.*` só funcionam com a service role key, nunca com a anon/public
+key.
 
 Suporta `?dryRun=true` — calcula e retorna o que *seria* alterado sem
 escrever nada. Use sempre antes de uma primeira execução real num

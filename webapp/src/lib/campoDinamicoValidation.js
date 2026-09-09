@@ -41,4 +41,5 @@ export const campoDinamicoSchema = yup.object().shape({
   is_required: yup.boolean().default(false),
   is_active: yup.boolean().default(true),
   display_order: yup.number().integer().min(0).default(0),
+  sensivel: yup.boolean().default(false), // PED-173 — heurística no banco pode sobrescrever para true
 });

@@ -10,6 +10,7 @@ import {
   useReativarCampoDinamico,
 } from '../hooks/useCamposDinamicos';
 import { campoDinamicoSchema } from '../lib/campoDinamicoValidation';
+import { sugereCampoSensivel } from '../lib/camposSistema';
 import Input, { Label, FormField } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Surface from '../components/ui/Surface';
@@ -23,6 +24,7 @@ const CAMPO_VAZIO = {
   field_type: 'text',
   opcoes: [],
   is_required: false,
+  sensivel: false,
 };
 
 const TIPOS = [
@@ -102,6 +104,26 @@ function FormCampo({ valor, onChange, erros }) {
         />
         <span className="text-sm font-medium text-foreground">Obrigatório no cadastro</span>
       </label>
+
+      {/* PED-173 (LGPD art. 5º II): o banco tem a palavra final (trigger
+          aplicar_heuristica_sensivel_campos_dinamicos liga sozinha, nunca
+          desliga) — esta checkbox é só a marcação manual do admin para
+          campos que a heurística não capture. */}
+      <label className="flex items-center gap-2.5 py-1 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={valor.sensivel}
+          onChange={(e) => onChange({ ...valor, sensivel: e.target.checked })}
+          className="h-4 w-4 rounded border-input text-primary focus-visible:ring-2 focus-visible:ring-ring"
+        />
+        <span className="text-sm font-medium text-foreground">Dado sensível (saúde, religião, biometria, etc.)</span>
+      </label>
+      {sugereCampoSensivel(valor.field_name, valor.label) && (
+        <p className="text-xs text-warning -mt-2">
+          O nome/rótulo deste campo sugere dado sensível — será marcado automaticamente ao
+          salvar, e exigirá consentimento do responsável legal para alunos menores de idade.
+        </p>
+      )}
     </div>
   );
 }
@@ -194,6 +216,7 @@ export default function ConfiguracoesCamposAluno() {
               <code className="bg-muted px-1.5 py-0.5 rounded">{campo.field_name}</code>
               <Badge variant="soft" tone="neutral">{tipoLabel}</Badge>
               {campo.is_required && <Badge variant="soft" tone="warning">Obrigatório</Badge>}
+              {campo.sensivel && <Badge variant="soft" tone="destructive">Sensível</Badge>}
               {!campo.is_active && <Badge variant="soft" tone="destructive">Inativo</Badge>}
             </p>
           </div>

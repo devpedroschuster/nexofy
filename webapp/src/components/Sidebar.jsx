@@ -25,7 +25,7 @@ import {
   LayoutDashboard, Users, Calendar, Download, LogOut,
   Package, TrendingDown, UserCheck, Calculator, X,
   Clock, Bell, Percent, DollarSign, Gift, CalendarCog,
-  CreditCard, Settings, ChevronRight, MapPin,
+  CreditCard, Settings, ChevronRight, MapPin, ShieldCheck, ListPlus,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import ThemeToggle from './ui/ThemeToggle';
@@ -65,6 +65,7 @@ const construirMenuAdmin = (t) => [
   { name: 'Agenda',                     path: '/agenda',                     icon: Calendar,  modulo: 'agenda'     },
   { name: 'Presença',                   path: '/presenca',                   icon: Clock,     modulo: 'presenca'   },
   { name: 'Feriados',                   path: '/configuracoes/feriados',     icon: CalendarCog                     },
+  { name: 'Campos Personalizados',      path: '/configuracoes/campos-aluno', icon: ListPlus,  modulo: 'alunos'     },
 
   { label: 'Financeiro' },
   { name: 'Mensalidades',      path: '/financeiro',                 icon: DollarSign,   modulo: 'financeiro' },
@@ -75,6 +76,8 @@ const construirMenuAdmin = (t) => [
   { name: 'Pagamentos',        path: '/configuracoes/pagamentos',   icon: CreditCard,   modulo: 'financeiro' },
   { name: 'Configurações',     path: '/configuracoes/estudio',      icon: Settings },
   { name: 'Espaços',           path: '/configuracoes/espacos',      icon: MapPin },
+  { name: 'LGPD',              path: '/configuracoes/lgpd',         icon: ShieldCheck },
+  { name: 'Segurança',         path: '/configuracoes/seguranca',    icon: ShieldCheck },
 ];
 
 const construirMenuProfessor = (t) => [

@@ -78,11 +78,27 @@ export default function PoliticaPrivacidade() {
           <section>
             <h2 className="font-display text-lg font-bold text-foreground">5. Seus direitos (LGPD)</h2>
             <p className="mt-2">
-              Você pode solicitar acesso, correção ou exclusão dos seus dados a qualquer momento,
-              escrevendo para{' '}
+              Você tem direito de acesso, portabilidade, correção e exclusão dos seus dados
+              (art. 18 da LGPD).
+            </p>
+            <p className="mt-2">
+              <strong>Acesso e portabilidade</strong>: se você é aluno de um estúdio na
+              plataforma, pode baixar uma cópia estruturada dos seus dados a qualquer momento, na
+              sua Área do Aluno, na seção &quot;Meus Dados (LGPD)&quot; — sem precisar pedir a
+              ninguém.
+            </p>
+            <p className="mt-2">
+              <strong>Exclusão</strong>: pode ser solicitada pelo mesmo caminho (Área do Aluno →
+              &quot;Solicitar exclusão da minha conta&quot;) ou escrevendo para{' '}
               <a href={LINKS.CONTATO_COMERCIAL} className="font-semibold underline">
                 contato@nexofy.com.br
-              </a>.
+              </a>. Como a exclusão é irreversível e pode exigir checar pendências financeiras
+              com o estúdio, o pedido é analisado pelo estúdio (controlador dos dados) ou por nós,
+              dentro de um SLA de até <strong>15 dias corridos</strong> a partir da solicitação.
+            </p>
+            <p className="mt-2">
+              Correções de cadastro podem ser feitas diretamente na Área do Aluno, ou solicitadas
+              ao estúdio.
             </p>
           </section>
         </div>

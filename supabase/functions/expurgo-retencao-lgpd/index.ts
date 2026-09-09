@@ -18,12 +18,20 @@ interface EstudioCandidato {
   id: string
 }
 
+interface ArquivoStorage {
+  bucket: string
+  path: string
+}
+
 interface ResultadoAnonimizacao {
   skipped: boolean
   alunos_anonimizados?: number
   professores_anonimizados?: number
   mensalidades_anonimizadas?: number
+  fechamentos_anonimizados?: number
   leads_removidos?: number
+  arquivos_storage_a_remover?: ArquivoStorage[]
+  auth_ids_a_remover?: string[]
 }
 
 serve(withSentry("expurgo-retencao-lgpd", async (req: Request) => {
@@ -73,6 +81,10 @@ async function handleRequest(req: Request): Promise<Response> {
     if (errCandidatos) throw errCandidatos
 
     const resultadosEstudios: Array<{ estudioId: string; erro?: string } & ResultadoAnonimizacao> = []
+    let arquivosStorageRemovidos = 0
+    let arquivosStorageFalhas = 0
+    let authIdsRemovidos = 0
+    let authIdsFalhas = 0
 
     if (!dryRun) {
       for (const estudio of candidatos ?? []) {
@@ -82,7 +94,45 @@ async function handleRequest(req: Request): Promise<Response> {
             p_data_corte: corteEstudios,
           })
           if (error) throw error
-          resultadosEstudios.push({ estudioId: estudio.id, ...(data as ResultadoAnonimizacao) })
+          const resultado = data as ResultadoAnonimizacao
+          resultadosEstudios.push({ estudioId: estudio.id, ...resultado })
+
+          // PED-182 — limpeza de Storage roda best-effort DEPOIS do commit
+          // da anonimização no banco: não é transacional com o Postgres, e
+          // um arquivo que falhe ao remover (já apagado, path inválido)
+          // não pode reverter nem travar a anonimização do estúdio, que já
+          // aconteceu. Cada bucket é removido separadamente (a API do
+          // Storage não aceita paths de buckets diferentes numa chamada só).
+          for (const arquivo of resultado.arquivos_storage_a_remover ?? []) {
+            const { error: erroStorage } = await supabase.storage
+              .from(arquivo.bucket)
+              .remove([arquivo.path])
+            if (erroStorage) {
+              arquivosStorageFalhas++
+              logger.error('Falha ao remover arquivo do Storage', {
+                estudio_id: estudio.id, bucket: arquivo.bucket, path: arquivo.path, erro: erroStorage.message,
+              })
+            } else {
+              arquivosStorageRemovidos++
+            }
+          }
+
+          // PED-181 — apagar a conta auth.users só depois de confirmado que
+          // ela não tem NENHUM vínculo ativo em outro estúdio (a RPC já fez
+          // essa checagem). Usa a Admin API (não DELETE SQL direto): é o
+          // único jeito de limpar corretamente sessions/refresh_tokens/
+          // identities internos do GoTrue junto com a conta.
+          for (const authId of resultado.auth_ids_a_remover ?? []) {
+            const { error: erroAuth } = await supabase.auth.admin.deleteUser(authId)
+            if (erroAuth) {
+              authIdsFalhas++
+              logger.error('Falha ao apagar conta auth.users órfã', {
+                estudio_id: estudio.id, auth_id: authId, erro: erroAuth.message,
+              })
+            } else {
+              authIdsRemovidos++
+            }
+          }
         } catch (err: unknown) {
           // Mesmo princípio de isolamento do gerar-mensalidades: um
           // estúdio falhar não pode travar o lote inteiro pros demais.
@@ -123,6 +173,10 @@ async function handleRequest(req: Request): Promise<Response> {
       estudios_falhas: falhas,
       webhook_events_elegiveis: webhookElegiveis ?? 0,
       webhook_events_expurgados: webhookEventsExpurgados,
+      arquivos_storage_removidos: arquivosStorageRemovidos,
+      arquivos_storage_falhas: arquivosStorageFalhas,
+      auth_ids_removidos: authIdsRemovidos,
+      auth_ids_falhas: authIdsFalhas,
     })
 
     return response({
@@ -139,6 +193,14 @@ async function handleRequest(req: Request): Promise<Response> {
       webhookEvents: {
         elegiveis: webhookElegiveis ?? 0,
         expurgados: webhookEventsExpurgados,
+      },
+      storage: {
+        arquivosRemovidos: arquivosStorageRemovidos,
+        arquivosFalhas: arquivosStorageFalhas,
+      },
+      authUsers: {
+        removidos: authIdsRemovidos,
+        falhas: authIdsFalhas,
       },
     })
   } catch (err: unknown) {
