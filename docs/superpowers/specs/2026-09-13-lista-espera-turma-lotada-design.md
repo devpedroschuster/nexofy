@@ -162,8 +162,10 @@ foi lançado) — por isso a UI web do aluno (abaixo) é o canal garantido.
 um aluno cadastrado (não visitante — lista de espera exige `aluno_id`),
 mostra uma terceira opção "Adicionar à lista de espera" ao lado de
 "Agendar mesmo assim"/"Cancelar" (estendo `ModalConfirmacao` com uma ação
-extra opcional, sem quebrar os demais usos). Mostra também a fila da turma
-(nomes em ordem, com opção de remover) num painel no modal de chamada.
+extra opcional, sem quebrar os demais usos). Um painel de
+visualização/gestão da fila (nomes em ordem, remover manualmente) fica de
+fora do V1 — o valor central do recurso é não exigir intervenção manual do
+estúdio; um painel de leitura pode ser adicionado depois se pedido.
 
 **Autoatendimento (`webapp/src/pages/AreaAluno.jsx`)**: primeiro corrige o
 bug bloqueante (RPC `agendar_aula` inexistente → `agendar_avulso`;
@@ -183,6 +185,8 @@ Adiciona também uma pequena seção "Minha lista de espera" (via
   `AreaAluno.jsx` — sinalizado como tarefa separada (não bloqueia a fila
   de espera, que valida no servidor).
 - Promoção ao aumentar capacidade manualmente.
+- Painel admin de visualização/gestão da fila (ver fila, remover manualmente)
+  — só o ponto de entrada (adicionar à fila) entra no V1.
 
 ## Testes
 
