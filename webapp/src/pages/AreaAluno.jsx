@@ -7,6 +7,8 @@ import { showToast } from '../components/shared/Toast';
 import { useEstudio } from '../hooks/useEstudio';
 import { formatarMoeda, formatarData as formatarDataUtil } from '../lib/utils';
 import { alunosKeys } from '../lib/alunosQueryKeys';
+import { listaEsperaService } from '../services/listaEsperaService';
+import { ModalConfirmacao } from '../components/ui/Modal';
 
 const NOMES_DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const DIAS_BANCO = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
@@ -54,6 +56,8 @@ export default function AreaAluno() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [exportandoDados, setExportandoDados] = useState(false);
   const [solicitandoExclusao, setSolicitandoExclusao] = useState(false);
+  const [modalFila, setModalFila] = useState({ isOpen: false, aulaId: null, nomeAtividade: '' });
+  const [entrandoNaFila, setEntrandoNaFila] = useState(false);
 
   const { data: aluno, isLoading: loadingAluno, isError: erroAluno } = useQuery({
     queryKey: alunosKeys.meuPerfil(),
@@ -174,6 +178,18 @@ export default function AreaAluno() {
       return data || [];
     },
   });
+
+  const { data: minhaFila } = useQuery({
+    queryKey: ['minha-fila-espera', aluno?.id],
+    enabled: !!aluno?.id && !!estudioIdAluno,
+    queryFn: () => listaEsperaService.listarMinhaFila(aluno.id, estudioIdAluno),
+  });
+
+  const filaAguardandoPorAula = new Map(
+    (minhaFila || [])
+      .filter((f) => f.status === 'aguardando')
+      .map((f) => [`${f.aula_id}-${f.data_aula}`, f])
+  );
 
   const { data: isProfessor } = useQuery({
     queryKey: ['check-hibrido', aluno?.auth_id],
@@ -316,25 +332,54 @@ export default function AreaAluno() {
     }
   };
 
+  // FIX (PED-185): `agendar_aula` foi removida do banco em
+  // supabase/migration-history/20260812130940_drop_dead_legacy_functions.sql
+  // — toda tentativa de agendamento por aqui falhava com "function does not
+  // exist". A RPC real (mesma usada por admin/professor em
+  // ModalAgendamento.jsx, e já corrigida do lado do app mobile em
+  // mobile/src/features/agenda.ts) é `agendar_avulso`, que exige
+  // p_estudio_id/p_data_aula além de aluno/aula. Erro P0100 (turma lotada)
+  // abre o modal de lista de espera em vez de só mostrar um erro genérico.
   const handleAgendar = async (agendaId) => {
     setProcessandoId(agendaId);
     try {
-      const { error } = await supabase.rpc('agendar_aula', { p_aluno_id: aluno.id, p_agenda_id: agendaId });
+      const { error } = await supabase.rpc('agendar_avulso', {
+        p_estudio_id: estudioIdAluno,
+        p_aluno_id: aluno.id,
+        p_aula_id: agendaId,
+        p_data_aula: diaAtivo,
+      });
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: alunosKeys.agendaDoDia(diaAtivo, estudioIdAluno) });
       await queryClient.invalidateQueries({ queryKey: alunosKeys.presencasMes(aluno.id) });
       showToast.success('Vaga garantida!');
     } catch (error) {
-      showToast.error(`Ops! Recusado: ${error.message || error.details || 'Erro desconhecido'}`);
+      if (error.code === 'P0100') {
+        setModalFila({
+          isOpen: true,
+          aulaId: agendaId,
+          nomeAtividade: aulasDoDia?.find((a) => a.id === agendaId)?.atividade || 'esta aula',
+        });
+      } else {
+        showToast.error(`Ops! Recusado: ${error.message || error.details || 'Erro desconhecido'}`);
+      }
     } finally {
       setProcessandoId(null);
     }
   };
 
+  // FIX (PED-185): `cancelar_agendamento` exige p_aula_id/p_data/p_estudio_id
+  // (não só p_aluno_id/p_agenda_id) — a chamada anterior nunca teria
+  // funcionado, mesmo bug de cópia do `agendar_aula` acima.
   const handleCancelar = async (agendaId) => {
     setProcessandoId(agendaId);
     try {
-      const { error } = await supabase.rpc('cancelar_agendamento', { p_aluno_id: aluno.id, p_agenda_id: agendaId });
+      const { error } = await supabase.rpc('cancelar_agendamento', {
+        p_aluno_id: aluno.id,
+        p_aula_id: agendaId,
+        p_data: diaAtivo,
+        p_estudio_id: estudioIdAluno,
+      });
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: alunosKeys.agendaDoDia(diaAtivo, estudioIdAluno) });
       await queryClient.invalidateQueries({ queryKey: alunosKeys.presencasMes(aluno.id) });
@@ -344,6 +389,33 @@ export default function AreaAluno() {
       showToast.error(error.message || 'Erro ao cancelar o agendamento.');
     } finally {
       setProcessandoId(null);
+    }
+  };
+
+  const handleEntrarNaFila = async () => {
+    setEntrandoNaFila(true);
+    try {
+      await listaEsperaService.entrar(
+        { alunoId: aluno.id, aulaId: modalFila.aulaId, dataAula: diaAtivo },
+        estudioIdAluno
+      );
+      showToast.success('Você entrou na lista de espera! Assim que uma vaga abrir, você será agendado(a) automaticamente.');
+      await queryClient.invalidateQueries({ queryKey: ['minha-fila-espera', aluno.id] });
+      setModalFila({ isOpen: false, aulaId: null, nomeAtividade: '' });
+    } catch (error) {
+      showToast.error(error.message || 'Não foi possível entrar na lista de espera.');
+    } finally {
+      setEntrandoNaFila(false);
+    }
+  };
+
+  const handleSairDaFila = async (listaEsperaId) => {
+    try {
+      await listaEsperaService.sair(listaEsperaId, estudioIdAluno);
+      showToast.success('Você saiu da lista de espera.');
+      await queryClient.invalidateQueries({ queryKey: ['minha-fila-espera', aluno.id] });
+    } catch (error) {
+      showToast.error(error.message || 'Não foi possível sair da lista de espera.');
     }
   };
 
@@ -602,19 +674,58 @@ export default function AreaAluno() {
                             <div className="text-[11px] font-bold text-red-400 text-center uppercase tracking-wider flex flex-col items-center gap-1">
                               <AlertCircle size={16} /> Limite Atingido
                             </div>
+                          ) : filaAguardandoPorAula.has(`${aula.id}-${diaAtivo}`) ? (
+                            <div className="text-[11px] font-bold text-amber-500 text-center uppercase tracking-wider flex flex-col items-center gap-1">
+                              Na lista de espera
+                            </div>
                           ) : (
+                            // FIX: `lotado` vem de `agenda.vagas_ocupadas`, uma coluna
+                            // que nada no schema atualiza (achado à parte, sinalizado
+                            // separadamente) — não é confiável pra pré-desabilitar o
+                            // botão. A validação real acontece no servidor
+                            // (agendar_avulso/verificar_disponibilidade_v2); se a turma
+                            // estiver de fato lotada, o clique abre o modal da fila de
+                            // espera (handleAgendar) em vez de um erro genérico.
                             <button
                               onClick={() => handleAgendar(aula.id)}
-                              disabled={lotado || estaProcessando}
-                              className={`btn-book ${lotado ? 'disabled' : 'reserve'}`}
+                              disabled={estaProcessando}
+                              className="btn-book reserve"
                             >
-                              {estaProcessando ? <RefreshCw className="animate-spin text-white" size={16} /> : lotado ? 'Esgotado' : 'Agendar'}
+                              {estaProcessando ? <RefreshCw className="animate-spin text-white" size={16} /> : 'Agendar'}
                             </button>
                           )}
                         </div>
                       </div>
                     );
                   })
+                )}
+                {minhaFila && minhaFila.filter((f) => f.status === 'aguardando' || f.status === 'convertido').length > 0 && (
+                  <div className="mt-6 bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
+                    <h3 className="text-sm font-black text-gray-800 mb-3 uppercase tracking-wide">Minha lista de espera</h3>
+                    <div className="space-y-2">
+                      {minhaFila.filter((f) => f.status === 'aguardando' || f.status === 'convertido').map((f) => (
+                        <div key={f.id} className="flex items-center justify-between gap-3 text-sm">
+                          {f.status === 'convertido' ? (
+                            <span className="text-green-600 font-semibold">
+                              🎉 Você foi promovido para {f.atividade} — já está agendado(a)!
+                            </span>
+                          ) : (
+                            <>
+                              <span className="text-gray-700 font-medium">
+                                {f.atividade} — posição {f.posicao}
+                              </span>
+                              <button
+                                onClick={() => handleSairDaFila(f.id)}
+                                className="text-xs font-bold text-red-500 uppercase"
+                              >
+                                Sair da fila
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -815,6 +926,17 @@ export default function AreaAluno() {
           </div>
         )}
       </div>
+      <ModalConfirmacao
+        isOpen={modalFila.isOpen}
+        onClose={() => setModalFila({ isOpen: false, aulaId: null, nomeAtividade: '' })}
+        onConfirm={handleEntrarNaFila}
+        loading={entrandoNaFila}
+        titulo="Turma lotada"
+        mensagem={`${modalFila.nomeAtividade} está lotada no momento. Quer entrar na lista de espera? Você será agendado(a) automaticamente assim que uma vaga abrir.`}
+        textoConfirmar="Entrar na lista de espera"
+        textoCancelar="Agora não"
+        tipo="info"
+      />
     </div>
   );
 }
