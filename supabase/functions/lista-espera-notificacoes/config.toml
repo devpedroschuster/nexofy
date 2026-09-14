@@ -1,0 +1,14 @@
+[functions.lista-espera-notificacoes]
+verify_jwt = false  # Autorização validada dentro da função (x-cron-secret ou JWT + checagem de
+                    # admin) — ver comentário "AUTORIZAÇÃO" em index.ts. Este bloco por-function
+                    # sozinho NÃO é suficiente pro deploy real — ver o bloco
+                    # [functions.lista-espera-notificacoes] em supabase/config.toml (raiz), que é
+                    # o que efetivamente vale (mesma lição do PED-57/PED-68 em gerar-mensalidades).
+
+# [[cron]] abaixo é só documentação/referência (confirmado no PED-56 que este bloco nunca é o
+# mecanismo real de agendamento) — o cron de verdade é criado manualmente via cron.schedule(...)
+# direto no projeto (staging e produção, separadamente), ver RUNBOOK.md.
+[[cron]]
+name = "lista-espera-notificacoes"
+schedule = "*/5 * * * *"   # A cada 5 minutos — promoção em si é instantânea (trigger), isto só entrega a notificação e expira filas de datas passadas
+command = "POST https://<PROJECT_REF>.supabase.co/functions/v1/lista-espera-notificacoes -H 'x-cron-secret: ${CRON_SECRET}' -H 'Content-Type: application/json' -d '{\"estudioId\": \"<ESTUDIO_ID>\"}'"

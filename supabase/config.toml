@@ -257,3 +257,13 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/webhook-assinatura-nexofy/deno.json"
 entrypoint = "./functions/webhook-assinatura-nexofy/index.ts"
+
+[functions.lista-espera-notificacoes]
+enabled = true
+# Precisa ser false para o cron (autenticado via x-cron-secret, sem JWT — ver
+# AUTORIZAÇÃO em index.ts) conseguir chamar esta function. Mesma lição do bloco
+# [functions.gerar-mensalidades] acima: o config.toml por-function sozinho não
+# basta, este bloco na RAIZ é o que efetivamente vale no deploy.
+verify_jwt = false
+import_map = "./functions/lista-espera-notificacoes/deno.json"
+entrypoint = "./functions/lista-espera-notificacoes/index.ts"
