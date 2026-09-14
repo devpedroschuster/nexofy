@@ -4,7 +4,9 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Building2, Users, DollarSign, TrendingUp } from 'lucide-react';
 import { superAdminService } from '../../../services/superAdminService';
+import { exportarRelatorioPDF, exportarRelatorioXLSX } from '../../../lib/relatorioExport';
 import MetricCard from '../../../components/ui/MetricCard';
+import ExportarRelatorioMenu from '../../../components/shared/ExportarRelatorioMenu';
 import { formatarMoeda } from '../../../lib/utils';
 
 export default function MetricasGlobais() {
@@ -47,11 +49,41 @@ export default function MetricasGlobais() {
     },
   ];
 
+  const kpisRelatorio = cards.map((c) => ({ label: c.label, valor: c.valor }));
+  const nomeBaseRelatorio = `Metricas_Globais_${new Date().toISOString().slice(0, 10)}`;
+
+  function handleExportarPDF() {
+    exportarRelatorioPDF({
+      nomeArquivo: `${nomeBaseRelatorio}.pdf`,
+      titulo: 'Métricas Globais',
+      subtitulo: 'Visão consolidada de todos os estúdios',
+      kpis: kpisRelatorio,
+      secoes: [],
+    });
+  }
+
+  function handleExportarPlanilha() {
+    exportarRelatorioXLSX({
+      nomeArquivo: `${nomeBaseRelatorio}.xlsx`,
+      kpis: kpisRelatorio,
+      secoes: [],
+    });
+  }
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-      {cards.map((c) => (
-        <MetricCard key={c.label} {...c} loading={isLoading} />
-      ))}
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <ExportarRelatorioMenu
+          disabled={isLoading}
+          onExportarPDF={handleExportarPDF}
+          onExportarPlanilha={handleExportarPlanilha}
+        />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {cards.map((c) => (
+          <MetricCard key={c.label} {...c} loading={isLoading} />
+        ))}
+      </div>
     </div>
   );
 }

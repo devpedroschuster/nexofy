@@ -15,9 +15,11 @@ import {
 import { format, subMonths, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatarMoeda } from '../lib/utils';
+import { exportarRelatorioPDF, exportarRelatorioXLSX } from '../lib/relatorioExport';
 import Surface from '../components/ui/Surface';
 import Skeleton from '../components/ui/Skeleton';
 import Badge from '../components/ui/Badge';
+import ExportarRelatorioMenu from '../components/shared/ExportarRelatorioMenu';
 
 // Helpers
 const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
@@ -198,6 +200,89 @@ export default function ResultadoFinanceiro() {
     'Lucro':     parseFloat((h.lucro    ?? 0).toFixed(2)),
   }));
 
+  // Dados formatados para exportação de relatório (PDF/planilha)
+  const kpisRelatorio = useMemo(() => ([
+    { label: 'Receita Recebida', valor: formatarMoeda(dre?.receitasRecebidas ?? 0) },
+    { label: 'Total de Saídas', valor: formatarMoeda(dre?.totalSaidas ?? 0) },
+    { label: 'Lucro Líquido', valor: formatarMoeda(dre?.lucroLiquido ?? 0) },
+    { label: 'Margem Líquida', valor: `${(dre?.margemLiquida ?? 0).toFixed(1)}%` },
+    { label: 'Alunos Ativos', valor: String(dre?.totalAlunos ?? 0) },
+  ]), [dre]);
+
+  const secoesRelatorio = useMemo(() => {
+    const secoes = [];
+    if ((dre?.despesasPorCategoria?.length ?? 0) > 0) {
+      secoes.push({
+        titulo: 'Despesas por Categoria',
+        colunas: [
+          { header: 'Categoria', key: 'categoria' },
+          { header: 'Pago', key: 'pago' },
+          { header: 'Pendente', key: 'pendente' },
+        ],
+        linhas: dre.despesasPorCategoria.map((cat) => ({
+          categoria: cat.categoria,
+          pago: formatarMoeda(cat.pago ?? 0),
+          pendente: formatarMoeda(cat.pendente ?? 0),
+        })),
+      });
+    }
+    if ((dre?.comissoesPorProfessor?.length ?? 0) > 0) {
+      secoes.push({
+        titulo: 'Comissões por Professor',
+        colunas: [
+          { header: 'Professor', key: 'professor' },
+          { header: 'Total', key: 'total' },
+        ],
+        linhas: dre.comissoesPorProfessor.map((p) => ({
+          professor: p.nome,
+          total: formatarMoeda(p.total ?? 0),
+        })),
+      });
+    }
+    if ((dre?.despesas?.length ?? 0) > 0) {
+      secoes.push({
+        titulo: 'Despesas do Período',
+        colunas: [
+          { header: 'Descrição', key: 'descricao' },
+          { header: 'Categoria', key: 'categoria' },
+          { header: 'Vencimento', key: 'vencimento' },
+          { header: 'Valor', key: 'valor' },
+          { header: 'Status', key: 'status' },
+        ],
+        linhas: dre.despesas.map((d) => ({
+          descricao: d.descricao,
+          categoria: d.categoria || '—',
+          vencimento: d.data_vencimento
+            ? format(new Date(d.data_vencimento + 'T12:00:00'), 'dd/MM/yyyy')
+            : '—',
+          valor: formatarMoeda(d.valor),
+          status: d.status,
+        })),
+      });
+    }
+    return secoes;
+  }, [dre]);
+
+  const nomeBaseRelatorio = `Resultado_Financeiro_${MESES_PT[mes]}_${ano}`;
+
+  function handleExportarPDF() {
+    exportarRelatorioPDF({
+      nomeArquivo: `${nomeBaseRelatorio}.pdf`,
+      titulo: 'Resultado Financeiro',
+      subtitulo: `${MESES_PT[mes]} ${ano}`,
+      kpis: kpisRelatorio,
+      secoes: secoesRelatorio,
+    });
+  }
+
+  function handleExportarPlanilha() {
+    exportarRelatorioXLSX({
+      nomeArquivo: `${nomeBaseRelatorio}.xlsx`,
+      kpis: kpisRelatorio,
+      secoes: secoesRelatorio,
+    });
+  }
+
   // Render
   return (
     <div className="p-6 md:p-8 space-y-8 animate-in fade-in duration-500 bg-background min-h-screen">
@@ -216,24 +301,32 @@ export default function ResultadoFinanceiro() {
           </p>
         </div>
 
-        {/* Navegador de mês */}
-        <div className="flex items-center gap-3 bg-card border border-border rounded-2xl px-2 py-1.5 shadow-sm">
-          <button
-            onClick={navAnterior}
-            className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <span className="font-black text-foreground text-sm w-36 text-center capitalize">
-            {format(mesRef, 'MMMM yyyy', { locale: ptBR })}
-          </span>
-          <button
-            onClick={navProximo}
-            disabled={ehMesAtual}
-            className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
-          >
-            <ChevronRight size={18} />
-          </button>
+        <div className="flex items-center gap-3">
+          {/* Navegador de mês */}
+          <div className="flex items-center gap-3 bg-card border border-border rounded-2xl px-2 py-1.5 shadow-sm">
+            <button
+              onClick={navAnterior}
+              className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <span className="font-black text-foreground text-sm w-36 text-center capitalize">
+              {format(mesRef, 'MMMM yyyy', { locale: ptBR })}
+            </span>
+            <button
+              onClick={navProximo}
+              disabled={ehMesAtual}
+              className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+
+          <ExportarRelatorioMenu
+            disabled={loadingDRE || !dre}
+            onExportarPDF={handleExportarPDF}
+            onExportarPlanilha={handleExportarPlanilha}
+          />
         </div>
       </div>
 

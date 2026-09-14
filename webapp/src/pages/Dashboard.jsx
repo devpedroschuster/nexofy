@@ -9,11 +9,13 @@ import {
 import { addDays, format, startOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatarMoeda } from '../lib/utils';
+import { exportarRelatorioPDF, exportarRelatorioXLSX } from '../lib/relatorioExport';
 import Surface from '../components/ui/Surface';
 import Skeleton from '../components/ui/Skeleton';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import OnboardingChecklist from '../components/shared/OnboardingChecklist';
+import ExportarRelatorioMenu from '../components/shared/ExportarRelatorioMenu';
 import Modal, { useModal } from '../components/ui/Modal';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -171,6 +173,83 @@ export default function Dashboard() {
   const nomesMes = format(agora, 'MMMM', { locale: ptBR });
   const nomesMesCapitalizado = nomesMes.charAt(0).toUpperCase() + nomesMes.slice(1);
 
+  // Dados formatados para exportação de relatório (PDF/planilha)
+  const kpisRelatorio = useMemo(() => ([
+    { label: 'Receita do Mês', valor: formatarMoeda(faturamentoMes) },
+    { label: 'Alunos Ativos', valor: String(totalAlunos) },
+    { label: 'Pagamentos em Atraso', valor: `${listaInadimplentes.length} (${formatarMoeda(inadimplenciaTotal)})` },
+  ]), [faturamentoMes, totalAlunos, listaInadimplentes, inadimplenciaTotal]);
+
+  const secoesRelatorio = useMemo(() => {
+    const secoes = [];
+    if (listaInadimplentes.length > 0) {
+      secoes.push({
+        titulo: 'Pagamentos em Atraso',
+        colunas: [
+          { header: 'Aluno', key: 'aluno' },
+          { header: 'Vencimento', key: 'vencimento' },
+          { header: 'Valor', key: 'valor' },
+        ],
+        linhas: listaInadimplentes.map((item) => ({
+          aluno: item.alunos?.nome_completo || '—',
+          vencimento: format(new Date(item.data_vencimento + 'T12:00:00'), 'dd/MM/yyyy'),
+          valor: formatarMoeda(item.valor_pago),
+        })),
+      });
+    }
+    if (alunosPlanosVencendo.length > 0) {
+      secoes.push({
+        titulo: 'Planos Vencendo em 7 dias',
+        colunas: [
+          { header: 'Aluno', key: 'aluno' },
+          { header: 'Vencimento', key: 'vencimento' },
+        ],
+        linhas: alunosPlanosVencendo.map((a) => ({
+          aluno: a.nome_completo,
+          vencimento: format(new Date(a.data_fim_plano + 'T12:00:00'), 'dd/MM/yyyy'),
+        })),
+      });
+    }
+    if (aniversariantesHoje.length + aniversariantesEmBreve.length > 0) {
+      secoes.push({
+        titulo: 'Aniversariantes (7 dias)',
+        colunas: [
+          { header: 'Aluno', key: 'aluno' },
+          { header: 'Data', key: 'data' },
+        ],
+        linhas: [
+          ...aniversariantesHoje.map((a) => ({ aluno: a.nome_completo, data: 'Hoje' })),
+          ...aniversariantesEmBreve.map((a) => {
+            const [, m, d] = a.data_nascimento.split('-').map(Number);
+            const dataAniv = new Date(agora.getFullYear(), m - 1, d);
+            return { aluno: a.nome_completo, data: format(dataAniv, "dd/MM") };
+          }),
+        ],
+      });
+    }
+    return secoes;
+  }, [listaInadimplentes, alunosPlanosVencendo, aniversariantesHoje, aniversariantesEmBreve, agora]);
+
+  const nomeBaseRelatorio = `Painel_de_Avisos_${format(agora, 'dd-MM-yyyy')}`;
+
+  function handleExportarPDF() {
+    exportarRelatorioPDF({
+      nomeArquivo: `${nomeBaseRelatorio}.pdf`,
+      titulo: 'Painel de Avisos',
+      subtitulo: format(agora, "dd 'de' MMMM 'de' yyyy", { locale: ptBR }),
+      kpis: kpisRelatorio,
+      secoes: secoesRelatorio,
+    });
+  }
+
+  function handleExportarPlanilha() {
+    exportarRelatorioXLSX({
+      nomeArquivo: `${nomeBaseRelatorio}.xlsx`,
+      kpis: kpisRelatorio,
+      secoes: secoesRelatorio,
+    });
+  }
+
    const handleCobranca = (aluno, vencimento, valor) => {
     const link = gerarLinkWhatsApp(
       aluno?.telefone,
@@ -224,11 +303,18 @@ export default function Dashboard() {
               .replace(/^./, c => c.toUpperCase())}
           </p>
         </div>
-        <Link to="/resultado-financeiro">
-          <Button variant="outline" size="sm" rightIcon={<ChevronRight size={16} />}>
-            Ver DRE do mês
-          </Button>
-        </Link>
+        <div className="flex items-center gap-3">
+          <ExportarRelatorioMenu
+            disabled={isLoading}
+            onExportarPDF={handleExportarPDF}
+            onExportarPlanilha={handleExportarPlanilha}
+          />
+          <Link to="/resultado-financeiro">
+            <Button variant="outline" size="sm" rightIcon={<ChevronRight size={16} />}>
+              Ver DRE do mês
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <OnboardingChecklist estudioId={idEfetivo} key={idEfetivo} />
