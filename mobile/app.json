@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Nexofy",
+    "slug": "nexofy-mobile",
+    "scheme": "nexofy",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#FDF8F5",
+    "newArchEnabled": true,
+    "ios": { "supportsTablet": false, "bundleIdentifier": "com.nexofy.mobile" },
+    "android": {
+      "package": "com.nexofy.mobile"
+    },
+    "plugins": ["expo-secure-store"],
+    "extra": {
+      "eas": { "projectId": "REPLACE_WITH_EAS_PROJECT_ID" }
+    }
+  }
+}
