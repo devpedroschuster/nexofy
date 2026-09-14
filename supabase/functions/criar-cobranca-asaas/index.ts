@@ -97,22 +97,31 @@ serve(withSentry("criar-cobranca-asaas", async (req) => {
   // 1. Busca aluno
   const { data: aluno, error: alunoErr } = await supabase
     .from('alunos')
-    .select('id, nome, email, cpf, telefone, asaas_customer_id, estudio_id')
+    .select('id, nome, email, cpf, telefone, asaas_customer_id, estudio_id, auth_id')
     .eq('id', aluno_id)
     .maybeSingle()
 
   if (alunoErr || !aluno) return response({ erro: 'Aluno não encontrado.' }, 404)
 
-  // ISOLAMENTO MULTI-TENANT
-  const { data: membro } = await supabase
-    .from('estudio_membros')
-    .select('role')
-    .eq('user_id', user.id)
-    .eq('estudio_id', aluno.estudio_id)
-    .maybeSingle()
+  // AUTORIZAÇÃO: admin/super_admin do estúdio (fluxo original, cobrança
+  // manual pelo operador) OU o próprio aluno gerando a cobrança da própria
+  // mensalidade (app mobile — ver docs/superpowers/specs/2026-09-09-app-mobile-area-aluno-design.md).
+  // `auth.uid() === aluno.auth_id` é comparação de UUID direta — sem risco de
+  // NULL-bypass (v.g. aluno sem primeiro acesso) porque user.id acima já veio
+  // de userClient.auth.getUser(), nunca é null neste ponto.
+  const ehOProprioAluno = aluno.auth_id === user.id
 
-  if (!membro || !['admin', 'super_admin'].includes(membro.role)) {
-    return response({ erro: 'Acesso negado.' }, 403)
+  if (!ehOProprioAluno) {
+    const { data: membro } = await supabase
+      .from('estudio_membros')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('estudio_id', aluno.estudio_id)
+      .maybeSingle()
+
+    if (!membro || !['admin', 'super_admin'].includes(membro.role)) {
+      return response({ erro: 'Acesso negado.' }, 403)
+    }
   }
 
   // 2. Se for mensalidade, busca duracao_meses do plano (necessário pro periodo_fim)
