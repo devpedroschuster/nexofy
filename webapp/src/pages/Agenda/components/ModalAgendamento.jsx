@@ -27,10 +27,14 @@ export default function ModalAgendamento({
   handleAgendarAluno,
   savingAgendamento, infoVaga, verificandoVaga,
   modalLotacao, confirmarAgendamentoLotado, cancelarAgendamentoLotado,
+  handleAdicionarNaFila,
   modalInadimplente, setModalInadimplente,
 }) {
 
   const configModal = resolverConfigModal(modalLotacao?.tipo, modalLotacao?.msg);
+  // Lista de espera exige um aluno cadastrado (FK pra `alunos`) — visitantes
+  // (aula experimental) não entram na fila.
+  const podeEntrarNaFila = modalLotacao?.tipo === 'lotacao' && agendamentoForm.tipo === 'cadastrado' && !!agendamentoForm.aluno_id;
 
   React.useEffect(() => {
     if (agendamentoForm.aula_id && !aulas.some(a => a.id === agendamentoForm.aula_id)) {
@@ -193,6 +197,7 @@ export default function ModalAgendamento({
           textoCancelar="Cancelar"
           onConfirm={confirmarAgendamentoLotado}
           onClose={cancelarAgendamentoLotado}
+          acaoExtra={podeEntrarNaFila ? { texto: 'Adicionar à lista de espera', onClick: handleAdicionarNaFila } : undefined}
         />
       )}
       {modalInadimplente?.isOpen && (
