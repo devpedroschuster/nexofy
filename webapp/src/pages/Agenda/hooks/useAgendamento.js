@@ -5,6 +5,7 @@ import { ptBR } from 'date-fns/locale';
 import { agendamentoService } from '../../../services/agendamentoService';
 import { presencaService } from '../../../services/presencaService';
 import { leadsService } from '../../../services/leadsService';
+import { listaEsperaService } from '../../../services/listaEsperaService';
 import { showToast } from '../../../components/shared/Toast';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -281,10 +282,31 @@ if (motivo === 'lotacao' || motivo === 'plano') {
     setSavingAgendamento(false);
   };
 
+  const handleAdicionarNaFila = async () => {
+    setModalLotacao({ isOpen: false, msg: '', tipo: '' });
+    try {
+      await listaEsperaService.entrar(
+        { alunoId: agendamentoForm.aluno_id, aulaId: agendamentoForm.aula_id, dataAula: agendamentoForm.data_aula },
+        estudioId
+      );
+      showToast.success('Aluno adicionado à lista de espera. Será agendado automaticamente quando surgir uma vaga.');
+      setAgendamentoForm({
+        tipo: 'cadastrado', aluno_id: '', nome_visitante: '', aula_id: '', data_aula: '',
+        _nomeAluno: '', _nomeAtividade: '',
+      });
+      if (onSucesso) onSucesso();
+    } catch (err) {
+      showToast.error(err.message || 'Não foi possível adicionar à lista de espera.');
+    } finally {
+      setSavingAgendamento(false);
+    }
+  };
+
   return {
     agendamentoForm, setAgendamentoForm, handleAgendarAluno,
     savingAgendamento, infoVaga, verificandoVaga,
     modalLotacao, confirmarAgendamentoLotado, cancelarAgendamentoLotado,
+    handleAdicionarNaFila,
     modalInadimplente, setModalInadimplente,
   };
 }

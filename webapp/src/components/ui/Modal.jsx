@@ -98,6 +98,7 @@ export function ModalConfirmacao({
   textoCancelar = 'Cancelar',
   tipo = 'danger',
   loading = false,
+  acaoExtra, // { texto: string, onClick: () => Promise<void> | void } — botão extra opcional
 }) {
   const _aberto = aberto ?? isOpen ?? false;
   const _fechar = fechar ?? onClose ?? (() => {});
@@ -105,7 +106,23 @@ export function ModalConfirmacao({
   // NOVO: erro visível ao usuário quando onConfirm falha, em vez de só
   // console.error (falha silenciosa da versão anterior).
   const [erroConfirmacao, setErroConfirmacao] = React.useState('');
+  const [executandoExtra, setExecutandoExtra] = React.useState(false);
   const isLoading = loading || confirmando;
+
+  const handleAcaoExtra = async () => {
+    if (!acaoExtra) return;
+    setExecutandoExtra(true);
+    setErroConfirmacao('');
+    try {
+      await acaoExtra.onClick();
+      _fechar();
+    } catch (err) {
+      console.error('ModalConfirmacao: acaoExtra falhou', err);
+      setErroConfirmacao(err?.message || 'Não foi possível concluir a ação. Tente novamente.');
+    } finally {
+      setExecutandoExtra(false);
+    }
+  };
 
   // ModalConfirmacao não desmonta quando fecha (só o <Modal> interno
   // retorna null) — sem isso, o erro de uma tentativa anterior
@@ -159,19 +176,33 @@ export function ModalConfirmacao({
           </p>
         )}
 
-        <div className="flex gap-3 pt-6">
-          <Button variant="outline" fullWidth size="lg" onClick={_fechar} disabled={isLoading}>
-            {textoCancelar}
-          </Button>
-          <Button
-            variant={btnVariant[tipo]}
-            fullWidth size="lg"
-            loading={isLoading}
-            onClick={handleConfirm}
-            className={cn(tipo === 'warning' && 'bg-warning text-warning-foreground hover:opacity-90 hover:bg-warning')}
-          >
-            {textoConfirmar}
-          </Button>
+        <div className="space-y-3 pt-6">
+          {acaoExtra && (
+            <Button
+              variant="outline"
+              fullWidth size="lg"
+              loading={executandoExtra}
+              disabled={isLoading || executandoExtra}
+              onClick={handleAcaoExtra}
+            >
+              {acaoExtra.texto}
+            </Button>
+          )}
+          <div className="flex gap-3">
+            <Button variant="outline" fullWidth size="lg" onClick={_fechar} disabled={isLoading || executandoExtra}>
+              {textoCancelar}
+            </Button>
+            <Button
+              variant={btnVariant[tipo]}
+              fullWidth size="lg"
+              loading={isLoading}
+              disabled={executandoExtra}
+              onClick={handleConfirm}
+              className={cn(tipo === 'warning' && 'bg-warning text-warning-foreground hover:opacity-90 hover:bg-warning')}
+            >
+              {textoConfirmar}
+            </Button>
+          </div>
         </div>
       </div>
     </Modal>
