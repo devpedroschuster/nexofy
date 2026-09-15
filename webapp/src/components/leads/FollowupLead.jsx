@@ -23,6 +23,30 @@ export default function FollowupLead({ lead, onSalvar, isSalvando }) {
   const [data, setData] = useState(() => paraInputLocal(lead.proximo_followup_em));
   const [nota, setNota] = useState(lead.nota_followup || '');
 
+  // Resincroniza `data`/`nota` quando o follow-up do lead muda por fora
+  // (ex.: outro admin edita e o cache deste componente é atualizado por um
+  // refetch em segundo plano). Ajuste feito durante o render, não em
+  // useEffect, para não deixar o badge mostrar um valor desatualizado por
+  // um frame — mesmo racional de `ObservacaoLead` em `Leads.jsx`. Só
+  // resincroniza fora do modo de edição: com `editando` true, um refetch em
+  // segundo plano não deve apagar silenciosamente uma edição em andamento.
+  const [ultimoFollowup, setUltimoFollowup] = useState({
+    proximoFollowupEm: lead.proximo_followup_em,
+    notaFollowup: lead.nota_followup,
+  });
+  if (
+    !editando &&
+    (lead.proximo_followup_em !== ultimoFollowup.proximoFollowupEm ||
+      lead.nota_followup !== ultimoFollowup.notaFollowup)
+  ) {
+    setUltimoFollowup({
+      proximoFollowupEm: lead.proximo_followup_em,
+      notaFollowup: lead.nota_followup,
+    });
+    setData(paraInputLocal(lead.proximo_followup_em));
+    setNota(lead.nota_followup || '');
+  }
+
   const classificacao = classificarFollowup(lead.proximo_followup_em);
 
   function salvar() {
