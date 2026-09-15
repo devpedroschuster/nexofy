@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { ESTAGIOS_ATIVOS } from '../lib/funilLeads';
 
 // ─────────────────────────────────────────────────────────────────────────
 // leadsService
@@ -10,7 +11,7 @@ import { supabase } from '../lib/supabase';
 
 const SELECT_BASE =
   'id, nome_visitante, telefone_visitante, data_visita, status_conversao, ' +
-  'observacao_lead, aluno_convertido_id, agenda(atividade)';
+  'observacao_lead, aluno_convertido_id, proximo_followup_em, nota_followup, agenda(atividade)';
 
   /**
  * Calcula o intervalo [inicio, fim) de um mês para uso em filtros
@@ -71,7 +72,7 @@ async criarLeadPublico({ nomeVisitante, telefoneVisitante, estudioId }) {
       .from('leads')
       .select(SELECT_BASE)
       .eq('estudio_id', estudioId)
-      .eq('status_conversao', 'pendente')
+      .in('status_conversao', ESTAGIOS_ATIVOS)
       .order('data_visita', { ascending: false });
 
     if (error) throw error;
@@ -89,7 +90,7 @@ async criarLeadPublico({ nomeVisitante, telefoneVisitante, estudioId }) {
       .from('leads')
       .select(SELECT_BASE)
       .eq('estudio_id', estudioId)
-      .eq('status_conversao', 'pendente')
+      .in('status_conversao', ESTAGIOS_ATIVOS)
       .gte('data_visita', inicio)
       .lt('data_visita', fim)
       .order('data_visita', { ascending: false });
@@ -160,7 +161,7 @@ async criarLeadPublico({ nomeVisitante, telefoneVisitante, estudioId }) {
       .from('leads')
       .select('id, data_visita, status_conversao')
       .eq('estudio_id', estudioId)
-      .eq('status_conversao', 'pendente')
+      .in('status_conversao', ESTAGIOS_ATIVOS)
       .order('data_visita', { ascending: false });
 
     if (error) throw error;
@@ -205,6 +206,39 @@ async criarLeadPublico({ nomeVisitante, telefoneVisitante, estudioId }) {
       .update({
         status_conversao: 'convertido',
         aluno_convertido_id: alunoId,
+      })
+      .eq('id', leadId)
+      .eq('estudio_id', estudioId);
+
+    if (error) throw error;
+    return true;
+  },
+
+  /**
+   * Todos os leads (sem filtro de status/período) para montar o kanban
+   * do funil.
+   */
+  async listarLeadsFunil(estudioId) {
+    const { data, error } = await supabase
+      .from('leads')
+      .select(SELECT_BASE)
+      .eq('estudio_id', estudioId)
+      .order('data_visita', { ascending: false });
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Salva/atualiza o follow-up agendado de um lead (data/hora + nota).
+   * `proximoFollowupEm` é uma string ISO ou null para limpar o follow-up.
+   */
+  async atualizarFollowupLead(leadId, { proximoFollowupEm, notaFollowup }, estudioId) {
+    const { error } = await supabase
+      .from('leads')
+      .update({
+        proximo_followup_em: proximoFollowupEm || null,
+        nota_followup: notaFollowup || null,
       })
       .eq('id', leadId)
       .eq('estudio_id', estudioId);
