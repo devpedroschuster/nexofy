@@ -3,6 +3,7 @@ import { leadsService } from '../services/leadsService';
 import { showToast } from '../components/shared/Toast';
 import { Lead } from '../types/leads';
 import { useAuth } from './useAuth';
+import { ESTAGIOS_FINAIS } from '../lib/funilLeads';
 
 export function useLeadsPendentes() {
   const { estudioId } = useAuth();
@@ -68,6 +69,20 @@ export function useHistoricoLeadsPorMes(ano: number, mes: number, enabled = true
     },
     enabled: !!estudioId && enabled, // FIX real: antes o 3º arg passado por Leads.jsx era descartado
     staleTime: 1000 * 60,
+  });
+}
+
+export function useLeadsFunil() {
+  const { estudioId } = useAuth();
+
+  return useQuery<Lead[]>({
+    queryKey: ['leads', estudioId, 'funil'],
+    queryFn: async () => {
+      const data = await leadsService.listarLeadsFunil(estudioId);
+      return data as unknown as Lead[];
+    },
+    enabled: !!estudioId,
+    staleTime: 1000 * 30,
   });
 }
 
@@ -174,26 +189,26 @@ export function useResumoMensalLeadsPendentes() {
 export function useAtualizarStatusLead() {
   const queryClient = useQueryClient();
   const { estudioId } = useAuth();
- 
+
   return useMutation({
-    mutationFn: async ({ id, status }: { id: string, status: 'convertido' | 'perdido' | 'pendente' }) => {
+    mutationFn: async ({ id, status }: { id: string, status: Lead['status_conversao'] }) => {
       if (!estudioId) throw new Error('Estúdio não identificado. Recarregue a página.');
       return await leadsService.atualizarStatusLead(id, status, estudioId);
     },
     onMutate: async ({ id, status }) => {
       await queryClient.cancelQueries({ queryKey: ['leads', estudioId] });
- 
+
       const previousPendentes = queryClient.getQueriesData<Lead[]>({
         queryKey: ['leads', estudioId, 'pendentes'], exact: false,
       });
       const previousHistorico = queryClient.getQueriesData<InfiniteData<Lead[]> | Lead[]>({
         queryKey: ['leads', estudioId, 'historico'], exact: false,
       });
- 
+
       // Listas simples
       queryClient.setQueriesData<Lead[]>({ queryKey: ['leads', estudioId, 'pendentes'], exact: false }, (old) => {
         if (!old) return old;
-        return status !== 'pendente' ? old.filter(l => l.id !== id) : old.map(l => l.id === id ? { ...l, status_conversao: status } : l);
+        return ESTAGIOS_FINAIS.includes(status) ? old.filter(l => l.id !== id) : old.map(l => l.id === id ? { ...l, status_conversao: status } : l);
       });
       queryClient.setQueriesData<Lead[]>({ queryKey: ['leads', estudioId, 'historico', 'mes'], exact: false }, (old) =>
         old?.map(l => l.id === id ? { ...l, status_conversao: status } : l) ?? old
@@ -280,6 +295,45 @@ export function useAtualizarObservacaoLead() {
     },
     onSuccess: () => {
       showToast.success("Observação salva.");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads', estudioId] });
+    },
+  });
+}
+
+export function useAtualizarFollowupLead() {
+  const queryClient = useQueryClient();
+  const { estudioId } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({ id, proximoFollowupEm, notaFollowup }: { id: string, proximoFollowupEm: string | null, notaFollowup: string | null }) => {
+      if (!estudioId) throw new Error('Estúdio não identificado. Recarregue a página.');
+      return await leadsService.atualizarFollowupLead(id, { proximoFollowupEm, notaFollowup }, estudioId);
+    },
+    onMutate: async ({ id, proximoFollowupEm, notaFollowup }) => {
+      await queryClient.cancelQueries({ queryKey: ['leads', estudioId] });
+
+      const previousFunil = queryClient.getQueryData<Lead[]>(['leads', estudioId, 'funil']);
+      const previousPendentes = queryClient.getQueriesData<Lead[]>({ queryKey: ['leads', estudioId, 'pendentes'], exact: false });
+
+      const atualizarLista = (old?: Lead[]) =>
+        old?.map(l => l.id === id ? { ...l, proximo_followup_em: proximoFollowupEm, nota_followup: notaFollowup } : l);
+
+      queryClient.setQueryData<Lead[]>(['leads', estudioId, 'funil'], (old) => atualizarLista(old) ?? old);
+      queryClient.setQueriesData<Lead[]>({ queryKey: ['leads', estudioId, 'pendentes'], exact: false }, (old) => atualizarLista(old) ?? old);
+
+      return { previousFunil, previousPendentes };
+    },
+    onError: (err, variables, context) => {
+      if (context?.previousFunil) {
+        queryClient.setQueryData<Lead[]>(['leads', estudioId, 'funil'], context.previousFunil);
+      }
+      context?.previousPendentes?.forEach(([key, data]) => queryClient.setQueryData(key, data));
+      showToast.error('Erro ao salvar follow-up. Tente novamente.');
+    },
+    onSuccess: () => {
+      showToast.success('Follow-up salvo.');
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['leads', estudioId] });
