@@ -19,6 +19,7 @@ import Button  from '../components/ui/Button';
 import Surface from '../components/ui/Surface';
 import EmptyState from '../components/ui/EmptyState';
 import EstagioDropdown from '../components/leads/EstagioDropdown';
+import FunilLeads from '../components/leads/FunilLeads';
 import { formatarData, formatarDataHora } from '../lib/utils';
 
 // Média histórica de referência para comparação (pode ser ajustada conforme o negócio)
@@ -248,7 +249,7 @@ const {
 
   const isProcessando = (id) => mutationStatus.isPending && mutationStatus.variables?.id === id;
   const isSalvandoObservacao = (id) => mutationObservacao.isPending && mutationObservacao.variables?.id === id;
-  const loading = visaoAtiva === 'cards' ? loadingPendentes : loadingHistorico;
+  const loading = visaoAtiva === 'cards' ? loadingPendentes : visaoAtiva === 'lista' ? loadingHistorico : false;
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in">
@@ -271,6 +272,16 @@ const {
             }`}
           >
             <LayoutGrid size={18} /> Ação ({leadsPendentesTodos.length})
+          </button>
+          <button
+            onClick={() => setVisaoAtiva('funil')}
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black uppercase transition-all ${
+              visaoAtiva === 'funil'
+                ? 'bg-card text-warning shadow-sm border border-border'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <TrendingUp size={18} /> Funil
           </button>
           <button
             onClick={() => setVisaoAtiva('lista')}
@@ -490,6 +501,8 @@ const {
             </div>
           )}
         </div>
+      ) : visaoAtiva === 'funil' ? (
+        <FunilLeads />
       ) : (
         /* Visão Histórico */
         <div className="space-y-4">
