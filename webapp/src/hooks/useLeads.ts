@@ -3,7 +3,7 @@ import { leadsService } from '../services/leadsService';
 import { showToast } from '../components/shared/Toast';
 import { Lead } from '../types/leads';
 import { useAuth } from './useAuth';
-import { ESTAGIOS_FINAIS } from '../lib/funilLeads';
+import { ESTAGIOS_FINAIS, ESTAGIOS_ATIVOS } from '../lib/funilLeads';
 
 export function useLeadsPendentes() {
   const { estudioId } = useAuth();
@@ -92,7 +92,7 @@ export function useLeadsFunil() {
 interface ResumoLead {
   id: string;
   data_visita: string;
-  status_conversao: 'pendente' | 'convertido' | 'perdido';
+  status_conversao: Lead['status_conversao'];
 }
 
 export interface ResumoMensal {
@@ -135,7 +135,7 @@ function agruparPorMes(data: ResumoLead[]): ResumoMensal[] {
     const item = mapa.get(chave)!;
     item.total += 1;
     if (lead.status_conversao === 'convertido') item.convertidos += 1;
-    else if (lead.status_conversao === 'pendente') item.pendentes += 1;
+    else if (ESTAGIOS_ATIVOS.includes(lead.status_conversao)) item.pendentes += 1;
     else if (lead.status_conversao === 'perdido') item.perdidos += 1;
   }
 
