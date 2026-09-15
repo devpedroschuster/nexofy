@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Phone, CheckCircle, XCircle, Clock, RefreshCw, MessageCircle, LayoutGrid, List, X, ChevronDown, TrendingUp, TrendingDown, Minus, Calendar, MessageSquare } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
@@ -18,6 +18,7 @@ import Badge   from '../components/ui/Badge';
 import Button  from '../components/ui/Button';
 import Surface from '../components/ui/Surface';
 import EmptyState from '../components/ui/EmptyState';
+import EstagioDropdown from '../components/leads/EstagioDropdown';
 import { formatarData, formatarDataHora } from '../lib/utils';
 
 // Média histórica de referência para comparação (pode ser ajustada conforme o negócio)
@@ -39,79 +40,6 @@ function dataEhFutura(dataStr) {
   const dataUTC = Date.UTC(ano, mes - 1, dia);
   return dataUTC > hojeUTC;
 }
-
-// ── Dropdown de Status Inline ───────────────────────────────────────────────
-function StatusDropdown({ lead, onAlterarStatus, isProcessando }) {
-  const [aberto, setAberto] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    function handleClickFora(e) {
-      if (ref.current && !ref.current.contains(e.target)) setAberto(false);
-    }
-    if (aberto) document.addEventListener('mousedown', handleClickFora);
-    return () => document.removeEventListener('mousedown', handleClickFora);
-  }, [aberto]);
-
-  const opcoes = [
-    { status: 'convertido', label: 'Convertido', tone: 'success', icon: <CheckCircle size={13} /> },
-    { status: 'pendente',   label: 'Pendente',   tone: 'warning', icon: <Clock size={13} /> },
-    { status: 'perdido',    label: 'Perdido',    tone: 'destructive', icon: <XCircle size={13} /> },
-  ];
-
-  const atual = opcoes.find(o => o.status === lead.status_conversao) ?? opcoes[1];
-
-  if (isProcessando) {
-    return (
-      <Badge tone={atual.tone} variant="soft">
-        <RefreshCw size={12} className="animate-spin" /> {atual.label}
-      </Badge>
-    );
-  }
-
-  return (
-    <div className="relative inline-block" ref={ref}>
-      <button
-        onClick={() => setAberto(v => !v)}
-        title="Alterar status"
-        className="flex items-center gap-1 focus:outline-none group"
-      >
-        <Badge tone={atual.tone} variant="soft" className="cursor-pointer group-hover:opacity-80 transition-opacity">
-          {atual.icon} {atual.label}
-          <ChevronDown size={11} className={`ml-0.5 transition-transform ${aberto ? 'rotate-180' : ''}`} />
-        </Badge>
-      </button>
-
-      {aberto && (
-        <div className="absolute left-0 top-full mt-1 z-50 bg-card border border-border rounded-xl shadow-card overflow-hidden min-w-[140px] animate-in fade-in zoom-in-95">
-          {opcoes.map(({ status, label, tone, icon }) => (
-            <button
-              key={status}
-              disabled={status === lead.status_conversao}
-              onClick={() => {
-                setAberto(false);
-                onAlterarStatus(lead.id, status);
-              }}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-sm font-bold text-left transition-colors
-                ${status === lead.status_conversao
-                  ? 'opacity-40 cursor-default bg-muted'
-                  : 'hover:bg-muted cursor-pointer'
-                }`}
-            >
-              <Badge tone={tone} variant="soft" className="pointer-events-none">
-                {icon} {label}
-              </Badge>
-              {status === lead.status_conversao && (
-                <span className="ml-auto text-[10px] font-black text-muted-foreground uppercase tracking-wide">atual</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-// ───────────────────────────────────────────────────────────────────────────
 
 // ── Seletor de Período (mês/ano) ────────────────────────────────────────────
 function SeletorPeriodo({ resumoMensal, periodoSelecionado, onSelecionarPeriodo, labelTotal = 'experimentais' }) {
@@ -281,12 +209,15 @@ const {
 
   function alterarStatus(leadId, novoStatus) {
     const mensagens = {
+      novo: 'Lead marcado como novo.',
+      contatado: 'Lead marcado como contatado.',
+      aula_agendada: 'Lead marcado como aula agendada.',
+      negociacao: 'Lead marcado como em negociação.',
       convertido: 'Lead marcado como convertido.',
-      perdido:    'Visitante marcado como perdido.',
-      pendente:   'Lead reaberto como pendente.',
+      perdido: 'Visitante marcado como perdido.',
     };
     mutationStatus.mutate({ id: leadId, status: novoStatus }, {
-      onSuccess: () => showToast.success(mensagens[novoStatus] ?? 'Status atualizado.'),
+      onSuccess: () => showToast.success(mensagens[novoStatus] ?? 'Estágio atualizado.'),
     });
   }
 
@@ -629,9 +560,9 @@ const {
                         </Badge>
                       </td>
                       <td className="p-4">
-                        <StatusDropdown
+                        <EstagioDropdown
                           lead={lead}
-                          onAlterarStatus={alterarStatus}
+                          onAlterarEstagio={alterarStatus}
                           isProcessando={isProcessando(lead.id)}
                         />
                       </td>
