@@ -1,6 +1,12 @@
-// mobile-pro/src/screens/Financeiro/FinanceiroScreen.tsx (stub — implementado na Tarefa 12)
+// mobile-pro/src/screens/Financeiro/FinanceiroScreen.tsx
 import React from 'react';
-import { Text, View } from 'react-native';
+import { useSessaoAtual } from '@/features/auth';
+import InadimplenciaAdmin from '@/screens/Financeiro/InadimplenciaAdmin';
+import RepassesProfessor from '@/screens/Financeiro/RepassesProfessor';
+
 export default function FinanceiroScreen() {
-  return <View className="flex-1 items-center justify-center bg-white"><Text>Financeiro</Text></View>;
+  const { papel, estudioId, professorId } = useSessaoAtual();
+  return papel === 'admin'
+    ? <InadimplenciaAdmin estudioId={estudioId} />
+    : <RepassesProfessor estudioId={estudioId} professorId={professorId} />;
 }
