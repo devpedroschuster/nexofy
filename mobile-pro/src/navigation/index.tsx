@@ -1,5 +1,5 @@
 // mobile-pro/src/navigation/index.tsx
-import React from 'react';
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -102,6 +102,14 @@ function AppTabs({ sessao }: { sessao: SessaoAtual }) {
 
 export function RootNavigator() {
   const { papel, estudioId, professorId, nomeUsuario, carregando, papelNaoSuportado } = useSessaoComPapel();
+  const { data: estudio } = useEstudio(estudioId);
+  const aplicarTemaDoEstudio = useThemeStore((s) => s.aplicarTemaDoEstudio);
+  const resetarTema = useThemeStore((s) => s.resetarTema);
+
+  useEffect(() => {
+    if (estudio) aplicarTemaDoEstudio(estudio);
+    else resetarTema();
+  }, [estudio, aplicarTemaDoEstudio, resetarTema]);
 
   if (carregando) return <LoadingState label="Verificando sessão..." />;
 

@@ -32,9 +32,12 @@ export default function RepassesProfessor({ estudioId, professorId }: { estudioI
     if (!repasses) return { total: 0, qtdPaga: 0, qtdPendente: 0 };
     return repasses.reduce(
       (acc, r) => {
-        acc.total += r.valor ?? 0;
-        if (r.status === 'pago') acc.qtdPaga += 1;
-        else acc.qtdPendente += 1;
+        if (r.status === 'pago') {
+          acc.qtdPaga += 1;
+        } else if (r.status !== 'cancelado') {
+          acc.total += r.valor ?? 0;
+          acc.qtdPendente += 1;
+        }
         return acc;
       },
       { total: 0, qtdPaga: 0, qtdPendente: 0 }

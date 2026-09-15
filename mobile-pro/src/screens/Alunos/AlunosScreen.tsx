@@ -4,14 +4,7 @@ import { Search } from 'lucide-react-native';
 import { useSessaoAtual } from '@/features/auth';
 import { useAlunosDoEstudio, useMeusAlunos, type AlunoResumo } from '@/features/alunos';
 import { Badge, Card, Display, EmptyState, ErrorState, LoadingState } from '@/components/ui';
-
-function formatarWhatsApp(telefone: string | null) {
-  if (!telefone) return null;
-  const digits = telefone.replace(/\D/g, '');
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-  if (digits.length === 12 || digits.length === 13) return digits;
-  return null;
-}
+import { formatarWhatsApp } from '@/lib/whatsapp';
 
 function LinhaAluno({ aluno }: { aluno: AlunoResumo }) {
   const whatsapp = formatarWhatsApp(aluno.telefone);

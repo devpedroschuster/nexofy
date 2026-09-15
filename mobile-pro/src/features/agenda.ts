@@ -225,5 +225,26 @@ export function useDesfazerRegistro(estudioId: string | null) {
   });
 }
 
+// Cancela (apaga) um agendamento avulso/lead — port de
+// webapp/src/services/presencaService.js's cancelarAgendamento(id, estudioId).
+// Diferente de useDesfazerRegistro (que reverte o status), esta função
+// apaga a linha de `presencas` por completo. Só faz sentido pra uma linha
+// que já tem registro (avulso/lead); um fixo sem registro não tem o que apagar.
+export function useCancelarAgendamento(estudioId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (aluno: AlunoChamada) => {
+      if (!aluno.registroExiste) return;
+      const { error } = await supabase
+        .from('presencas')
+        .delete()
+        .eq('id', aluno.id_relacao)
+        .eq('estudio_id', estudioId!);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chamada'] }),
+  });
+}
+
 export { deriveEstadoChamada };
 export type { AlunoChamada };

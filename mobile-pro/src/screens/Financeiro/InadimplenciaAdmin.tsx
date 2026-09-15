@@ -4,14 +4,10 @@ import { FlatList, Linking, Text, View } from 'react-native';
 import { MessageCircle } from 'lucide-react-native';
 import { useInadimplencia } from '@/features/financeiro';
 import { Card, Display, EmptyState, ErrorState, LoadingState } from '@/components/ui';
+import { gerarLinkWhatsApp } from '@/lib/whatsapp';
 
 function formatarMoeda(valor: number) {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-function gerarLinkWhatsApp(telefone: string | null | undefined, mensagem: string): string | null {
-  const num = (telefone ?? '').replace(/\D/g, '');
-  if (!num) return null;
-  return `https://wa.me/55${num}?text=${encodeURIComponent(mensagem)}`;
 }
 
 export default function InadimplenciaAdmin({ estudioId }: { estudioId: string }) {

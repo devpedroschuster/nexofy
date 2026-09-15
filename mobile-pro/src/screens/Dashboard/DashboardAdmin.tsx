@@ -6,15 +6,10 @@ import { useDashboardAdmin } from '@/features/dashboard';
 import { useThemeStore } from '@/lib/theme';
 import { Body, Card, CardSkeleton, Display, ErrorState, LoadingState } from '@/components/ui';
 import { fonts } from '@/lib/typography';
+import { gerarLinkWhatsApp } from '@/lib/whatsapp';
 
 function formatarMoeda(valor: number) {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-function gerarLinkWhatsApp(telefone: string | null | undefined, mensagem: string): string | null {
-  const num = (telefone ?? '').replace(/\D/g, '');
-  if (!num) return null;
-  return `https://wa.me/55${num}?text=${encodeURIComponent(mensagem)}`;
 }
 
 export default function DashboardAdmin({ estudioId }: { estudioId: string }) {

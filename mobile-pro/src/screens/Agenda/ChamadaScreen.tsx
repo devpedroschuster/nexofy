@@ -5,6 +5,7 @@ import { useRoute, type RouteProp } from '@react-navigation/native';
 import { useSessaoAtual } from '@/features/auth';
 import {
   deriveEstadoChamada,
+  useCancelarAgendamento,
   useDesfazerRegistro,
   useListaChamada,
   useMarcarPresenca,
@@ -25,9 +26,12 @@ function LinhaAluno({ aluno }: { aluno: AlunoChamada }) {
   const marcarPresenca = useMarcarPresenca(aulaId, dataAula, estudioId);
   const registrarFalta = useRegistrarFalta(aulaId, dataAula, estudioId);
   const desfazer = useDesfazerRegistro(estudioId);
+  const cancelarAgendamento = useCancelarAgendamento(estudioId);
 
   const estado = deriveEstadoChamada(aluno);
-  const processando = marcarPresenca.isPending || registrarFalta.isPending || desfazer.isPending;
+  const processando =
+    marcarPresenca.isPending || registrarFalta.isPending || desfazer.isPending || cancelarAgendamento.isPending;
+  const podeRemover = aluno.tipo !== 'fixo';
 
   return (
     <View className="flex-row items-center justify-between py-3 border-b border-gray-100">
@@ -37,20 +41,32 @@ function LinhaAluno({ aluno }: { aluno: AlunoChamada }) {
           {estado === 'presente' ? 'Presente' : estado === 'falta' ? 'Faltou' : 'Pendente'}
         </Badge>
       </View>
-      {estado === 'pendente' ? (
-        <View className="flex-row gap-2">
-          <Button variant="primary" loading={marcarPresenca.isPending} disabled={processando} onPress={() => marcarPresenca.mutate(aluno)}>
-            Presente
+      <View className="flex-row flex-wrap gap-2 justify-end">
+        {estado === 'pendente' ? (
+          <>
+            <Button variant="primary" loading={marcarPresenca.isPending} disabled={processando} onPress={() => marcarPresenca.mutate(aluno)}>
+              Presente
+            </Button>
+            <Button variant="danger" loading={registrarFalta.isPending} disabled={processando} onPress={() => registrarFalta.mutate({ aluno, tipoFalta: 'nao_avisada' })}>
+              Falta
+            </Button>
+          </>
+        ) : (
+          <Button variant="outline" loading={desfazer.isPending} disabled={processando} onPress={() => desfazer.mutate(aluno)}>
+            Desfazer
           </Button>
-          <Button variant="danger" loading={registrarFalta.isPending} disabled={processando} onPress={() => registrarFalta.mutate({ aluno, tipoFalta: 'nao_avisada' })}>
-            Falta
+        )}
+        {podeRemover && (
+          <Button
+            variant="outline"
+            loading={cancelarAgendamento.isPending}
+            disabled={processando}
+            onPress={() => cancelarAgendamento.mutate(aluno)}
+          >
+            Remover
           </Button>
-        </View>
-      ) : (
-        <Button variant="outline" loading={desfazer.isPending} disabled={processando} onPress={() => desfazer.mutate(aluno)}>
-          Desfazer
-        </Button>
-      )}
+        )}
+      </View>
     </View>
   );
 }
@@ -80,7 +96,9 @@ export default function ChamadaScreen() {
       {lista.length === 0 ? (
         <EmptyState titulo="Sem alunos nessa aula" descricao="Não há fixos, avulsos ou leads agendados pra essa data." />
       ) : (
-        lista.map((aluno) => <LinhaAluno key={aluno.id_relacao} aluno={aluno} />)
+        lista.map((aluno) => (
+          <LinhaAluno key={`${aluno.tipo}-${aluno.registroExiste ? 'registro' : 'fixo'}-${aluno.id_relacao}`} aluno={aluno} />
+        ))
       )}
     </ScrollView>
   );
