@@ -6,7 +6,7 @@
 export const ESTAGIOS_FUNIL = [
   { valor: 'novo', label: 'Novo', tone: 'neutral' },
   { valor: 'contatado', label: 'Contatado', tone: 'info' },
-  { valor: 'aula_agendada', label: 'Aula Agendada', tone: 'brand' },
+  { valor: 'aula_agendada', label: 'Aula Agendada', tone: 'primary' },
   { valor: 'negociacao', label: 'Em Negociação', tone: 'warning' },
   { valor: 'convertido', label: 'Convertido', tone: 'success' },
   { valor: 'perdido', label: 'Perdido', tone: 'destructive' },

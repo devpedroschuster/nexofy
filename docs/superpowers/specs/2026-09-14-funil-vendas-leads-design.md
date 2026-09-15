@@ -124,7 +124,9 @@ migration, tratado separadamente.
 
 - `ESTAGIOS_FUNIL`: array ordenado `{ valor, label, tone }` para os 6
   estágios (tone reaproveita as variantes já existentes de `Badge`:
-  neutral/info/brand/warning/success/destructive).
+  `primary/success/warning/destructive/info/neutral` — não existe tom
+  `brand` em `Badge.jsx`, apesar de código pré-existente em `Leads.jsx`
+  usá-lo por engano e cair silenciosamente em `neutral`).
 - `ESTAGIOS_ATIVOS` = os 4 estágios não-finais (`novo`, `contatado`,
   `aula_agendada`, `negociacao`) — usado para filtrar a visão "Ação".
 - `ESTAGIOS_FINAIS` = `['convertido', 'perdido']` — usado pelo optimistic

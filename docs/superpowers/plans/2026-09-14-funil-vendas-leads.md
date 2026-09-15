@@ -14,7 +14,7 @@
 
 - Projeto Supabase de staging para validar antes do PR: `qjmybxkfjkxttggdjxga` (ver `.env`/`.env.local` do `webapp`). **Não aplicar a migration em produção (`tciiepqmnrrcjnqhspvw`) como parte deste plano** — o RPC muda o valor default que o frontend em produção lê, e o frontend de produção só entende os 3 valores antigos até o deploy desta feature acontecer; promover em produção antes do deploy do frontend quebraria silenciosamente a aba "Ação" da produção atual (leads novos sumiriam do filtro `status_conversao = 'pendente'`). Isso fica para o momento do deploy real (pós-merge), documentado no PR.
 - Sem dependência nova no `package.json` (nada de biblioteca de drag-and-drop).
-- Reaproveitar os componentes de UI existentes (`Badge`, `Button`, `Surface`, `EmptyState`) e as `tone`s já suportadas por `Badge` (neutral/info/brand/warning/success/destructive) — não criar variantes novas de cor.
+- Reaproveitar os componentes de UI existentes (`Badge`, `Button`, `Surface`, `EmptyState`) e as `tone`s já suportadas por `Badge` (`primary/success/warning/destructive/info/neutral` — conferido em `webapp/src/components/ui/Badge.jsx`; **não existe tom `brand`**, apesar de código pré-existente em `Leads.jsx` usá-lo por engano e cair silenciosamente em `neutral`) — não criar variantes novas de cor.
 - Nomenclatura em português, consistente com o resto do arquivo (`estagio`, `followup`, `agendado`).
 - Todo código roda em `webapp/` — comandos abaixo (`npm run test`, `npm run lint`, `npm run build`) assumem `cwd = webapp/`.
 
@@ -209,7 +209,7 @@ Expected: FAIL com "Failed to resolve import './funilLeads'" (ou similar — mó
 export const ESTAGIOS_FUNIL = [
   { valor: 'novo', label: 'Novo', tone: 'neutral' },
   { valor: 'contatado', label: 'Contatado', tone: 'info' },
-  { valor: 'aula_agendada', label: 'Aula Agendada', tone: 'brand' },
+  { valor: 'aula_agendada', label: 'Aula Agendada', tone: 'primary' },
   { valor: 'negociacao', label: 'Em Negociação', tone: 'warning' },
   { valor: 'convertido', label: 'Convertido', tone: 'success' },
   { valor: 'perdido', label: 'Perdido', tone: 'destructive' },
