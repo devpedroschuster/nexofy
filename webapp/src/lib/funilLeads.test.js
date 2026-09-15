@@ -23,6 +23,15 @@ describe('classificarFollowup', () => {
   it('retorna "agendado" quando é um dia futuro', () => {
     expect(classificarFollowup('2026-09-20T09:00:00-03:00', agora)).toBe('agendado');
   });
+
+  it('retorna "hoje" quando o instante é exatamente igual a "agora" (limite estrito)', () => {
+    expect(classificarFollowup(agora.toISOString(), agora)).toBe('hoje');
+  });
+
+  it('usa `agora = new Date()` como padrão quando o 2º argumento não é passado', () => {
+    const futuro = new Date(Date.now() + 86400000).toISOString();
+    expect(classificarFollowup(futuro)).toBe('agendado');
+  });
 });
 
 describe('ESTAGIOS_FUNIL', () => {
