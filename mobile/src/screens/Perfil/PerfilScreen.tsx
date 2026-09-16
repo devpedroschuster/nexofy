@@ -122,9 +122,9 @@ export default function PerfilScreen() {
               {aluno.avatar_url ? (
                 <Image source={{ uri: aluno.avatar_url }} className="w-24 h-24" />
               ) : (
-                <Text style={{ color: tokens.priText }} className="text-2xl font-black">
+                <Display style={{ color: tokens.priText, fontSize: 24, fontFamily: fonts.displayBlack }}>
                   {iniciais(aluno.nome_completo)}
-                </Text>
+                </Display>
               )}
             </View>
             <View
@@ -143,18 +143,18 @@ export default function PerfilScreen() {
 
       <Card>
         <View className="flex-row justify-between items-center mb-4">
-          <Text className="text-xs font-black text-gray-400 uppercase tracking-widest">Dados pessoais</Text>
+          <Body style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1 }}>Dados pessoais</Body>
           {!modoEdicao && (
-            <Text onPress={iniciarEdicao} style={{ color: tokens.pri }} className="text-xs font-bold">
+            <Body onPress={iniciarEdicao} style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: tokens.pri }}>
               Editar
-            </Text>
+            </Body>
           )}
         </View>
 
-        <Text className="text-xs text-gray-400 mb-1">E-mail</Text>
-        <Text className="text-gray-700 font-semibold mb-3">{aluno.email}</Text>
+        <Body style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>E-mail</Body>
+        <Body style={{ fontFamily: fonts.bodySemibold, color: '#374151', marginBottom: 12 }}>{aluno.email}</Body>
 
-        <Text className="text-xs text-gray-400 mb-1">Telefone</Text>
+        <Body style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>Telefone</Body>
         {modoEdicao ? (
           <TextInput
             className="border border-gray-200 rounded-xl px-3 py-2 mb-3"
@@ -163,10 +163,10 @@ export default function PerfilScreen() {
             placeholder="(00) 00000-0000"
           />
         ) : (
-          <Text className="text-gray-700 font-semibold mb-3">{aluno.telefone ?? 'Não informado'}</Text>
+          <Body style={{ fontFamily: fonts.bodySemibold, color: '#374151', marginBottom: 12 }}>{aluno.telefone ?? 'Não informado'}</Body>
         )}
 
-        <Text className="text-xs text-gray-400 mb-1">CPF</Text>
+        <Body style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>CPF</Body>
         {modoEdicao ? (
           <TextInput
             className="border border-gray-200 rounded-xl px-3 py-2 mb-3"
@@ -175,10 +175,10 @@ export default function PerfilScreen() {
             placeholder="000.000.000-00"
           />
         ) : (
-          <Text className="text-gray-700 font-semibold mb-3">{aluno.cpf ?? 'Não informado'}</Text>
+          <Body style={{ fontFamily: fonts.bodySemibold, color: '#374151', marginBottom: 12 }}>{aluno.cpf ?? 'Não informado'}</Body>
         )}
 
-        <Text className="text-xs text-gray-400 mb-1">Data de nascimento</Text>
+        <Body style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>Data de nascimento</Body>
         {modoEdicao ? (
           <TextInput
             className="border border-gray-200 rounded-xl px-3 py-2"
@@ -187,7 +187,7 @@ export default function PerfilScreen() {
             placeholder="AAAA-MM-DD"
           />
         ) : (
-          <Text className="text-gray-700 font-semibold">{aluno.data_nascimento ?? 'Não informado'}</Text>
+          <Body style={{ fontFamily: fonts.bodySemibold, color: '#374151' }}>{aluno.data_nascimento ?? 'Não informado'}</Body>
         )}
 
         {modoEdicao && (
@@ -203,10 +203,10 @@ export default function PerfilScreen() {
       </Card>
 
       <Card>
-        <Text className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">Meus dados (LGPD)</Text>
-        <Text className="text-gray-500 text-sm mb-4">
+        <Body style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>Meus dados (LGPD)</Body>
+        <Body style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>
           Baixe uma cópia dos seus dados ou solicite a exclusão da sua conta.
-        </Text>
+        </Body>
         <View className="gap-3">
           <Button variant="outline" loading={exportarDados.isPending} onPress={handleExportarDados}>
             Baixar meus dados

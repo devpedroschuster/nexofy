@@ -1,7 +1,7 @@
 // src/components/ui/Badge.jsx
 // ─── Midnight Indigo · Badge ──────────────────────────────────────────────────
 //
-// Tons semânticos: primary | success | warning | destructive | info | neutral
+// Tons semânticos: primary | brand | success | warning | destructive | info | neutral
 // Variantes visuais: soft (padrão) | solid | outline | premium
 //
 // Soft  → fundo com opacidade 12%, texto na cor semântica — leitura confortável
@@ -16,6 +16,14 @@ import { cn } from '../../lib/cn';
 /* Mapa: tone → classes por variante */
 const TONES = {
   primary: {
+    soft:    'bg-primary-soft text-primary',
+    solid:   'bg-primary text-primary-foreground',
+    outline: 'border border-primary/60 text-primary',
+  },
+  /* 'brand' é um alias de 'primary' — mesma cor, nome usado em outros
+   * componentes do design system (KPICard, CardMetrica). Existe aqui
+   * para que <Badge tone="brand"> não caia silenciosamente em neutral. */
+  brand: {
     soft:    'bg-primary-soft text-primary',
     solid:   'bg-primary text-primary-foreground',
     outline: 'border border-primary/60 text-primary',
