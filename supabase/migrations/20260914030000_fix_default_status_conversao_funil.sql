@@ -1,0 +1,12 @@
+-- Corrige o DEFAULT de leads.status_conversao, esquecido na migration
+-- anterior (20260914020000): o CHECK foi ampliado pros 6 estágios do
+-- funil, mas o DEFAULT continuava 'pendente' — um valor que o CHECK
+-- novo não aceita mais. Qualquer INSERT que omita a coluna (ex.: um
+-- insert manual pelo Supabase Studio, ou uma RPC futura que esqueça de
+-- setar o estágio) falharia com 23514 em vez de cair num valor válido.
+--
+-- IMPORTANTE (ordem de deploy): assim como a migration anterior, esta
+-- só deve ser promovida pra produção junto com (ou depois de) o deploy
+-- do frontend desta feature — não isoladamente antes. Ver
+-- docs/DEPLOY.md seção 1 e a nota de exceção lá.
+alter table public.leads alter column status_conversao set default 'novo';

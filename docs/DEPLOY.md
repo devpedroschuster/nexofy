@@ -41,6 +41,21 @@ roda, antes de qualquer deploy de código — a janela de erro começa antes
 mesmo do primeiro deploy. Migration aditiva elimina essa janela: código
 antigo e novo convivem com o mesmo schema até o passo 4.
 
+**Exceção:** as migrations `supabase/migrations/20260914020000_funil_vendas_estagios_leads.sql`
+e sua follow-up `supabase/migrations/20260914030000_fix_default_status_conversao_funil.sql`
+são aditivas no sentido do CI (não fazem `DROP`/`RENAME` de nada), mas
+não seguem a regra "migration first" acima: a RPC alterada por elas
+(`criar_lead_com_presenca`) muda o *valor* gravado em `status_conversao`
+pra novos leads (de `'pendente'` pros 6 estágios do funil), e o frontend
+ainda em produção no momento em que essa migration rodar sozinha
+continua filtrando a aba "Ação" pelo valor antigo `'pendente'` — ou
+seja, aplicar só a migration em produção, antes do deploy do frontend
+desta feature, faz novos leads pararem de aparecer nessa aba
+silenciosamente (sem erro, sem exception, só sumindo da lista). Por
+isso essas duas migrations só podem ser promovidas pra produção junto
+com (ou depois de) o deploy do frontend do funil de vendas — nunca de
+forma isolada, antes dele.
+
 Essa disciplina de staging-first do passo 1 já é reforçada automaticamente
 pelo CI: o job **`Supabase DB Diff (staging)`** (`.github/workflows/ci.yml`,
 script `scripts/check-db-diff.sh`) roda `supabase db diff` contra staging em

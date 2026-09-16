@@ -14,7 +14,7 @@
 
 - Projeto Supabase de staging para validar antes do PR: `qjmybxkfjkxttggdjxga` (ver `.env`/`.env.local` do `webapp`). **Não aplicar a migration em produção (`tciiepqmnrrcjnqhspvw`) como parte deste plano** — o RPC muda o valor default que o frontend em produção lê, e o frontend de produção só entende os 3 valores antigos até o deploy desta feature acontecer; promover em produção antes do deploy do frontend quebraria silenciosamente a aba "Ação" da produção atual (leads novos sumiriam do filtro `status_conversao = 'pendente'`). Isso fica para o momento do deploy real (pós-merge), documentado no PR.
 - Sem dependência nova no `package.json` (nada de biblioteca de drag-and-drop).
-- Reaproveitar os componentes de UI existentes (`Badge`, `Button`, `Surface`, `EmptyState`) e as `tone`s já suportadas por `Badge` (neutral/info/brand/warning/success/destructive) — não criar variantes novas de cor.
+- Reaproveitar os componentes de UI existentes (`Badge`, `Button`, `Surface`, `EmptyState`) e as `tone`s já suportadas por `Badge` (`primary/success/warning/destructive/info/neutral` — conferido em `webapp/src/components/ui/Badge.jsx`; **não existe tom `brand`**, apesar de código pré-existente em `Leads.jsx` usá-lo por engano e cair silenciosamente em `neutral`) — não criar variantes novas de cor.
 - Nomenclatura em português, consistente com o resto do arquivo (`estagio`, `followup`, `agendado`).
 - Todo código roda em `webapp/` — comandos abaixo (`npm run test`, `npm run lint`, `npm run build`) assumem `cwd = webapp/`.
 
@@ -31,13 +31,14 @@
 - [ ] **Step 1: Escrever o arquivo de migration**
 
 ```sql
--- 1. Amplia o CHECK de status_conversao para os estágios do funil.
+-- 1. Remove o CHECK antigo primeiro — enquanto não existe nenhum CHECK
+--    sobre status_conversao, a coluna aceita qualquer texto, o que deixa
+--    o backfill do passo 2 livre para gravar os novos valores. Rodar
+--    ADD CONSTRAINT antes do backfill falha contra as linhas 'pendente'
+--    ainda não migradas; rodar o UPDATE antes do DROP falha contra a
+--    constraint ANTIGA, que não conhece 'aula_agendada'/'novo'. A ordem
+--    DROP → UPDATE → ADD é a única que funciona nos dois lados.
 alter table public.leads drop constraint leads_status_conversao_check;
-alter table public.leads add constraint leads_status_conversao_check
-  check (status_conversao = any (array[
-    'novo', 'contatado', 'aula_agendada', 'negociacao',
-    'convertido', 'perdido'
-  ]));
 
 -- 2. Backfill dos leads existentes com 'pendente': quem já tem aula/data
 --    marcada vira 'aula_agendada'; os demais viram 'novo'.
@@ -48,12 +49,21 @@ update public.leads
   end
   where status_conversao = 'pendente';
 
--- 3. Campos do follow-up agendado.
+-- 3. Amplia o CHECK de status_conversao para os estágios do funil —
+--    só agora, com todas as linhas já conformes ao novo conjunto de
+--    valores.
+alter table public.leads add constraint leads_status_conversao_check
+  check (status_conversao = any (array[
+    'novo', 'contatado', 'aula_agendada', 'negociacao',
+    'convertido', 'perdido'
+  ]));
+
+-- 4. Campos do follow-up agendado.
 alter table public.leads
   add column proximo_followup_em timestamptz null,
   add column nota_followup text null;
 
--- 4. criar_lead_com_presenca passa a definir o estágio inicial conforme
+-- 5. criar_lead_com_presenca passa a definir o estágio inicial conforme
 --    o lead já nasce com aula/data vinculada ou não.
 create or replace function public.criar_lead_com_presenca(
   p_estudio_id uuid, p_nome text, p_telefone text,
@@ -199,7 +209,7 @@ Expected: FAIL com "Failed to resolve import './funilLeads'" (ou similar — mó
 export const ESTAGIOS_FUNIL = [
   { valor: 'novo', label: 'Novo', tone: 'neutral' },
   { valor: 'contatado', label: 'Contatado', tone: 'info' },
-  { valor: 'aula_agendada', label: 'Aula Agendada', tone: 'brand' },
+  { valor: 'aula_agendada', label: 'Aula Agendada', tone: 'primary' },
   { valor: 'negociacao', label: 'Em Negociação', tone: 'warning' },
   { valor: 'convertido', label: 'Convertido', tone: 'success' },
   { valor: 'perdido', label: 'Perdido', tone: 'destructive' },
