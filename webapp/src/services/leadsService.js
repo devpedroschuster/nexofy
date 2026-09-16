@@ -50,20 +50,21 @@ export const leadsService = {
     return data;
   },
 
+// PED-192: usa uma RPC dedicada (`criar_lead_publico`), sem checagem de
+// admin/professor e sem o segundo insert em `presencas` — a captação da
+// landing page é anônima (sem sessão) e não tem aula/data vinculada, então
+// reaproveitar `criar_lead_com_presenca` (staff-only, exige aula_id/data
+// para o registro de presença) sempre falhava: `anon` nem tem EXECUTE
+// nessa RPC, e ainda que tivesse, `leads.data_visita`/`presencas.aula_id`/
+// `presencas.data_aula` são NOT NULL.
 async criarLeadPublico({ nomeVisitante, telefoneVisitante, estudioId }) {
-  const { data, error } = await supabase.rpc('criar_lead_com_presenca', {
-    p_estudio_id:  estudioId,
-    p_nome:        nomeVisitante,
-    p_telefone:    telefoneVisitante || null,
-    p_aula_id:     null,
-    p_data_visita: null,
+  const { data, error } = await supabase.rpc('criar_lead_publico', {
+    p_estudio_id: estudioId,
+    p_nome:       nomeVisitante,
+    p_telefone:   telefoneVisitante || null,
   });
 
-  if (error) {
-    if (error.code === '23505')
-      throw new Error('Este visitante já possui um agendamento nesta turma e data.');
-    throw error;
-  }
+  if (error) throw error;
   return data;
 },
 

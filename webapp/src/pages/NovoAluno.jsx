@@ -12,6 +12,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as Sentry from '@sentry/react';
 
 import { alunosService } from '../services/alunosService';
+import { leadsService } from '../services/leadsService';
 import { alunoSchema } from '../lib/validation';
 import { formatarCPF, validarCPF, formatarTelefone, ehMenorDeIdade } from '../lib/utils';
 import { supabase } from '../lib/supabase';
@@ -864,16 +865,21 @@ export default function NovoAluno() {
       }
 
       // Lead conversion
-      // FIX: sem .eq('estudio_id', idEfetivo) qualquer id de "presenca" informado
-      // via location.state poderia ser atualizado, mesmo de outro tenant (IDOR).
-      // O erro também deixa de ser ignorado silenciosamente.
-       if (leadParaConversao?.id) {
-        const payload = { status_conversao: 'convertido' };
-        if (novoAlunoId) payload.aluno_id = novoAlunoId;
-        const { error: errConversao } = await supabase
-          .from('presencas').update(payload)
-          .eq('id', leadParaConversao.id).eq('estudio_id', idEfetivo);
-        if (errConversao) console.error('Erro ao converter lead:', errConversao);
+      // PED-195: o update mirava `presencas` (sem coluna status_conversao,
+      // e leadParaConversao.id é um id de `leads` — tabelas diferentes) em
+      // vez de `leads.converterLead`, que já existe e faz o certo (marca
+      // status_conversao='convertido' e grava aluno_convertido_id). O lead
+      // nunca saía do estágio antigo do funil mesmo já matriculado.
+      if (leadParaConversao?.id) {
+        try {
+          await leadsService.converterLead(leadParaConversao.id, novoAlunoId, idEfetivo);
+        } catch (errConversao) {
+          console.error('Erro ao converter lead:', errConversao);
+          Sentry.captureException(errConversao, { tags: { fluxo: 'converter_lead' } });
+          showToast.error(
+            'Aluno criado, mas houve um erro ao marcar o lead como convertido. Verifique manualmente.'
+          );
+        }
       }
 
       await Promise.all([

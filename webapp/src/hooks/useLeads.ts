@@ -91,7 +91,7 @@ export function useLeadsFunil() {
 // e quebrava o agrupamento mensal (chave "NaN-NaN").
 interface ResumoLead {
   id: string;
-  data_visita: string;
+  data_visita: string | null;
   status_conversao: Lead['status_conversao'];
 }
 
@@ -111,6 +111,7 @@ function agruparPorMes(data: ResumoLead[]): ResumoMensal[] {
   const mapa = new Map<string, ResumoMensal>();
 
   for (const lead of data) {
+    if (!lead.data_visita) continue; // leads sem aula vinculada (ex: captação pública) não entram no resumo mensal
     const d = new Date(lead.data_visita);
     if (Number.isNaN(d.getTime())) continue; // guarda contra dados malformados
 
