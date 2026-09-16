@@ -81,6 +81,20 @@ export default defineConfig({
       }),
   ].filter(Boolean),
 
+  optimizeDeps: {
+    // PED-194: jspdf/jspdf-autotable só são importados dinamicamente (via
+    // import() dentro de exportarRelatorioPDF, em src/lib/relatorioExport.js)
+    // pra não entrarem no bundle inicial. O crawler do optimizeDeps descobre
+    // imports dinâmicos com scan estático, mas essa descoberta depende do
+    // cache em node_modules/.vite não estar desatualizado em relação ao
+    // grafo de módulos — foi assim que o dev server chegou a quebrar com
+    // "Failed to resolve import 'jspdf'" (500 repetido, app não carrega)
+    // depois que a feature de exportação de relatórios (#99) foi mesclada.
+    // Listar explicitamente aqui remove a dependência desse scan/cache:
+    // ambos os pacotes são sempre pré-empacotados no cold start.
+    include: ['jspdf', 'jspdf-autotable'],
+  },
+
   build: {
     // "hidden": gera o .map mas SEM o comentário `//# sourceMappingURL=`
     // no JS final — o navegador nunca tenta buscá-lo, só o Sentry o usa
