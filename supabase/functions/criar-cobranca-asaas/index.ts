@@ -124,15 +124,31 @@ serve(withSentry("criar-cobranca-asaas", async (req) => {
     }
   }
 
-  // 2. Se for mensalidade, busca duracao_meses do plano (necessário pro periodo_fim)
+  // 2. Se for mensalidade, busca duracao_meses e preco do plano (necessário pro
+  // periodo_fim e para validar o valor recebido — ver PED-189 abaixo).
   let duracaoMeses: number | null = null
   if (tipo_cobranca === 'mensalidade') {
     const { data: plano } = await supabase
       .from('planos')
-      .select('duracao_meses')
+      .select('preco, duracao_meses')
       .eq('id', plano_id)
       .maybeSingle()
-    duracaoMeses = plano?.duracao_meses ?? 1
+
+    if (!plano) return response({ erro: 'Plano não encontrado.' }, 404)
+    const duracaoMesesPlano: number = plano.duracao_meses ?? 1
+    duracaoMeses = duracaoMesesPlano
+
+    // PED-189: até aqui `valor` era gravado em valor_cobranca exatamente como
+    // veio no corpo da requisição, sem checar contra o preço real do plano —
+    // como esta function aceita chamada direta do próprio aluno (self-service,
+    // não só admin/staff), um aluno autenticado podia montar uma requisição
+    // com um `valor` arbitrário (ex: R$0,01) e gerar um link de pagamento
+    // Asaas legítimo nesse valor. Tolerância de 1 centavo pro arredondamento
+    // de ponto flutuante na multiplicação por duracaoMeses.
+    const valorEsperado = Math.round(Number(plano.preco) * (cobrePeriodoCompleto ? duracaoMesesPlano : 1) * 100) / 100
+    if (Math.abs(valor! - valorEsperado) > 0.01) {
+      return response({ erro: `Valor da cobrança não confere com o preço do plano (esperado: ${valorEsperado.toFixed(2)}).` }, 400)
+    }
   }
 
   // 3. Localiza a pendência já existente (criada pelo cron) para mensalidade — não se
