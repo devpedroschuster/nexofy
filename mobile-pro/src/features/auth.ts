@@ -44,6 +44,7 @@ interface EstadoSessaoComPapel {
   professorId: number | null;
   nomeUsuario: string | null;
   papelNaoSuportado: boolean;
+  perfilIncompleto: boolean;
 }
 
 const ESTADO_INICIAL: EstadoSessaoComPapel = {
@@ -52,6 +53,7 @@ const ESTADO_INICIAL: EstadoSessaoComPapel = {
   professorId: null,
   nomeUsuario: null,
   papelNaoSuportado: false,
+  perfilIncompleto: false,
 };
 
 export interface SessaoComPapel extends EstadoSessaoComPapel {
@@ -108,6 +110,7 @@ export function useSessaoComPapel(): SessaoComPapel {
           professorId: null,
           nomeUsuario: null,
           papelNaoSuportado: false,
+          perfilIncompleto: false,
         });
         setResolvendo(false);
         return;
@@ -126,12 +129,23 @@ export function useSessaoComPapel(): SessaoComPapel {
         console.error('[useSessaoComPapel] erro ao buscar professor', errProf);
       }
 
+      // PED-212: role='professor' sem linha correspondente em professores
+      // (auth_id não casado) — bloqueia explicitamente em vez de deixar
+      // professorId nulo destravar silenciosamente a visão de gestor
+      // (Dashboard/Agenda ignoram o filtro por professor quando é null).
+      if (!professor) {
+        setEstado({ ...ESTADO_INICIAL, perfilIncompleto: true });
+        setResolvendo(false);
+        return;
+      }
+
       setEstado({
         papel: 'professor',
         estudioId: membro.estudio_id,
-        professorId: professor?.id ?? null,
-        nomeUsuario: professor?.nome ?? null,
+        professorId: professor.id,
+        nomeUsuario: professor.nome,
         papelNaoSuportado: false,
+        perfilIncompleto: false,
       });
       setResolvendo(false);
     })();

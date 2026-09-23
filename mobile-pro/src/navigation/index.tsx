@@ -10,6 +10,7 @@ import { useThemeStore } from '@/lib/theme';
 import { LoadingState } from '@/components/ui';
 import LoginScreen from '@/screens/Auth/LoginScreen';
 import PapelNaoSuportadoScreen from '@/screens/PapelNaoSuportado/PapelNaoSuportadoScreen';
+import PerfilIncompletoScreen from '@/screens/PerfilIncompleto/PerfilIncompletoScreen';
 import DashboardScreen from '@/screens/Dashboard/DashboardScreen';
 import AgendaScreen from '@/screens/Agenda/AgendaScreen';
 import ChamadaScreen from '@/screens/Agenda/ChamadaScreen';
@@ -101,7 +102,8 @@ function AppTabs({ sessao }: { sessao: SessaoAtual }) {
 }
 
 export function RootNavigator() {
-  const { papel, estudioId, professorId, nomeUsuario, carregando, papelNaoSuportado } = useSessaoComPapel();
+  const { papel, estudioId, professorId, nomeUsuario, carregando, papelNaoSuportado, perfilIncompleto } =
+    useSessaoComPapel();
   const { data: estudio } = useEstudio(estudioId);
   const aplicarTemaDoEstudio = useThemeStore((s) => s.aplicarTemaDoEstudio);
   const resetarTema = useThemeStore((s) => s.resetarTema);
@@ -114,8 +116,10 @@ export function RootNavigator() {
   if (carregando) return <LoadingState label="Verificando sessão..." />;
 
   let conteudo: React.ReactNode;
-  if (!papel && !papelNaoSuportado) {
+  if (!papel && !papelNaoSuportado && !perfilIncompleto) {
     conteudo = <AuthStack />;
+  } else if (perfilIncompleto) {
+    conteudo = <PerfilIncompletoScreen />;
   } else if (papelNaoSuportado || !papel || !estudioId) {
     conteudo = <PapelNaoSuportadoScreen />;
   } else {
