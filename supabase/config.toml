@@ -240,6 +240,14 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/exportar-dados-aluno/index.ts"
 
+[functions.atender-solicitacao-exclusao]
+enabled = true
+# PED-261: sempre exige JWT — a RPC atender_solicitacao_exclusao autoriza
+# pelo auth.uid() do admin; o service role só entra depois, pra remover
+# Storage/conta do aluno já anonimizado.
+verify_jwt = true
+entrypoint = "./functions/atender-solicitacao-exclusao/index.ts"
+
 [functions.health]
 enabled = true
 # PED-157: precisa ser false para o monitor de uptime externo (UptimeRobot /
