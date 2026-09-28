@@ -45,22 +45,22 @@ function tabelaAlunos({ dataNascimento }) {
 }
 
 function tabelaConsentimentos({ existe }) {
-  return {
-    select: () => ({
-      eq: () => ({
-        eq: () => ({
-          limit: async () => ({ data: existe ? [{ id: 'c1' }] : [], error: null }),
-          order: () => ({
-            limit: () => ({
-              maybeSingle: async () => ({
-                data: existe ? { id: 'c1', nome_responsavel: 'Maria', parentesco: 'mae' } : null,
-                error: null,
-              }),
-            }),
-          }),
+  // `.eq` encadeável em qualquer profundidade: a consulta de consentimento
+  // do titular filtra também `origem = 'titular'` (PED-244).
+  const resultado = {
+    limit: async () => ({ data: existe ? [{ id: 'c1' }] : [], error: null }),
+    order: () => ({
+      limit: () => ({
+        maybeSingle: async () => ({
+          data: existe ? { id: 'c1', nome_responsavel: 'Maria', parentesco: 'mae' } : null,
+          error: null,
         }),
       }),
     }),
+  };
+  const eq = () => ({ ...resultado, eq });
+  return {
+    select: () => ({ eq }),
     insert: () => ({
       select: () => ({
         single: async () => ({ data: { id: 'c1' }, error: null }),
@@ -110,7 +110,7 @@ describe('alunosService — gate LGPD (PED-170)', () => {
 
     await expect(
       alunosService.atualizar(1, { observacoes_medicas: 'Sem restrições' }, 'estudio-1')
-    ).rejects.toThrow(/específico do titular/);
+    ).rejects.toThrow(/próprio aluno ainda não autorizou/);
   });
 
   it('permite atualizar observacoes_medicas de aluno maior de idade com consentimento do titular já registrado', async () => {

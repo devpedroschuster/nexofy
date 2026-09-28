@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { sanitizarMetadata } from '../lib/camposSistema';
 import { ehMenorDeIdade } from '../lib/utils';
+import { VERSAO_CONSENTIMENTO_SAUDE } from '../lib/consentimentoSaude';
 
 // PED-170 (LGPD art. 14): dado sensível de saúde (anamnese/observações
 // médicas) de aluno menor de idade nunca pode ser gravado sem consentimento
@@ -40,14 +41,14 @@ async function possuiConsentimentoResponsavel(alunoId, estudioId) {
 // (supabase/migrations/20260908190000_create_consentimento_titular_dados_sensiveis.sql).
 // Mesma defesa em profundidade de possuiConsentimentoResponsavel acima; a
 // validação "de verdade" é o trigger `bloquear_dados_sensiveis_sem_consentimento_titular`.
+//
+// PED-244: só conta consentimento dado pelo PRÓPRIO aluno, logado
+// (`origem = 'titular'`, decidida pelo banco no insert) — o antigo aceite
+// atestado pelo operador (`origem = 'operador'`) não libera mais.
 const ERRO_TITULAR_SEM_CONSENTIMENTO =
-  'Consentimento específico do titular para dado sensível de saúde ainda não ' +
-  'registrado. Confirme o consentimento antes de preencher anamnese/observações médicas.';
-
-// Identifica o texto de consentimento apresentado ao operador do estúdio em
-// PerfilAluno.jsx (AbaAnamnese) — se o texto mudar de forma relevante,
-// incremente esta versão (mesmo aceite anterior não cobre o texto novo).
-const VERSAO_CONSENTIMENTO_TITULAR_DADOS_SENSIVEIS = 'v1';
+  'O próprio aluno ainda não autorizou o registro de dados de saúde. Solicite o ' +
+  'consentimento para que ele aceite no app ou na Área do Aluno antes de preencher ' +
+  'anamnese/observações médicas.';
 
 async function possuiConsentimentoTitular(alunoId, estudioId) {
   const { data, error } = await supabase
@@ -55,6 +56,7 @@ async function possuiConsentimentoTitular(alunoId, estudioId) {
     .select('id')
     .eq('aluno_id', alunoId)
     .eq('estudio_id', estudioId)
+    .eq('origem', 'titular')
     .limit(1);
 
   if (error) throw error;
@@ -593,10 +595,33 @@ export const alunosService = {
   },
 
   /**
+   * PED-244: o admin só SOLICITA o consentimento — marca o pedido no
+   * cadastro e o próprio aluno aceita na Área do Aluno/app.
+   */
+  async solicitarConsentimentoTitular(alunoId, estudioId) {
+    try {
+      const { error } = await supabase
+        .from('alunos')
+        .update({ consentimento_saude_solicitado_em: new Date().toISOString() })
+        .eq('id', alunoId)
+        .eq('estudio_id', estudioId);
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('[alunosService.solicitarConsentimentoTitular]', error);
+      throw error;
+    }
+  },
+
+  /**
    * Registra o consentimento específico do próprio titular (aluno maior de
    * idade) para dado sensível de saúde (PED-168 / LGPD art. 5º, II e
-   * art. 11, I). Sempre um INSERT novo — nunca um update — mesmo padrão
-   * append-only de `registrarConsentimentoResponsavel` acima.
+   * art. 11, I). Chamado pelo PRÓPRIO aluno logado (PED-244) — a RLS só
+   * aceita o insert da conta vinculada ao aluno, e o banco carimba
+   * `origem`, `registrado_por` e `aceito_em`. Sempre um INSERT novo —
+   * nunca um update — mesmo padrão append-only de
+   * `registrarConsentimentoResponsavel` acima.
    */
   async registrarConsentimentoTitular(alunoId, estudioId) {
     try {
@@ -605,7 +630,7 @@ export const alunosService = {
         .insert([{
           aluno_id: alunoId,
           estudio_id: estudioId,
-          versao: VERSAO_CONSENTIMENTO_TITULAR_DADOS_SENSIVEIS,
+          versao: VERSAO_CONSENTIMENTO_SAUDE,
         }])
         .select()
         .single();
@@ -618,7 +643,7 @@ export const alunosService = {
     }
   },
 
-  /** Consentimento mais recente do titular, ou null se nenhum foi registrado. */
+  /** Consentimento mais recente dado pelo próprio titular, ou null se ainda não houver. */
   async buscarConsentimentoTitular(alunoId, estudioId) {
     try {
       const { data, error } = await supabase
@@ -626,6 +651,7 @@ export const alunosService = {
         .select('*')
         .eq('aluno_id', alunoId)
         .eq('estudio_id', estudioId)
+        .eq('origem', 'titular')
         .order('aceito_em', { ascending: false })
         .limit(1)
         .maybeSingle();

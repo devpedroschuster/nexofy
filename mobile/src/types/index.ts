@@ -56,6 +56,8 @@ export interface Aluno {
   complemento: string | null;
   contato_emergencia: string | null;
   metadata: Record<string, unknown>;
+  // PED-244: marcado pelo estúdio ao pedir o consentimento para dados de saúde.
+  consentimento_saude_solicitado_em: string | null;
   planos?: Plano;
 }
 

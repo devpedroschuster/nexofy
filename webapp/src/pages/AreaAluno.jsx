@@ -9,6 +9,7 @@ import { formatarMoeda, formatarData as formatarDataUtil } from '../lib/utils';
 import { alunosKeys } from '../lib/alunosQueryKeys';
 import { listaEsperaService } from '../services/listaEsperaService';
 import { ModalConfirmacao } from '../components/ui/Modal';
+import ConsentimentoSaudePendente from '../components/aluno/ConsentimentoSaudePendente';
 
 const NOMES_DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const DIAS_BANCO = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
@@ -542,6 +543,7 @@ export default function AreaAluno() {
         </div>
       </aside>
       <div className="main-content">
+        <ConsentimentoSaudePendente aluno={aluno} nomeEstudio={nomeEstudio} />
         {abaAtiva === 'schedule' && (
           <div>
             <div className="main-header">

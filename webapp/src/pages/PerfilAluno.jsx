@@ -640,26 +640,30 @@ function AbaAnamnese({
   const [salvandoLink, setSalvandoLink] = useState(false);
   // PED-168 (LGPD art. 5º, II / art. 11, I): aluno maior de idade (ou sem
   // data de nascimento cadastrada) sem consentimento específico do próprio
-  // titular ainda registrado — bloqueia os campos até o operador confirmar
-  // o consentimento abaixo. Menor de idade já é coberto por
+  // titular — bloqueia os campos. Menor de idade já é coberto por
   // menorSemConsentimento (PED-170, consentimento do responsável legal).
-  const [aceitaConsentimentoTitular, setAceitaConsentimentoTitular] = useState(false);
-  const [registrandoConsentimento, setRegistrandoConsentimento]     = useState(false);
+  //
+  // PED-244: o operador não atesta mais o consentimento em nome do aluno —
+  // só SOLICITA; o próprio aluno aceita logado (Área do Aluno / app), e só
+  // esse aceite (origem 'titular') libera os campos no banco.
+  const [solicitandoConsentimento, setSolicitandoConsentimento] = useState(false);
   const precisaConsentimentoTitular = !menorSemConsentimento && !ehMenorDeIdade(aluno?.data_nascimento) && !consentimentoTitular;
   const camposBloqueados = menorSemConsentimento || precisaConsentimentoTitular;
+  const alunoTemAcesso = !!aluno?.auth_id;
+  const consentimentoSolicitadoEm = aluno?.consentimento_saude_solicitado_em;
 
-  const handleRegistrarConsentimentoTitular = async () => {
-    if (registrandoConsentimento) return;
-    setRegistrandoConsentimento(true);
+  const handleSolicitarConsentimentoTitular = async () => {
+    if (solicitandoConsentimento) return;
+    setSolicitandoConsentimento(true);
     try {
-      await alunosService.registrarConsentimentoTitular(alunoId, estudioId);
-      queryClient.invalidateQueries({ queryKey: alunosKeys.consentimentoTitular(alunoId, estudioId) });
-      showToast.success('Consentimento registrado!');
+      await alunosService.solicitarConsentimentoTitular(alunoId, estudioId);
+      queryClient.invalidateQueries({ queryKey: alunosKeys.perfil(alunoId, estudioId) });
+      showToast.success('Pedido enviado. O aluno verá a solicitação ao entrar no app.');
     } catch (err) {
-      console.error('[PerfilAluno] Erro ao registrar consentimento do titular:', err);
-      showToast.error('Erro ao registrar o consentimento. Tente novamente.');
+      console.error('[PerfilAluno] Erro ao solicitar consentimento do titular:', err);
+      showToast.error('Erro ao solicitar o consentimento. Tente novamente.');
     } finally {
-      setRegistrandoConsentimento(false);
+      setSolicitandoConsentimento(false);
     }
   };
 
@@ -715,33 +719,39 @@ function AbaAnamnese({
             <p className="text-xs text-destructive leading-relaxed">
               <strong>Bloqueado:</strong> observações médicas e link de anamnese são{' '}
               <strong>dado sensível de saúde</strong> (LGPD, art. 5º, II) e exigem
-              consentimento específico e destacado do próprio titular (art. 14, I) —
+              consentimento específico e destacado do próprio aluno (art. 11, I) —
               distinto do aceite genérico de Termos/Privacidade feito no cadastro.
-              Confirme abaixo antes de preencher.
+              O aceite é feito pelo próprio aluno, no app ou na Área do Aluno.
             </p>
           </div>
-          <label className="flex items-start gap-3 cursor-pointer pl-1">
-            <input type="checkbox" checked={aceitaConsentimentoTitular}
-              onChange={(e) => setAceitaConsentimentoTitular(e.target.checked)}
-              className="mt-1 w-4 h-4 accent-destructive shrink-0" />
-            <span className="text-xs text-destructive leading-relaxed font-medium">
-              Declaro que {aluno?.nome_completo || 'o(a) aluno(a)'} autorizou, de forma
-              específica e destacada, o registro de anamnese/observações médicas nesta
-              plataforma (LGPD, art. 11, I).
-            </span>
-          </label>
-          <Button variant="brand" size="sm" leftIcon={<CheckCircle size={14} />}
-            onClick={handleRegistrarConsentimentoTitular}
-            disabled={!aceitaConsentimentoTitular || registrandoConsentimento}>
-            {registrandoConsentimento ? 'Registrando...' : 'Confirmar consentimento'}
-          </Button>
+          {!alunoTemAcesso ? (
+            <p className="text-xs text-destructive leading-relaxed pl-7">
+              Este aluno ainda não tem acesso ao app. Libere o acesso dele para poder
+              solicitar o consentimento.
+            </p>
+          ) : consentimentoSolicitadoEm ? (
+            <p className="text-xs text-destructive leading-relaxed pl-7">
+              Consentimento solicitado em{' '}
+              {new Date(consentimentoSolicitadoEm).toLocaleDateString('pt-BR')} — aguardando o
+              aceite do aluno.
+            </p>
+          ) : null}
+          {alunoTemAcesso && (
+            <Button variant="brand" size="sm" leftIcon={<CheckCircle size={14} />}
+              onClick={handleSolicitarConsentimentoTitular}
+              disabled={solicitandoConsentimento}>
+              {solicitandoConsentimento
+                ? 'Enviando...'
+                : consentimentoSolicitadoEm ? 'Solicitar novamente' : 'Solicitar consentimento ao aluno'}
+            </Button>
+          )}
         </div>
       ) : (
         <div className="flex gap-3 rounded-2xl border border-success/30 bg-success-soft p-4">
           <CheckCircle size={16} className="text-success shrink-0 mt-0.5" />
           <p className="text-xs text-success leading-relaxed">
             Consentimento específico para dado sensível de saúde (LGPD, art. 5º, II e
-            art. 11, I) já registrado
+            art. 11, I) dado pelo próprio aluno
             {consentimentoTitular?.aceito_em
               ? ` em ${new Date(consentimentoTitular.aceito_em).toLocaleDateString('pt-BR')}`
               : ''}.

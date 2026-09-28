@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { supabase } from '@/lib/supabase';
+import { VERSAO_CONSENTIMENTO_SAUDE } from '@/lib/consentimentoSaude';
 import { useSession } from '@/features/auth';
 import type { Aluno, Estudio } from '@/types';
 
@@ -118,6 +119,44 @@ export function useExportarDados() {
         dialogTitle: 'Meus dados',
       });
     },
+  });
+}
+
+// PED-244 (LGPD art. 11, I): o consentimento para dado de saúde é dado pelo
+// próprio aluno, logado. Só conta o de origem 'titular' — decidida pelo
+// banco no insert, junto com registrado_por e aceito_em.
+export function useConsentimentoSaude(alunoId: number | undefined, estudioId: string | undefined, solicitado: boolean) {
+  return useQuery({
+    queryKey: ['consentimento-saude', alunoId, estudioId],
+    enabled: solicitado && !!alunoId && !!estudioId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('consentimentos_dados_sensiveis_saude')
+        .select('id, aceito_em')
+        .eq('aluno_id', alunoId!)
+        .eq('estudio_id', estudioId!)
+        .eq('origem', 'titular')
+        .order('aceito_em', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+export function useRegistrarConsentimentoSaude(alunoId: number | undefined, estudioId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from('consentimentos_dados_sensiveis_saude').insert({
+        aluno_id: alunoId,
+        estudio_id: estudioId,
+        versao: VERSAO_CONSENTIMENTO_SAUDE,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['consentimento-saude', alunoId, estudioId] }),
   });
 }
 
