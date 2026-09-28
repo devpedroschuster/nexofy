@@ -897,7 +897,10 @@ export default function NovoAluno() {
         setCadastroSalvo(true);
       }
     } catch (error) {
-      showToast.error(error.message || 'Erro ao processar a solicitação.');
+      const mensagem = error.code === '23505'
+        ? 'Já existe um aluno com este e-mail neste estúdio.'
+        : error.message || 'Erro ao processar a solicitação.';
+      showToast.error(mensagem);
     }
   }
 

@@ -468,7 +468,10 @@ export default function ImportarAlunos() {
         }
       } catch (errCriar) {
         console.error('[ImportarAlunos] Falha ao criar aluno:', errCriar);
-        pulados.push({ linha, tipo: 'nao_criado', motivo: errCriar.message || 'Erro ao criar o aluno.' });
+        const motivo = errCriar.code === '23505'
+          ? 'Já existe um aluno com este e-mail neste estúdio.'
+          : errCriar.message || 'Erro ao criar o aluno.';
+        pulados.push({ linha, tipo: 'nao_criado', motivo });
       }
 
       setProgresso({ atual: i + 1, total: linhasValidas.length });
