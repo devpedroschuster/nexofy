@@ -45,28 +45,37 @@ function tabelaAlunos({ dataNascimento }) {
   };
 }
 
+// Registra os filtros `.eq(coluna, valor)` aplicados na consulta de
+// consentimento — PED-244 exige que o gate filtre `origem = 'titular'`.
+let filtrosConsentimento = [];
+let insertConsentimento = null;
+
 function tabelaConsentimentoTitular({ existe }) {
-  return {
-    select: () => ({
-      eq: () => ({
-        eq: () => ({
-          limit: async () => ({ data: existe ? [{ id: 'ct1' }] : [], error: null }),
-          order: () => ({
-            limit: () => ({
-              maybeSingle: async () => ({
-                data: existe ? { id: 'ct1', versao: 'v1', aceito_em: '2026-09-08T12:00:00Z' } : null,
-                error: null,
-              }),
-            }),
-          }),
+  const resultado = {
+    limit: async () => ({ data: existe ? [{ id: 'ct1' }] : [], error: null }),
+    order: () => ({
+      limit: () => ({
+        maybeSingle: async () => ({
+          data: existe ? { id: 'ct1', versao: 'v2-titular', aceito_em: '2026-09-08T12:00:00Z' } : null,
+          error: null,
         }),
       }),
     }),
-    insert: () => ({
-      select: () => ({
-        single: async () => ({ data: { id: 'ct1' }, error: null }),
-      }),
-    }),
+  };
+  const eq = (coluna, valor) => {
+    filtrosConsentimento.push([coluna, valor]);
+    return { ...resultado, eq };
+  };
+  return {
+    select: () => ({ eq }),
+    insert: (linhas) => {
+      insertConsentimento = linhas;
+      return {
+        select: () => ({
+          single: async () => ({ data: { id: 'ct1' }, error: null }),
+        }),
+      };
+    },
   };
 }
 
@@ -84,6 +93,8 @@ const NASCIMENTO_MENOR = `${new Date().getFullYear() - 15}-01-01`;
 describe('alunosService — gate LGPD consentimento do titular (PED-168)', () => {
   beforeEach(() => {
     fromMock.mockReset();
+    filtrosConsentimento = [];
+    insertConsentimento = null;
   });
 
   it('bloqueia atualizar observacoes_medicas de aluno maior de idade sem consentimento do titular', async () => {
@@ -91,7 +102,7 @@ describe('alunosService — gate LGPD consentimento do titular (PED-168)', () =>
 
     await expect(
       alunosService.atualizar(1, { observacoes_medicas: 'Alergia a poeira' }, 'estudio-1')
-    ).rejects.toThrow(/específico do titular/);
+    ).rejects.toThrow(/próprio aluno ainda não autorizou/);
   });
 
   it('permite atualizar observacoes_medicas de aluno maior de idade com consentimento já registrado', async () => {
@@ -102,12 +113,20 @@ describe('alunosService — gate LGPD consentimento do titular (PED-168)', () =>
     ).resolves.toBeTruthy();
   });
 
+  it('PED-244: o gate só considera consentimento dado pelo próprio titular (origem titular)', async () => {
+    mockarTabelas({ dataNascimento: NASCIMENTO_MAIOR, temConsentimento: true });
+
+    await alunosService.atualizar(1, { observacoes_medicas: 'Alergia a poeira' }, 'estudio-1');
+
+    expect(filtrosConsentimento).toContainEqual(['origem', 'titular']);
+  });
+
   it('bloqueia atualizar link_anamnese quando data de nascimento não está cadastrada e não há consentimento', async () => {
     mockarTabelas({ dataNascimento: null, temConsentimento: false });
 
     await expect(
       alunosService.atualizar(1, { link_anamnese: 'https://forms.google.com/x' }, 'estudio-1')
-    ).rejects.toThrow(/específico do titular/);
+    ).rejects.toThrow(/próprio aluno ainda não autorizou/);
   });
 
   it('não checa consentimento do titular quando o update não toca em campo sensível de saúde', async () => {
@@ -128,7 +147,7 @@ describe('alunosService — gate LGPD consentimento do titular (PED-168)', () =>
         { nome_completo: 'Teste', data_nascimento: NASCIMENTO_MAIOR, observacoes_medicas: 'x' },
         'estudio-1'
       )
-    ).rejects.toThrow(/específico do titular/);
+    ).rejects.toThrow(/próprio aluno ainda não autorizou/);
   });
 
   it('bloqueia criar aluno menor de idade já com observacoes_medicas preenchidas com a mensagem do responsável legal', async () => {
@@ -148,6 +167,16 @@ describe('alunosService — gate LGPD consentimento do titular (PED-168)', () =>
     const resultado = await alunosService.registrarConsentimentoTitular(1, 'estudio-1');
 
     expect(resultado).toEqual({ id: 'ct1' });
+    // origem/registrado_por/aceito_em são carimbados pelo banco, nunca pelo client.
+    expect(insertConsentimento).toEqual([{ aluno_id: 1, estudio_id: 'estudio-1', versao: 'v2-titular' }]);
+  });
+
+  it('buscarConsentimentoTitular ignora consentimento atestado pelo operador', async () => {
+    mockarTabelas({ dataNascimento: NASCIMENTO_MAIOR, temConsentimento: true });
+
+    await alunosService.buscarConsentimentoTitular(1, 'estudio-1');
+
+    expect(filtrosConsentimento).toContainEqual(['origem', 'titular']);
   });
 
   it('buscarConsentimentoTitular retorna null quando nenhum consentimento existe', async () => {
@@ -163,6 +192,6 @@ describe('alunosService — gate LGPD consentimento do titular (PED-168)', () =>
 
     await expect(
       alunosService.buscarConsentimentoTitular(1, 'estudio-1')
-    ).resolves.toEqual({ id: 'ct1', versao: 'v1', aceito_em: '2026-09-08T12:00:00Z' });
+    ).resolves.toEqual({ id: 'ct1', versao: 'v2-titular', aceito_em: '2026-09-08T12:00:00Z' });
   });
 });

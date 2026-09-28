@@ -1,7 +1,13 @@
-import React from 'react';
-import { RefreshControl, ScrollView, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Alert, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { CalendarClock, CheckCircle2, Clock } from 'lucide-react-native';
-import { useMeuPerfil, useEstudioDoAluno } from '@/features/aluno';
+import {
+  useConsentimentoSaude,
+  useEstudioDoAluno,
+  useMeuPerfil,
+  useRegistrarConsentimentoSaude,
+} from '@/features/aluno';
+import { textoConsentimentoSaude } from '@/lib/consentimentoSaude';
 import { useProximaAula, useCancelarAgendamento } from '@/features/agenda';
 import { useMensalidades, statusExibicao } from '@/features/financeiro';
 import { useThemeStore } from '@/lib/theme';
@@ -38,6 +44,23 @@ export default function DashboardScreen() {
 
   const cancelarMutation = useCancelarAgendamento(aluno?.id, aluno?.estudio_id);
 
+  const consentimentoSolicitado = !!aluno?.consentimento_saude_solicitado_em;
+  const { data: consentimentoSaude, isLoading: carregandoConsentimento } =
+    useConsentimentoSaude(aluno?.id, aluno?.estudio_id, consentimentoSolicitado);
+  const registrarConsentimento = useRegistrarConsentimentoSaude(aluno?.id, aluno?.estudio_id);
+  const [consentimentoAdiado, setConsentimentoAdiado] = useState(false);
+  const consentimentoPendente =
+    consentimentoSolicitado && !carregandoConsentimento && !consentimentoSaude && !consentimentoAdiado;
+
+  const handleAutorizarConsentimento = async () => {
+    try {
+      await registrarConsentimento.mutateAsync();
+      Alert.alert('Obrigado', 'Sua autorização foi registrada.');
+    } catch {
+      Alert.alert('Erro', 'Não foi possível registrar sua autorização agora.');
+    }
+  };
+
   // Loading geral — só o perfil bloqueia a tela inteira (aula/financeiro têm
   // seus próprios estados, a tela não trava esperando os três).
   if (carregandoAluno) {
@@ -71,6 +94,30 @@ export default function DashboardScreen() {
         <Display style={{ fontSize: 24 }}>Olá, {aluno.nome_completo?.split(' ')[0]} 👋</Display>
         <Body style={{ color: '#9ca3af', marginTop: 2 }}>{estudio?.nome ?? 'Carregando estúdio...'}</Body>
       </View>
+
+      {/* PED-244: pedido de consentimento para dados de saúde feito pelo
+          estúdio — o aceite precisa vir do próprio aluno, logado. */}
+      {consentimentoPendente && (
+        <Card>
+          <Body style={{ fontFamily: fonts.bodyBold, fontSize: 12, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+            Autorização de dados de saúde
+          </Body>
+          <Body style={{ color: '#374151', fontSize: 14, marginBottom: 8 }}>
+            {estudio?.nome ?? 'O estúdio'} pediu sua autorização para registrar sua anamnese e observações médicas.
+          </Body>
+          <Body style={{ color: '#6b7280', fontSize: 13, lineHeight: 19, marginBottom: 16 }}>
+            {textoConsentimentoSaude(estudio?.nome)}
+          </Body>
+          <View style={{ gap: 8 }}>
+            <Button loading={registrarConsentimento.isPending} onPress={handleAutorizarConsentimento}>
+              Autorizo
+            </Button>
+            <Button variant="outline" onPress={() => setConsentimentoAdiado(true)}>
+              Agora não
+            </Button>
+          </View>
+        </Card>
+      )}
 
       {/* Próxima aula — momento de assinatura: barra de destaque na cor do
           estúdio + horário em tipografia grande, é a primeira coisa que o
