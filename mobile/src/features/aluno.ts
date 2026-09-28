@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { supabase } from '@/lib/supabase';
 import { useSession } from '@/features/auth';
 import type { Aluno, Estudio } from '@/types';
@@ -93,12 +95,28 @@ export function useUploadAvatar(alunoId: number | undefined, authId: string | un
 
 // LGPD — reaproveita a mesma Edge Function do webapp (exportar-dados-aluno),
 // que resolve o titular por auth.uid(), sem precisar enviar aluno_id.
+// PED-213: grava o JSON num arquivo e abre o share sheet nativo — antes os
+// dados eram buscados e descartados, sem o titular receber artefato nenhum.
+// Fica no cacheDirectory (não em documentDirectory) de propósito: é cópia
+// de dado pessoal que só precisa existir até o aluno salvar/enviar, e o SO
+// pode limpar o cache; o nome fixo por dia sobrescreve exportações repetidas.
 export function useExportarDados() {
   return useMutation({
     mutationFn: async () => {
+      if (!(await Sharing.isAvailableAsync())) {
+        throw new Error('Compartilhamento de arquivos indisponível neste aparelho.');
+      }
+
       const { data, error } = await supabase.functions.invoke('exportar-dados-aluno', { method: 'POST', body: {} });
       if (error) throw error;
-      return data.dados;
+
+      const arquivo = `${FileSystem.cacheDirectory}meus-dados-${new Date().toISOString().slice(0, 10)}.json`;
+      await FileSystem.writeAsStringAsync(arquivo, JSON.stringify(data.dados, null, 2));
+      await Sharing.shareAsync(arquivo, {
+        mimeType: 'application/json',
+        UTI: 'public.json',
+        dialogTitle: 'Meus dados',
+      });
     },
   });
 }
