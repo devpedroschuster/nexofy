@@ -81,8 +81,8 @@ export default function PerfilScreen() {
 
   const handleExportarDados = async () => {
     try {
+      // O share sheet já é o retorno visual de sucesso — sem Alert extra.
       await exportarDados.mutateAsync();
-      Alert.alert('Pronto', 'Seus dados foram exportados. Em breve o compartilhamento do arquivo será adicionado.');
     } catch {
       Alert.alert('Erro', 'Não foi possível exportar seus dados agora.');
     }
